@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist2/  # TODO: 旧 dist/ 文件锁解除后删除此行，统一用 dist/
+.electron-cache/
+# 防止调试文件泄漏
+_dist/
+_nm_*/
+_test_*
+*.log
+.DS_Store
+.srt.config.json
+.env

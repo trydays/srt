@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>三天remotion — 组件展示</title>
+  <link rel="stylesheet" href="shared.css" />
+  <style>
+    /* Layout (OD entry-main__inner pattern) */
+    .main{flex:1;overflow-y:auto}
+    .inner{width:100%;max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-direction:column;gap:32px}
+
+    /* Header (OD plugins-view__hero + marketplace-view__header pattern) */
+    .hero{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+    .hero__kicker{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:var(--text-muted)}
+    .hero__title{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--text-strong)}
+    .hero__sub{margin:8px 0 0;max-width:620px;color:var(--text-muted);font-size:14px;line-height:1.55}
+
+    /* Toolbar (OD db-reference-toolbar pattern) */
+    .toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+    .tb-chips{flex:1 1 360px;min-width:0;display:flex;align-items:center;gap:8px;overflow-x:auto;scrollbar-width:none}
+    .tb-chips::-webkit-scrollbar{display:none}
+    .tb-chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;border:1px solid color-mix(in srgb,var(--border) 88%,transparent);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text-muted);padding:6px 13px;font-size:12.5px;font-weight:550;white-space:nowrap;cursor:pointer;transition:background 140ms var(--ease-out),border-color 140ms var(--ease-out),color 140ms var(--ease-out);appearance:none}
+    .tb-chip:hover{border-color:var(--border-strong);color:var(--text)}
+    .tb-chip.is-active{border-color:color-mix(in srgb,var(--accent) 40%,var(--border));background:var(--accent-tint);color:var(--accent-strong)}
+    .tb-chip-count{font-size:10.5px;color:var(--text-faint);font-variant-numeric:tabular-nums}
+    .tb-chip.is-active .tb-chip-count{color:var(--accent-strong)}
+    .tb-search{flex:0 0 226px;display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-panel);transition:border-color 140ms var(--ease-out),box-shadow 140ms var(--ease-out)}
+    .tb-search:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+    .tb-search input{flex:1 1 auto;min-width:0;border:0;background:transparent;color:var(--text);font-size:13px;outline:none}
+
+    /* Grid (OD plugins-home__grid pattern) */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+
+    /* Card (OD plugins-home__card pattern) */
+    .card{position:relative;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);overflow:hidden;transition:border-color 120ms var(--ease-out),box-shadow 160ms var(--ease-out),transform 160ms var(--ease-out);cursor:pointer;appearance:none;font:inherit;text-align:left;color:inherit}
+    .card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-md);transform:translateY(-2px)}
+    .card__preview{position:relative;aspect-ratio:4/3;background:var(--bg-subtle);overflow:hidden;display:flex;align-items:center;justify-content:center}
+    .card__preview .swatch{position:absolute;inset:0;display:flex}
+    .card__preview .swatch span{flex:1;min-width:0}
+    .card__preview-icon{font-size:32px;opacity:.25;color:var(--text-muted)}
+    .card__foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 10px;border-top:1px solid var(--border-soft);background:var(--bg-panel)}
+    .card__title{display:inline-flex;align-items:center;font-weight:600;color:var(--text-strong);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .card__badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:var(--radius-pill);color:var(--accent);background:var(--accent-tint);white-space:nowrap}
+
+    @media(max-width:900px){.grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}.inner{padding:24px 20px 48px}}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}.tb-chips{flex:1 1 auto}.tb-search{flex:1 1 180px}}
+    /* Preview animations (3s CSS demos per component type) */
+    .pvw{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .pvw-label{font-size:13px;font-weight:650;color:var(--text-strong)}
+    /* Entrance: scale in */
+    .pvw-in{animation:pvwIn 3s ease-in-out infinite}
+    @keyframes pvwIn{0%,100%{transform:scale(.3);opacity:0}40%,70%{transform:scale(1);opacity:1}}
+    /* Exit: scale out */
+    .pvw-out{animation:pvwOut 3s ease-in-out infinite}
+    @keyframes pvwOut{0%,40%{transform:scale(1);opacity:1;filter:blur(0)}85%,100%{transform:scale(.3);opacity:0;filter:blur(3px)}}
+    /* Text: glow pulse */
+    .pvw-text{font-size:15px;font-weight:700;animation:pvwText 3s ease-in-out infinite}
+    @keyframes pvwText{0%,100%{text-shadow:0 0 0 transparent;opacity:.6}50%{text-shadow:0 0 12px var(--accent-soft);opacity:1}}
+    /* BG: gradient drift */
+    .pvw-bg{position:absolute;inset:0;background:linear-gradient(135deg,color-mix(in srgb,var(--accent-tint) 80%,transparent),transparent 60%);animation:pvwDrift 3s ease-in-out infinite}
+    /* Card: border + float */
+    .pvw-card-wrap{animation:pvwFloat 3s ease-in-out infinite}
+    @keyframes pvwFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    .pvw-card-inner{padding:12px 16px;border-radius:var(--radius-sm);background:var(--bg-panel);border:1px solid var(--border);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 30%,transparent);animation:pvwBorderGlow 3s ease-in-out infinite;font-size:11px;font-weight:650;color:var(--text-strong)}
+    @keyframes pvwBorderGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 30%,transparent)}50%{box-shadow:0 0 12px 2px color-mix(in srgb,var(--accent) 30%,transparent)}}
+    /* Glam: combined scale + glow */
+    .pvw-glam{font-size:14px;font-weight:700;animation:pvwGlam 3s ease-in-out infinite}
+    @keyframes pvwGlam{0%,100%{transform:scale(.85);opacity:.5;text-shadow:0 0 0 transparent}50%{transform:scale(1.05);opacity:1;text-shadow:0 0 16px var(--accent-soft)}}
+
+  </style>
+  <script src="shared.js"></script>
+  <script src="components-data.js"></script>
+</head>
+<body>
+
+  <div class="tabs-chrome" id="tabsBar" role="tablist" aria-label="页面标签"></div>
+
+  <div class="main">
+    <div class="inner">
+      <div class="hero">
+        <div>
+          <div class="hero__kicker">组件库</div>
+          <h1 class="hero__title">浏览全部组件</h1>
+          <p class="hero__sub" id="heroSub">共 25 个组件，覆盖入场、退场、文字、卡片、背景、图表、标注、Glam 8 大类别。</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tb-chips" id="tbChips">
+          <button class="tb-chip is-active" data-cat="all">全部<span class="tb-chip-count">25</span></button>
+          <button class="tb-chip" data-cat="入场">入场<span class="tb-chip-count">4</span></button>
+          <button class="tb-chip" data-cat="退场">退场<span class="tb-chip-count">3</span></button>
+          <button class="tb-chip" data-cat="文字">文字<span class="tb-chip-count">4</span></button>
+          <button class="tb-chip" data-cat="背景">背景<span class="tb-chip-count">4</span></button>
+          <button class="tb-chip" data-cat="卡片">卡片<span class="tb-chip-count">3</span></button>
+          <button class="tb-chip" data-cat="Glam">Glam<span class="tb-chip-count">6</span></button>
+        </div>
+        <div class="tb-search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:0 0 auto;opacity:.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="tbSearch" placeholder="搜索组件…" />
+        </div>
+      </div>
+
+      <div class="grid" id="compGrid"></div>
+    </div>
+  </div>
+
+  <footer style="display:flex;align-items:center;justify-content:center;padding:16px 24px;border-top:1px solid var(--border-soft);color:var(--text-faint);font-size:12px">
+    <span>&copy; 2026 三天remotion · MIT</span>
+  </footer>
+
+  <script>
+    window.__PAGE = { id: 'showcase' };
+
+    /* Tab bar - shared.js handles tab rendering */
+    renderTabs();
+
+    /* Components (from components-data.js) */
+    var COMPONENTS = window.COMPONENTS;
+
+    var activeCat='all',searchTerm='';
+    function renderGrid(){
+      var f=COMPONENTS.filter(function(c){if(activeCat!=='all'&&c.cat!==activeCat)return false;if(searchTerm&&c.name.toLowerCase().indexOf(searchTerm.toLowerCase())===-1&&c.desc.toLowerCase().indexOf(searchTerm.toLowerCase())===-1)return false;return true});
+      var h='';document.getElementById('heroSub').textContent='共 '+f.length+' 个组件';
+      for(var i=0;i<f.length;i++){
+        var c=f[i];
+        var pvw='';
+        if(c.cat==='入场')pvw='<div class="pvw pvw-in"><span class="pvw-label">'+c.name+'</span></div>';
+        else if(c.cat==='退场')pvw='<div class="pvw pvw-out"><span class="pvw-label">'+c.name+'</span></div>';
+        else if(c.cat==='文字')pvw='<div class="pvw"><span class="pvw-text" style="color:'+c.color+'">'+c.name+'</span></div>';
+        else if(c.cat==='背景')pvw='<div class="pvw"><div class="pvw-bg"></div><span class="pvw-label" style="position:relative;z-index:1">'+c.name+'</span></div>';
+        else if(c.cat==='卡片')pvw='<div class="pvw"><div class="pvw-card-wrap"><div class="pvw-card-inner">'+c.name+'</div></div></div>';
+        else if(c.cat==='Glam')pvw='<div class="pvw"><span class="pvw-glam" style="color:'+c.color+'">'+c.name+'</span></div>';
+        h+='<button class="card"><div class="card__preview">'+pvw+'</div><div class="card__foot"><span class="card__title">'+c.name+'</span><span class="card__badge">'+c.cat+'</span></div></button>';
+      }
+      document.getElementById('compGrid').innerHTML=h||'<div style="color:var(--text-faint);text-align:center;padding:60px 0;font-size:13px;grid-column:1/-1">无匹配组件</div>';
+    }
+    renderGrid();
+
+    /* Chips */
+    document.getElementById('tbChips').addEventListener('click',function(e){
+      var chip=e.target.closest('.tb-chip');if(!chip)return;
+      setActiveChip(this, chip, '.tb-chip');activeCat=chip.dataset.cat;renderGrid();
+    });
+
+    /* Search */
+    var si=document.getElementById('tbSearch');
+    si.addEventListener('input',function(){searchTerm=this.value.trim();renderGrid()});
+  </script>
+</body>
+</html>

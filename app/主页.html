@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>三天remotion</title>
+  <link rel="stylesheet" href="shared.css" />
+  <style>
+    /* Nav */
+    .nav{display:flex;align-items:center;justify-content:space-between;padding:8px 12px}
+    .nav-logo{display:flex;align-items:center;gap:8px;font-family:var(--serif);font-weight:600;font-size:16px;color:var(--text-strong)}
+    .nav-logo-mark{width:26px;height:26px;border-radius:50%;background:var(--bg-panel);border:1px solid var(--border);display:grid;place-items:center;font-family:var(--sans);font-size:12px;font-weight:700;color:var(--accent)}
+    .nav-tag{font-family:var(--sans);font-weight:400;font-size:12px;color:var(--text-faint);margin-left:4px}
+    .nav-r{display:flex;align-items:center;gap:12px}
+    .nav-r a,.nav-r button{font-size:12.5px;color:var(--text-muted);transition:color var(--dur-quick)}
+    .nav-r a:hover,.nav-r button:hover{color:var(--text)}
+
+    /* Layout */
+    .main{flex:1;display:flex;flex-direction:column;align-items:center;gap:28px;padding:36px 24px 60px;overflow-y:auto}
+
+    /* Drop zone (OD df-drop-overlay + df-drop-overlay-card pattern) */
+    .drop-zone{position:relative;width:100%;max-width:720px;min-height:180px;display:flex;align-items:center;justify-content:center;padding:24px;cursor:pointer;transition:border-color 140ms var(--ease-out),background-color 140ms var(--ease-out)}
+    .drop-zone__card{display:flex;flex-direction:column;align-items:center;gap:6px;padding:32px 40px;border:2px dashed var(--accent);border-radius:var(--radius);background:color-mix(in srgb,var(--accent) 10%,transparent);text-align:center;transition:border-color 140ms var(--ease-out),background-color 140ms var(--ease-out),box-shadow 140ms var(--ease-out)}
+    .drop-zone:hover .drop-zone__card,.drop-zone.drag-over .drop-zone__card{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);box-shadow:var(--shadow-md)}
+    .drop-zone__card svg{color:var(--accent);width:24px;height:24px}
+    .drop-zone__card .title{font-size:13.5px;font-weight:650;color:var(--text-strong)}
+    .drop-zone__card .hint{font-size:12px;color:var(--text-muted);line-height:1.5}
+    .drop-zone.has-file .drop-zone__card{border-style:solid;border-color:color-mix(in srgb,var(--accent) 28%,var(--border));border-width:1px;background:var(--accent-tint);padding:18px 28px}
+    .drop-zone.has-file .drop-zone__card .title{font-size:13px;color:var(--accent)}
+    .drop-zone.has-file .drop-zone__card .hint{color:var(--text-soft)}
+    .drop-zone__actions{display:flex;align-items:center;gap:8px;margin-top:6px}
+
+    /* Start button (OD home-hero__submit) */
+    .btn-start{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:64px;height:32px;padding:0 16px;border-radius:var(--radius-pill);border:1px solid var(--accent);background:var(--accent);color:white;box-shadow:var(--shadow-xs);cursor:pointer;font:inherit;font-size:12.5px;font-weight:650;line-height:1;transition:background-color 140ms cubic-bezier(0.23,1,0.32,1),border-color 140ms cubic-bezier(0.23,1,0.32,1),box-shadow 140ms cubic-bezier(0.23,1,0.32,1),transform 140ms cubic-bezier(0.23,1,0.32,1),opacity 140ms cubic-bezier(0.23,1,0.32,1)}
+    .btn-start:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:var(--shadow-sm)}
+    .btn-start:active:not(:disabled){transform:translateY(1px);box-shadow:var(--shadow-xs)}
+    .btn-start:disabled{opacity:.5;cursor:default;box-shadow:none}
+
+    /* Section */
+    .sec{width:100%;max-width:720px;display:flex;flex-direction:column;gap:12px}
+    .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+    .sec-title{font-family:var(--serif);font-size:18px;font-weight:600;color:var(--text-strong);letter-spacing:-0.01em}
+    .sec-more{appearance:none;background:transparent;border:none;color:var(--text-muted);font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:2px 4px;border-radius:var(--radius-sm)}
+    .sec-more:hover{color:var(--text);background:var(--bg-subtle)}
+
+    /* Project cards */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+    .pcard{appearance:none;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);color:var(--text);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--shadow-xs);overflow:hidden;transition:border-color var(--dur-quick) var(--ease-out),background-color var(--dur-quick) var(--ease-out),transform var(--dur-quick) var(--ease-out),box-shadow var(--dur-quick) var(--ease-out)}
+    .pcard:hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--border));background:color-mix(in srgb,var(--accent-tint) 22%,var(--bg-panel));transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+    .pcard__preview{height:100px;background:var(--bg-subtle);border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .pcard__dots{display:flex;gap:4px}
+    .pcard__dot{width:6px;height:6px;border-radius:50%;background:var(--text-faint);opacity:.4}
+    .pcard__body{padding:12px 16px 14px;display:flex;flex-direction:column;gap:4px}
+    .pcard__title{font-size:13px;font-weight:650;color:var(--text-strong);line-height:1.3}
+    .pcard__desc{font-size:12px;color:var(--text-muted);line-height:1.5}
+
+    /* Preset cards (OD home-hero__plugin-preset) */
+    .presets-wrap{width:100%;max-width:min(880px,100%)}
+    .presets{display:flex;gap:10px;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;padding:1px 2px 8px;scrollbar-width:thin}
+    .preset{appearance:none;position:relative;flex:0 0 248px;min-width:0;display:grid;grid-template-rows:150px minmax(0,auto);gap:8px;padding:0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);color:var(--text);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--shadow-xs);scroll-snap-align:start;overflow:hidden;transition:border-color 140ms var(--ease-out),background-color 140ms var(--ease-out),color 140ms var(--ease-out),transform 140ms var(--ease-out),box-shadow 140ms var(--ease-out)}
+    .preset:hover,.preset:focus-visible{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:color-mix(in srgb,var(--accent-tint) 32%,var(--bg-panel));color:var(--text-strong);transform:translateY(-1px);box-shadow:var(--shadow-sm);outline:none}
+    .preset__preview{position:relative;min-width:0;min-height:0;overflow:hidden;background:var(--bg-subtle);border-bottom:1px solid color-mix(in srgb,var(--border) 72%,transparent)}
+    .preset__preview .swatch{position:absolute;inset:0;display:flex}
+    .preset__preview .swatch span{flex:1;min-width:0}
+    .preset__title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 12px 12px;font-size:12.5px;font-weight:650;line-height:1.2}
+
+    /* Preset preview animations (CSS-only 3s demos) */
+    .pvw{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .pvw-card{width:60%;padding:16px;border-radius:var(--radius-sm);background:var(--bg-panel);border:1px solid var(--border);box-shadow:var(--shadow-sm);text-align:center;animation:pvwCard 3s ease-in-out infinite}
+    .pvw-card__dot{width:5px;height:5px;border-radius:50%;background:var(--accent);margin:8px auto 0;box-shadow:0 0 8px var(--accent-soft)}
+    @keyframes pvwCard{0%,100%{transform:scale(.92);opacity:.8}50%{transform:scale(1);opacity:1}}
+    @keyframes pvwBorder{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 40%,transparent)}}
+    .pvw-title{font-size:14px;font-weight:700;animation:pvwBounce 3s ease-in-out infinite}
+    @keyframes pvwBounce{0%,100%{transform:translateY(0)}15%{transform:translateY(-8px)}30%{transform:translateY(0)}}
+    .pvw-stat{font-size:22px;font-weight:700;color:var(--accent);font-family:var(--mono);animation:pvwCount 3s ease-in-out infinite}
+    @keyframes pvwCount{0%,100%{opacity:.6;transform:scale(.95)}50%{opacity:1;transform:scale(1.08)}}
+    .pvw-overlay{position:absolute;inset:0}
+    .pvw-overlay::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,color-mix(in srgb,var(--accent-tint) 60%,transparent),transparent 60%,color-mix(in srgb,var(--bg-subtle) 80%,transparent));animation:pvwDrift 3s ease-in-out infinite}
+    .pvw-reveal{font-size:18px;font-weight:700;color:var(--text-strong);animation:pvwReveal 3s ease-in-out infinite}
+    @keyframes pvwReveal{0%,100%{opacity:.3;transform:scale(.95)}60%{opacity:1;transform:scale(1)}}
+    .pvw-exit{font-size:16px;font-weight:700;color:var(--text-muted);animation:pvwExit 3s ease-in-out infinite}
+    @keyframes pvwExit{0%,10%{opacity:1;transform:scale(1);filter:blur(0)}85%,100%{opacity:.2;transform:scale(.85);filter:blur(2px)}}
+
+    /* Footer */
+    .foot{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 24px;border-top:1px solid var(--border-soft);color:var(--text-faint);font-size:12px}
+    .foot-links{display:flex;gap:16px}
+    .foot-links a{font-size:12px;color:var(--text-muted);transition:color var(--dur-quick)}
+    .foot-links a:hover{color:var(--text)}
+
+    @media(max-width:900px){.preset{flex-basis:224px;grid-template-rows:136px minmax(0,auto)}}
+    @media(max-width:640px){.grid{grid-template-columns:1fr 1fr}}
+    @media(max-width:560px){.preset{flex-basis:208px;grid-template-rows:126px minmax(0,auto)}}
+    @media(max-width:440px){.grid{grid-template-columns:1fr}}
+    /* ── 开场动画 ── */
+    .splash{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:var(--bg);transition:opacity .5s var(--ease-out),visibility .5s}
+    .splash.is-done{opacity:0;visibility:hidden;pointer-events:none}
+    .splash__mark{width:72px;height:72px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-family:var(--sans);font-size:36px;font-weight:700;color:white;animation:splashMark .8s cubic-bezier(0.34,1.56,0.64,1) both}
+    @keyframes splashMark{0%{transform:scale(0);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+    .splash__title{font-family:var(--serif);font-size:32px;font-weight:600;color:var(--text-strong);letter-spacing:-0.02em;animation:splashTitle .6s .3s cubic-bezier(0.23,1,0.32,1) both}
+    @keyframes splashTitle{0%{transform:translateY(12px);opacity:0}100%{transform:translateY(0);opacity:1}}
+    .splash__sub{font-size:14px;color:var(--text-muted);animation:splashTitle .6s .45s cubic-bezier(0.23,1,0.32,1) both}
+    :root { --pvw-drift: 8px; }
+  </style>
+  <script src="shared.js"></script>
+</head>
+<body>
+
+  <!-- 开场动画 -->
+  <div class="splash" id="splash">
+    <div class="splash__mark">三</div>
+    <div class="splash__title">三天remotion</div>
+    <div class="splash__sub">AI 视频剪辑</div>
+  </div>
+
+  <nav class="nav">
+    <a href="主页.html" class="nav-logo"><span class="nav-logo-mark">三</span>三天remotion<span class="nav-tag">AI 视频剪辑</span></a>
+    <div class="nav-r">
+      <button class="btn ghost" style="padding:5px 12px;font-size:12px">文档</button>
+      <a href="#" class="btn ghost" style="padding:5px 12px;font-size:12px">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="tabs-chrome" id="tabsBar"></div>
+
+  <main class="main">
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone__card">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div class="title">点击或拖入视频开始</div>
+        <div class="hint">支持 MP4 / MOV / WebM</div>
+      </div>
+    </div>
+
+    <section class="sec">
+      <div class="sec-head"><h2 class="sec-title">最近项目</h2><button class="sec-more">查看全部 →</button></div>
+      <div class="grid" id="recentGrid">
+        <div style="color:var(--text-faint);text-align:center;padding:40px 0;font-size:13px;grid-column:1/-1">暂无项目</div>
+      </div>
+    </section>
+
+    <section class="sec" style="max-width:min(880px,100%)">
+      <div class="sec-head" style="max-width:720px;align-self:flex-start"><h2 class="sec-title">组件预设</h2><a class="sec-more" href="组件展示.html">浏览全部 25 个 →</a></div>
+      <div class="presets">
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-card" style="animation:pvwCard 3s ease-in-out infinite,pvwBorder 3s ease-in-out infinite">卡片<span class="pvw-card__dot"></span></div></div></div><div class="preset__title">GlamCard · 5合1豪华信息卡</div></button>
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-title" style="font-family:var(--sans);font-size:20px;color:var(--accent)">标题</div></div></div><div class="preset__title">GlamTitle · 弹跳+霓虹标题</div></button>
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-stat">8.3<span style="font-size:12px;font-weight:500;color:var(--text-muted);margin-left:2px">x</span></div></div></div><div class="preset__title">GlamStat · 数字+边框光晕</div></button>
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-overlay" style="background:radial-gradient(ellipse at 30% 50%,color-mix(in srgb,var(--accent-tint) 80%,transparent),transparent 70%)"></div><div class="pvw-card" style="background:transparent;border:none;box-shadow:none;animation:pvwCard 3s ease-in-out infinite">场景</div></div></div><div class="preset__title">GlamOverlay · 全屏氛围</div></button>
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-reveal">理念</div></div></div><div class="preset__title">GlamReveal · 概念揭示</div></button>
+        <button class="preset"><div class="preset__preview"><div class="pvw"><div class="pvw-exit">退出</div></div></div><div class="preset__title">GlamExit · 模糊缩放退场</div></button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>&copy; 2026 三天remotion · MIT</span>
+    <div class="foot-links"><a href="#">文档</a><a href="#">GitHub</a><a href="#">Discord</a></div>
+  </footer>
+
+  <script>
+    window.__PAGE = { id: 'home' };
+
+    /* ── 首次使用？直接进环境检测，不播动画 ── */
+    if (!localStorage.getItem(STORAGE_KEYS.ENV_DONE)) { location.replace('环境检测.html'); /* 此行以下对首次用户不可见 */ }
+
+    /* ── 开场动画：2.2 秒后自动消失 ── */
+    (function(){
+      var splash = document.getElementById('splash');
+      if (!splash) return;
+      window.addEventListener('load', function(){
+        setTimeout(function(){ splash.classList.add('is-done'); }, 2200);
+      });
+    })();
+
+    renderTabs();
+
+    /* Recent projects — from localStorage */
+    var recentGrid = document.getElementById('recentGrid');
+    var projects = getProjects();
+    if (projects.length > 0) {
+      var html = '';
+      for (var i = 0; i < Math.min(projects.length, 6); i++) {
+        var p = projects[i];
+        /* Try to read video info if this project has one */
+        var videoName = (p.video && p.video.name) ? p.video.name : '';
+        var ago = p.time ? Math.floor((Date.now() - p.time) / 86400000) : null;
+        var timeStr = ago === null ? '' : (ago === 0 ? '今天' : (ago === 1 ? '昨天' : ago + ' 天前'));
+        html += '<button class="pcard" onclick="location.href=\'' + p.path + '\'"><div class="pcard__preview"><div class="pcard__dots"><span class="pcard__dot"></span><span class="pcard__dot"></span><span class="pcard__dot"></span></div></div><div class="pcard__body"><div class="pcard__title">' + p.name + '</div><div class="pcard__desc">' + (videoName || '点击继续编辑') + (timeStr ? ' · ' + timeStr : '') + '</div></div></button>';
+      }
+      recentGrid.innerHTML = html;
+    }
+
+    /* Drop zone */
+    var dz = document.getElementById('dropZone');
+    var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'video/*'; fi.style.display = 'none';
+    document.body.appendChild(fi);
+    var selectedFile = null;
+
+    dz.addEventListener('click', function(e){ if(e.target.tagName!=='BUTTON')fi.click() });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag-over') });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag-over') });
+    dz.addEventListener('drop', function(e){ e.preventDefault(); dz.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]) });
+    fi.addEventListener('change', function(){ handleFile(fi.files[0]) });
+
+    function handleFile(f){
+      if(!f||!f.type.startsWith('video/'))return;
+      try { localStorage.setItem(STORAGE_KEYS.VIDEO, JSON.stringify({ name: f.name, size: f.size, type: f.type, lastMod: f.lastModified })); } catch(e) { console.error('[handleFile] localStorage 写入失败:', e.message); }
+      /* Store video blob in IndexedDB; wait for transaction before allowing navigation */
+      try {
+        var req = indexedDB.open('srt_store', 1);
+        req.onupgradeneeded = function(e){ e.target.result.createObjectStore('files'); };
+        req.onsuccess = function(e){
+          var tx = e.target.result.transaction('files','readwrite');
+          var putReq = tx.objectStore('files').put(f, 'current_video');
+          putReq.onsuccess = function(){ window.__videoReady = true; };
+          putReq.onerror = function(){ console.error('[handleFile] IndexedDB 写入失败'); };
+        };
+      } catch(e) { console.error('[handleFile] IndexedDB 打开失败:', e.message); }
+      dz.classList.add('has-file');
+      var card = dz.querySelector('.drop-zone__card');
+      var safeName = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      card.innerHTML = '<div class="title">'+safeName+'</div><div class="hint">'+(f.size/1048576).toFixed(1)+' MB</div><div class="drop-zone__actions"><button class="btn-start" id="startBtn">开始剪辑 →</button></div>';
+      document.getElementById('startBtn').addEventListener('click', startEditing);
+    }
+
+    function doStartEditing(){
+      var video = null;
+      try { video = JSON.parse(localStorage.getItem(STORAGE_KEYS.VIDEO)); } catch(e) { console.error('[startEditing] 读取视频信息失败:', e.message); }
+      if (!video || !video.name) {
+        var card = dz.querySelector('.drop-zone__card');
+        var old = card.innerHTML;
+        card.innerHTML = '<div class="title" style="color:var(--red)">请先上传素材</div><div class="hint">点击上方区域或拖入视频文件</div>';
+        setTimeout(function(){ card.innerHTML = old; document.getElementById('startBtn').addEventListener('click', startEditing); }, 2000);
+        return;
+      }
+      var p = getProjects(), exists = false;
+      for (var i = 0; i < p.length; i++) { if (p[i].path === '剪辑.html') { exists = true; break; } }
+      if (!exists) {
+        var vid = null; try { vid = JSON.parse(localStorage.getItem(STORAGE_KEYS.VIDEO)); } catch(e){ console.error('[startEditing] 重复读取视频失败:', e.message); }
+        p.unshift({ name: '未命名项目', path: '剪辑.html', time: Date.now(), video: vid || null });
+        saveProjects(p);
+      }
+      location.href = '剪辑.html';
+    }
+
+    function startEditing(){
+      if (window.__videoReady !== true) {
+        /* 等待 IndexedDB 写入完成（最多等 2 秒） */
+        var waited = 0;
+        var check = setInterval(function(){
+          waited += 100;
+          if (window.__videoReady === true || waited >= 2000) {
+            clearInterval(check);
+            doStartEditing();
+          }
+        }, 100);
+        return;
+      }
+      doStartEditing();
+    }
+
+  </script>
+</body>
+</html>

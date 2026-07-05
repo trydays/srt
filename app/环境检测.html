@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>三天remotion — 环境检测</title>
+  <link rel="stylesheet" href="shared.css" />
+  <style>
+    /* Layout */
+    .main{flex:1;display:flex;flex-direction:column;align-items:center;padding:48px 24px 60px;overflow-y:auto}
+    .panel{width:100%;max-width:520px;display:flex;flex-direction:column;gap:24px}
+    .panel-title{font-family:var(--serif);font-size:24px;font-weight:600;color:var(--text-strong);letter-spacing:-0.02em}
+    .panel-sub{font-size:13.5px;color:var(--text-muted);line-height:1.55;margin-top:2px}
+
+    /* Drive summary (OD db-reference-chip + stat-card pattern) */
+    .drive-card{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;padding:16px;border:1px solid color-mix(in srgb,var(--accent) 42%,var(--border));border-radius:var(--radius);background:color-mix(in srgb,var(--accent-tint) 30%,var(--bg-panel));box-shadow:var(--shadow-xs)}
+    .drive-card__info{display:flex;flex-direction:column;gap:2px}
+    .drive-card__label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em}
+    .drive-card__space{font-size:22px;font-weight:700;color:var(--text-strong);line-height:1.1}
+    .drive-card__total{font-size:12px;color:var(--text-muted)}
+    .drive-chips{display:flex;flex-wrap:wrap;gap:8px}
+    .dchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;border:1px solid color-mix(in srgb,var(--border) 88%,transparent);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text-muted);padding:6px 13px;font-size:12.5px;font-weight:550;white-space:nowrap;cursor:pointer;transition:background 140ms var(--ease-out),border-color 140ms var(--ease-out),color 140ms var(--ease-out)}
+    .dchip:hover{color:var(--text);border-color:var(--border-strong)}
+    .dchip.is-active{border-color:color-mix(in srgb,var(--accent) 40%,var(--border));background:var(--accent-tint);color:var(--accent-strong)}
+    .dchip__free{font-size:10px;color:inherit;opacity:.7}
+
+    /* Status bar — compact single-line */
+    .status-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border-soft);border-radius:var(--radius-sm);background:var(--bg-subtle);font-size:12px;color:var(--text-muted)}
+    .status-bar strong{color:var(--text-strong)}
+
+    /* Disk estimate (OD info-card pattern) */
+    .disk-estimate{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);box-shadow:var(--shadow-xs)}
+    .disk-estimate__icon{width:32px;height:32px;border-radius:var(--radius);background:var(--bg-subtle);display:grid;place-items:center;font-size:16px;flex-shrink:0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.7)}
+    .disk-estimate__body{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .disk-estimate__title{font-size:13px;font-weight:650;color:var(--text-strong)}
+    .disk-estimate__desc{font-size:12px;color:var(--text-muted);line-height:1.5}
+
+    /* Tool list (OD df-row 5-column pattern) */
+    .tool-list{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-xs)}
+    .tool-row{display:grid;grid-template-columns:20px 100px 1fr auto auto auto;align-items:center;gap:8px;padding:11px 16px;background:transparent;border-bottom:1px solid var(--border-soft);transition:background 120ms var(--ease-out)}
+    .tool-row:last-child{border-bottom:none}
+    .tool-row:hover{background:var(--bg-subtle)}
+    .tool-row__icon{font-size:14px;text-align:center}
+    .tool-row__name{font-weight:600;color:var(--text-strong);font-size:12.5px}
+    .tool-row__desc{display:flex;flex-direction:column;gap:2px;min-width:0}
+    .tool-row__desc-text{font-size:12px;color:var(--text-muted);line-height:1.4}
+    .tool-row__desc-size{font-size:10.5px;color:var(--text-muted);font-family:var(--mono)}
+    .tool-row__detail{font-size:12px;color:var(--text-muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+    .tool-row__status{font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--radius-pill);white-space:nowrap}
+    .tool-row__status.ok{background:var(--green-bg);color:var(--green)}
+    .tool-row__status.warn{background:var(--amber-bg);color:var(--amber)}
+    .tool-row__status.bad{background:var(--red-bg);color:var(--red)}
+    .tool-row__action{text-align:right}
+    .btn-install{appearance:none;display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid var(--accent);border-radius:var(--radius-pill);background:transparent;color:var(--accent);font:inherit;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 140ms var(--ease-out),color 140ms var(--ease-out)}
+    .btn-install:hover{background:var(--accent-tint);color:var(--accent-strong)}
+    .btn-install:disabled{opacity:.5;cursor:not-allowed}
+    .btn-install.installing{background:var(--accent-tint);border-color:var(--accent-soft);color:var(--accent-strong);cursor:wait}
+    .btn-retry{appearance:none;display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer;transition:background 140ms var(--ease-out),color 140ms var(--ease-out),border-color 140ms var(--ease-out)}
+    .btn-retry:hover{background:var(--bg-subtle);color:var(--text);border-color:var(--border-strong)}
+
+    /* AI collapsible (OD details/summary pattern) */
+    .ai-collapse{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);box-shadow:var(--shadow-xs)}
+    .ai-collapse[open]{border-color:color-mix(in srgb,var(--accent) 30%,var(--border))}
+    .ai-collapse__head{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;list-style:none;user-select:none}
+    .ai-collapse__head::-webkit-details-marker{display:none}
+    .ai-collapse__head .mode-label{margin-bottom:0;cursor:pointer}
+    .ai-collapse__badge{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:var(--radius-pill);white-space:nowrap}
+    .ai-collapse__chevron{margin-left:auto;flex-shrink:0;color:var(--text-faint);transition:transform 200ms var(--ease-out)}
+    .ai-collapse[open] .ai-collapse__chevron{transform:rotate(180deg)}
+    .ai-collapse .disk-estimate{margin:0 16px 14px;border:none;box-shadow:none;background:var(--bg-subtle)}
+
+    /* Mode cards */
+    .mode-label{font-family:var(--serif);font-size:16px;font-weight:600;color:var(--text-strong);letter-spacing:-0.01em}
+    .mode-row{display:flex;gap:10px}
+    .mode-card{appearance:none;flex:1;display:flex;flex-direction:column;gap:10px;padding:18px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);color:var(--text);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--shadow-xs);transition:border-color 140ms var(--ease-out),background-color 140ms var(--ease-out),color 140ms var(--ease-out),transform 140ms var(--ease-out),box-shadow 140ms var(--ease-out)}
+    .mode-card:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:color-mix(in srgb,var(--accent-tint) 32%,var(--bg-panel));color:var(--text-strong);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+    .mode-card.is-active{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:color-mix(in srgb,var(--accent-tint) 32%,var(--bg-panel));color:var(--text-strong);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+    .mode-card__title{font-size:13.5px;font-weight:650;color:var(--text-strong)}
+    .mode-card__desc{font-size:12px;color:var(--text-muted);line-height:1.5}
+    .mode-card__badge{display:inline-flex;align-self:flex-start;padding:2px 8px;border-radius:var(--radius-pill);font-size:10.5px;font-weight:600}
+    .mode-card__badge.ok{background:var(--green-bg);color:var(--green)}
+    .mode-card__badge.warn{background:var(--amber-bg);color:var(--amber)}
+
+    /* Confirm button */
+    .btn-confirm{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;height:32px;padding:0 16px;border-radius:var(--radius-pill);border:1px solid var(--accent);background:var(--accent);color:white;font:inherit;font-size:12.5px;font-weight:650;line-height:1;cursor:pointer;box-shadow:var(--shadow-xs);transition:background-color 140ms cubic-bezier(0.23,1,0.32,1),border-color 140ms cubic-bezier(0.23,1,0.32,1),box-shadow 140ms cubic-bezier(0.23,1,0.32,1),transform 140ms cubic-bezier(0.23,1,0.32,1),opacity 140ms cubic-bezier(0.23,1,0.32,1)}
+    .btn-confirm:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:var(--shadow-sm)}
+    .btn-confirm:active:not(:disabled){transform:translateY(1px);box-shadow:var(--shadow-xs)}
+    .btn-confirm:disabled{opacity:.5;cursor:default;box-shadow:none}
+
+    .foot{display:flex;align-items:center;justify-content:center;padding:16px 24px;border-top:1px solid var(--border-soft);color:var(--text-faint);font-size:12px}
+
+    @media(max-width:560px){.mode-row{flex-direction:column}.panel{max-width:100%}}
+  </style>
+  <script src="shared.js"></script>
+</head>
+<body>
+
+  <div class="tabs-chrome" id="tabsBar" role="tablist" aria-label="页面标签"></div>
+
+  <div class="main">
+    <div class="panel">
+      <div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div><h1 class="panel-title" style="margin:0">欢迎使用三天remotion 👋</h1>
+          <p class="panel-sub">进入主编辑器之前，我们先检测一下你电脑上的工具链。只需一分钟，帮你选好最佳渲染模式。</p></div>
+          <button class="btn-retry" id="btnRetry" title="重新检测">🔄 重新检测</button>
+        </div>
+      </div>
+
+      <!-- Drive card -->
+      <div class="drive-card" id="driveCard">
+        <div class="drive-card__info">
+          <span class="drive-card__label">选择您的工作盘</span>
+          <span class="drive-card__space" id="driveSpace">— GB 剩余</span>
+          <span class="drive-card__total" id="driveTotal"></span>
+        </div>
+        <div class="drive-chips" id="driveChips"></div>
+      </div>
+
+      <!-- Status bar -->
+      <div class="status-bar" id="statusBar"></div>
+
+      <!-- Tool list -->
+      <div class="tool-list" id="toolList"></div>
+
+      <!-- Disk estimate -->
+      <div class="disk-estimate" id="diskEstimate"></div>
+
+      <!-- Mode selection -->
+      <div>
+        <div class="mode-label" style="margin-bottom:10px">渲染模式</div>
+        <div class="mode-row">
+          <button class="mode-card is-active" data-mode="cli">
+            <span class="mode-card__badge warn" id="cliBadge">⚠️ 需环境</span>
+            <div class="mode-card__title">本地 CLI 渲染</div>
+            <div class="mode-card__desc">Remotion + FFmpeg + GPU — 全组件支持，高质量导出</div>
+          </button>
+          <button class="mode-card" data-mode="browser">
+            <span class="mode-card__badge ok">✅ 立即可用</span>
+            <div class="mode-card__title">浏览器预览模式</div>
+            <div class="mode-card__desc">WebCodecs + Canvas — 零安装，打开即用，仅预览</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- AI 翻译状态（自动探测） -->
+      <details class="ai-collapse" id="aiCollapse">
+        <summary class="ai-collapse__head">
+          <span class="mode-label">AI 效果翻译</span>
+          <span class="ai-collapse__badge" id="aiCollapseBadge"></span>
+          <svg class="ai-collapse__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <div class="disk-estimate" style="flex-direction:column;align-items:stretch;gap:10px">
+          <div class="disk-estimate__body" style="gap:6px">
+            <div class="disk-estimate__title" id="aiStatusTitle">🔍 正在检测 AI 配置来源...</div>
+            <div class="disk-estimate__desc" id="aiStatusDesc"></div>
+          </div>
+          <div id="aiSourceList" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div id="aiManualSetup" style="display:none;flex-direction:column;gap:8px">
+            <div style="font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:8px">或手动配置 Key（仅存本地）：</div>
+            <div style="display:flex;gap:8px">
+              <select id="aiProvider" style="flex:0 0 130px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text);font:inherit;font-size:12px">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI 兼容</option>
+              </select>
+              <input id="aiKey" type="password" placeholder="sk-xxxxxxxx" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text);font:inherit;font-size:12px" />
+              <button class="btn-retry" id="btnAiSave" style="flex:0 0 auto;color:var(--accent);border-color:var(--accent)">保存</button>
+            </div>
+            <div id="aiStatus" style="font-size:11px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+      </details>
+
+      <button class="btn-confirm" id="btnConfirm">确认并进入主页</button>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span>&copy; 2026 三天remotion · MIT</span>
+  </footer>
+
+  <script src="env-check.js"></script>
+</body>
+</html>

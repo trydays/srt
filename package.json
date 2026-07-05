@@ -1,0 +1,53 @@
+{
+  "name": "srt",
+  "version": "1.0.0",
+  "description": "三天remotion — AI 视频剪辑桌面应用",
+  "main": "main.js",
+  "scripts": {
+    "start": "npx electron .",
+    "dev": "npx electron . --dev",
+    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_CACHE=./.electron-cache electron-builder"
+  },
+  "license": "MIT",
+  "author": "三天remotion",
+  "build": {
+    "appId": "com.srt.three-days-remotion",
+    "productName": "三天remotion",
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "resources/tools",
+        "to": "tools"
+      },
+      {
+        "from": "resources/whisper",
+        "to": "whisper"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "config-loader.js",
+      "app/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "三天remotion Setup ${version}.exe",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.3.9"
+  }
+}
