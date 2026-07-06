@@ -20,10 +20,6 @@
       {
         "from": "resources/tools",
         "to": "tools"
-      },
-      {
-        "from": "resources/whisper",
-        "to": "whisper"
       }
     ],
     "files": [
@@ -38,7 +34,7 @@
       "icon": null
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "三天remotion Setup ${version}.exe",
