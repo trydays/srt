@@ -25,9 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Fetch tools (FFmpeg + Node + Python + Whisper)
+      - name: Fetch tools (skip Whisper — GitHub 2GB limit)
         shell: bash
-        run: bash fetch-tools.sh
+        run: bash fetch-tools.sh --skip large
 
       - name: Build zip
         env:
