@@ -30,11 +30,8 @@
       "package.json"
     ],
     "win": {
-      "target": ["portable", "zip"],
+      "target": "zip",
       "icon": null
-    },
-    "portable": {
-      "artifactName": "三天remotion-${version}-portable.exe"
     }
   },
   "devDependencies": {
