@@ -36,7 +36,6 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
       "artifactName": "三天remotion Setup ${version}.exe",
       "deleteAppDataOnUninstall": false
     }
