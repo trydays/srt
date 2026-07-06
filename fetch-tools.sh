@@ -85,7 +85,7 @@ download() {
 # ── 各工具下载 ────────────────────────────────────────────
 
 # 1. FFmpeg + FFprobe (打包在同一个 zip 里)
-#    多源: gyan.dev 主源, BtbN GitHub 备源
+#    多源: BtbN GitHub 主源 (CI 友好), gyan.dev 备源
 download_ffmpeg() {
   local ffmpeg_exe="$TOOLS_DIR/ffmpeg.exe"
   local ffprobe_exe="$TOOLS_DIR/ffprobe.exe"
@@ -104,15 +104,42 @@ download_ffmpeg() {
   rm -rf "$tmpdir"
   mkdir -p "$tmpdir"
 
-  log "downloading FFmpeg 8.x essentials ..."
-  # 主源: gyan.dev
-  if ! curl -Lf -# -o "$tmpdir/ffmpeg.zip" "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" 2>/dev/null; then
-    log "primary source failed, trying fallback ..."
-    # 备源: BtbN (使用已知可用版本)
-    curl -Lf -# -o "$tmpdir/ffmpeg.zip" \
-      "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" \
-      || { fail "FFmpeg download failed from all sources"; return 1; }
+  local curl_opts="-Lf -C -"
+  if [ -t 1 ]; then
+    curl_opts="$curl_opts -#"
+  else
+    curl_opts="$curl_opts -sS"
   fi
+
+  log "downloading FFmpeg ..."
+
+  # 主源: BtbN GitHub (GitHub Actions 域名内，速度快且不会被墙)
+  local dl_ok=false
+  if curl $curl_opts -o "$tmpdir/ffmpeg.zip" \
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"; then
+    dl_ok=true
+  else
+    log "primary source (BtbN) failed, trying gyan.dev ..."
+    # 备源: gyan.dev
+    if curl $curl_opts -o "$tmpdir/ffmpeg.zip" \
+      "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"; then
+      dl_ok=true
+    fi
+  fi
+
+  if [ "$dl_ok" != true ]; then
+    fail "FFmpeg download failed from all sources"
+    return 1
+  fi
+
+  # 验证下载文件存在且大于 1MB
+  local zip_size
+  zip_size=$(stat -c%s "$tmpdir/ffmpeg.zip" 2>/dev/null || stat -f%z "$tmpdir/ffmpeg.zip" 2>/dev/null || echo 0)
+  if [ "$zip_size" -lt 1048576 ]; then
+    fail "FFmpeg zip too small (${zip_size} bytes) — likely download failed"
+    return 1
+  fi
+  log "  → ffmpeg.zip downloaded ($((zip_size / 1048576))MB)"
 
   log "extracting ffmpeg + ffprobe ..."
   # 用 Python 解压 (CI 和 Windows 上都可用)
