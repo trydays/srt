@@ -24,7 +24,7 @@ npx create-srt
 | 方式 | 命令 | 适合 |
 |------|------|------|
 | 🔥 npx（推荐） | `npx create-srt` | 任何有 Node.js 的电脑 |
-| 📦 安装包 | [GitHub Releases](https://github.com/trydays/srt/releases) | 不装 Node 的用户 |
+| 📦 便携版 | [GitHub Releases](https://github.com/trydays/srt/releases) 下载 zip 解压即用 | 不装 Node 的用户 |
 | 🛠 开发 | `git clone` → `npm install` → `node server.js` | 开发者 |
 
 ## 系统要求

@@ -30,14 +30,11 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis",
+      "target": ["portable", "zip"],
       "icon": null
     },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "artifactName": "三天remotion Setup ${version}.exe",
-      "deleteAppDataOnUninstall": false
+    "portable": {
+      "artifactName": "三天remotion-${version}-portable.exe"
     }
   },
   "devDependencies": {
