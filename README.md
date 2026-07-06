@@ -6,7 +6,7 @@
 ## 快速开始
 
 ```bash
-npx srt
+npx create-srt
 ```
 
 首次运行会自动下载并安装，之后双击桌面图标即可使用。
@@ -23,7 +23,7 @@ npx srt
 
 | 方式 | 命令 | 适合 |
 |------|------|------|
-| 🔥 npx（推荐） | `npx srt` | 任何有 Node.js 的电脑 |
+| 🔥 npx（推荐） | `npx create-srt` | 任何有 Node.js 的电脑 |
 | 📦 安装包 | [GitHub Releases](https://github.com/trydays/srt/releases) | 不装 Node 的用户 |
 | 🛠 开发 | `git clone` → `npm install` → `node server.js` | 开发者 |
 

@@ -1,9 +1,9 @@
 {
-  "name": "srt",
+  "name": "create-srt",
   "version": "1.0.0",
   "description": "三天remotion — 用自然语言操控 FFmpeg 的视频剪辑桌面工具安装器",
   "bin": {
-    "srt": "cli.js"
+    "create-srt": "cli.js"
   },
   "files": [
     "cli.js"
