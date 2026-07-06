@@ -24,6 +24,14 @@ for cmd in python3 python; do
 done
 [ -z "$PYTHON" ] && { echo "[fetch-tools] FATAL: python not found" >&2; exit 1; }
 
+# Git Bash → Windows 路径转换 (Python 原生 Windows 版不认识 /d/ 这种路径)
+winpath() {
+  local p
+  p=$(cygpath -w "$1" 2>/dev/null) || true
+  [ -z "$p" ] && p="$1"
+  printf '%s' "$p"
+}
+
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)/resources/tools"
 FORCE=false
 SKIP_LARGE=false
@@ -142,15 +150,15 @@ download_ffmpeg() {
   log "  → ffmpeg.zip downloaded ($((zip_size / 1048576))MB)"
 
   log "extracting ffmpeg + ffprobe ..."
-  # 用 Python 解压 (CI 和 Windows 上都可用)
+  local zip_w="$(winpath "$tmpdir/ffmpeg.zip")"
+  local out_w="$(winpath "$TOOLS_DIR")"
   $PYTHON -c "
-import zipfile, os, sys
-z = zipfile.ZipFile('$tmpdir/ffmpeg.zip')
-# 使用正斜杠兼容 Windows
+import zipfile, os
+z = zipfile.ZipFile(r'$zip_w')
 for f in z.namelist():
     base = os.path.basename(f)
     if base.lower() in ('ffmpeg.exe', 'ffprobe.exe'):
-        with z.open(f) as src, open(os.path.join('$TOOLS_DIR', base), 'wb') as dst:
+        with z.open(f) as src, open(os.path.join(r'$out_w', base), 'wb') as dst:
             dst.write(src.read())
         print(f'extracted: {base}')
 " || { fail "FFmpeg extraction failed"; return 1; }
@@ -181,23 +189,29 @@ download_python() {
   mkdir -p "$tmpdir"
 
   log "downloading Python 3.12.4 embed ..."
-  curl -Lf -# -o "$tmpdir/python.zip" \
+  local c_opts="-Lf -sS"
+  [ -t 1 ] && c_opts="-Lf -#"
+  curl $c_opts -o "$tmpdir/python.zip" \
     "https://www.python.org/ftp/python/3.12.4/python-3.12.4-embed-amd64.zip" \
     || { fail "Python download failed"; return 1; }
 
+  local zip_w="$(winpath "$tmpdir/python.zip")"
+  local out_w="$(winpath "$TOOLS_DIR")"
   $PYTHON -c "
-import zipfile
-z = zipfile.ZipFile('$tmpdir/python.zip')
+import zipfile, os
+z = zipfile.ZipFile(r'$zip_w')
 for f in z.namelist():
-    if f.lower() == 'python.exe':
-        with z.open(f) as src, open('$TOOLS_DIR/python.exe', 'wb') as dst:
+    if f.lower().endswith('.exe') or f.lower().endswith('.dll'):
+        base = os.path.basename(f)
+        with z.open(f) as src, open(os.path.join(r'$out_w', base), 'wb') as dst:
             dst.write(src.read())
-        print('extracted: python.exe')
-    elif f.lower().endswith('.dll'):
-        with z.open(f) as src, open('$TOOLS_DIR/' + f.split('/')[-1], 'wb') as dst:
+        print(f'extracted: {base}')
+    else:
+        # 提取其他文件 (python312.zip 标准库等)
+        target = os.path.join(r'$out_w', f.replace('/', os.sep))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with z.open(f) as src, open(target, 'wb') as dst:
             dst.write(src.read())
-# 也提取 python312.zip (标准库)
-z.extractall('$TOOLS_DIR')
 " || { fail "Python extraction failed"; return 1; }
 
   rm -rf "$tmpdir"
