@@ -74,6 +74,11 @@ test('每个工具的版本号为非空字符串', () => {
 
 // ── 6: 工具文件存在于 resources 或 AppData ──────────────────────────
 test('工具文件存在于 resources 或 AppData（size>0 时）', () => {
+  // CI 环境不提交大二进制文件，跳过此检查
+  if (process.env.CI) {
+    console.log('SKIP: CI 环境，resources/tools/ 二进制文件未提交到 git');
+    return;
+  }
   var toolsDir = path.join(__dirname, '..', 'resources', 'tools');
   var names = Object.keys(bundledVersions.bundled);
   for (var i = 0; i < names.length; i++) {
