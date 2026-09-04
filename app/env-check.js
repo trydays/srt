@@ -99,6 +99,7 @@ if (!environmentPage) {
 
   function setLoadingState() {
     environmentPage.dataset.state = 'loading';
+    setLocalModeBadge('⏳ 检测中', 'checking');
     platformTitle.textContent = '正在识别当前电脑…';
     platformMeta.textContent = '检测会提供建议，但不会阻止你继续使用。';
     statusBar.innerHTML = '<strong>检测中…</strong> 正在读取真实环境信息';
@@ -209,16 +210,26 @@ if (!environmentPage) {
     modeList.innerHTML = html;
   }
 
+  function setLocalModeBadge(text, className) {
+    cliBadge.textContent = text;
+    cliBadge.className = 'mode-card__badge ' + className;
+  }
+
   function renderLocalModeBadge(report) {
-    var mode = report.modes && report.modes.ffmpeg || {};
-    var status = normalizedStatus(mode.status);
+    var modes = report.modes || {};
+    var hardware = report.hardware || {};
+    var ffmpegStatus = normalizedStatus(modes.ffmpeg && modes.ffmpeg.status);
+    var remotionStatus = normalizedStatus(modes.remotion && modes.remotion.status);
+    var graphicsStatus = normalizedStatus(hardware.graphics && hardware.graphics.status);
+    var status = ffmpegStatus !== 'ready'
+      ? 'missing'
+      : remotionStatus !== 'ready' || graphicsStatus !== 'ready' ? 'limited' : 'ready';
     var states = {
       ready: { text: '✅ 可用', className: 'ok' },
       limited: { text: '⚠️ 可用但受限', className: 'warn' },
-      missing: { text: '❌ 不满足', className: 'bad' }
+      missing: { text: '❌ 需环境', className: 'bad' }
     };
-    cliBadge.textContent = states[status].text;
-    cliBadge.className = 'mode-card__badge ' + states[status].className;
+    setLocalModeBadge(states[status].text, states[status].className);
   }
 
   function renderReport(report) {
@@ -245,6 +256,7 @@ if (!environmentPage) {
   }
 
   function renderDesktopOnly() {
+    setLocalModeBadge('⚠️ 需桌面检测', 'warn');
     platformTitle.textContent = '请在桌面版运行完整检测';
     platformMeta.textContent = '浏览器预览不会执行任何本机检测或安装命令。';
     statusBar.innerHTML = '<strong>浏览器模式</strong> 仍可继续使用预览功能';
@@ -256,6 +268,7 @@ if (!environmentPage) {
   }
 
   function renderDetectionError(error) {
+    setLocalModeBadge('❌ 检测失败', 'bad');
     platformTitle.textContent = '环境检测未完成';
     platformMeta.textContent = '检测失败，请重试；你仍然可以继续进入主页。';
     statusBar.innerHTML = '<strong>检测失败</strong> ' + escapeText(error && error.message || '无法读取环境信息');
@@ -460,34 +473,15 @@ if (!environmentPage) {
         html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🦙</span><span style="font-size:12px">Ollama 本地模型</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未检测到</span></div>';
       }
 
-      // Claude Code 凭证
-      if (detection.claudeCredentials && detection.claudeCredentials.available) {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🤖</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">Claude Code 凭证</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已检测到</span></div>';
+      // 已合并的云端配置不包含来源信息，只显示可确认的配置状态。
+      if (detection.cloudConfig && detection.cloudConfig.available) {
+        var providerLabel = detection.cloudConfig.provider
+          ? '（' + escapeText(detection.cloudConfig.provider) + '）'
+          : '';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">☁️</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">已配置的云端 AI' + providerLabel + '</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已配置</span></div>';
         found++;
       } else {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🤖</span><span style="font-size:12px">Claude Code 凭证</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未检测到</span></div>';
-      }
-
-      // OpenAI API Key
-      if (detection.openaiCredentials && detection.openaiCredentials.available) {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🔑</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">OpenAI API Key (Codex/Cursor 等)</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已设置</span></div>';
-        found++;
-      } else {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🔑</span><span style="font-size:12px">OpenAI API Key (Codex/Cursor 等)</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未设置</span></div>';
-      }
-
-      // 环境变量
-      if (detection.env && detection.env.available) {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🔧</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">环境变量 SRT_AI_KEY</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已设置</span></div>';
-        found++;
-      } else {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🔧</span><span style="font-size:12px">环境变量 SRT_AI_KEY</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未设置</span></div>';
-      }
-
-      // 配置文件
-      if (detection.configFile && detection.configFile.available) {
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">📄</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">配置文件 .srt.config.json</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已配置</span></div>';
-        found++;
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">☁️</span><span style="font-size:12px">云端 AI 配置</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未配置</span></div>';
       }
 
       list.innerHTML = html;
@@ -527,16 +521,11 @@ if (!environmentPage) {
         var detection = {};
         if (ollamaResult.ok) detection.ollama = ollamaResult.value;
         var config = configResult.ok ? configResult.value : null;
-        if (validCloudConfig(config)) {
-          if (config.provider.toLowerCase() === 'anthropic') {
-            detection.claudeCredentials = { available: true };
-          } else {
-            detection.openaiCredentials = { available: true };
-          }
-        }
+        var hasCloudConfig = validCloudConfig(config);
+        if (hasCloudConfig) detection.cloudConfig = { available: true, provider: config.provider.trim() };
         renderSources(detection);
 
-        if (validCloudConfig(config)) {
+        if (hasCloudConfig) {
           var st = document.getElementById('aiStatus');
           if (st) st.textContent = '当前 Key: ' + cloudKeyHint(config.key) + ' (' + config.provider + ')';
         }
