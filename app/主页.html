@@ -122,7 +122,7 @@
 
   <div class="tabs-chrome" id="tabsBar"></div>
 
-  <main class="main">
+  <main class="main" data-testid="home-page">
 
     <div class="drop-zone" id="dropZone">
       <div class="drop-zone__card">
@@ -192,7 +192,7 @@
 
     /* Drop zone */
     var dz = document.getElementById('dropZone');
-    var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'video/*'; fi.style.display = 'none';
+    var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'video/*'; fi.style.display = 'none'; fi.dataset.testid = 'video-input';
     document.body.appendChild(fi);
     var selectedFile = null;
 
@@ -219,7 +219,7 @@
       dz.classList.add('has-file');
       var card = dz.querySelector('.drop-zone__card');
       var safeName = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-      card.innerHTML = '<div class="title">'+safeName+'</div><div class="hint">'+(f.size/1048576).toFixed(1)+' MB</div><div class="drop-zone__actions"><button class="btn-start" id="startBtn">开始剪辑 →</button></div>';
+      card.innerHTML = '<div class="title">'+safeName+'</div><div class="hint">'+(f.size/1048576).toFixed(1)+' MB</div><div class="drop-zone__actions"><button class="btn-start" id="startBtn" data-testid="start-editing">开始剪辑 →</button></div>';
       document.getElementById('startBtn').addEventListener('click', startEditing);
     }
 

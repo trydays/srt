@@ -10,3 +10,5 @@ _test_*
 .DS_Store
 .srt.config.json
 .env
+test-results/
+playwright-report/

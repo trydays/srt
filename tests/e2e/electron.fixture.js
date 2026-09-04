@@ -11,7 +11,7 @@ function errorDetail(error) {
   return String(error);
 }
 
-function registerRendererDiagnostics(electronApp, diagnostics) {
+function registerRendererDiagnostics(electronApp, diagnostics, { includeConsole = true } = {}) {
   const observed = new WeakSet();
   const registrations = [];
 
@@ -29,7 +29,7 @@ function registerRendererDiagnostics(electronApp, diagnostics) {
     const onPageError = (error) => {
       diagnostics.push(`[renderer:pageerror] ${errorDetail(error)}`);
     };
-    page.on('console', onConsole);
+    if (includeConsole) page.on('console', onConsole);
     page.on('pageerror', onPageError);
     registrations.push({ page, onConsole, onPageError });
   }
@@ -41,7 +41,7 @@ function registerRendererDiagnostics(electronApp, diagnostics) {
     if (typeof electronApp.off === 'function') electronApp.off('window', registerWindow);
     registrations.forEach(({ page, onConsole, onPageError }) => {
       if (typeof page.off !== 'function') return;
-      page.off('console', onConsole);
+      if (includeConsole) page.off('console', onConsole);
       page.off('pageerror', onPageError);
     });
   };
@@ -129,7 +129,8 @@ async function cleanupElectronFixture({
 
 const test = base.extend({
   scenario: ['mac-ready', { option: true }],
-  window: async ({ scenario }, use, testInfo) => {
+  realEnvironment: [false, { option: true }],
+  electronContext: async ({ scenario, realEnvironment }, use, testInfo) => {
     const userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-e2e-'));
     const diagnostics = [];
     let electronApp;
@@ -142,9 +143,10 @@ const test = base.extend({
         args: [path.join(__dirname, 'electron-main.js')],
         env: {
           ...process.env,
-          SRT_E2E_SCENARIO: scenario,
           SRT_E2E_USER_DATA: userDataDir,
-          ...(scenario === 'mac-ready' ? {
+          SRT_E2E_REAL_MAC: realEnvironment ? '1' : '0',
+          SRT_E2E_SCENARIO: realEnvironment ? '' : scenario,
+          ...(!realEnvironment && scenario === 'mac-ready' ? {
             PATH: '/usr/bin:/bin',
             SRT_AI_KEY: E2E_CLOUD_KEY,
             SRT_AI_PROVIDER: 'openai',
@@ -154,7 +156,7 @@ const test = base.extend({
         }
       });
 
-      detachDiagnostics = registerRendererDiagnostics(electronApp, diagnostics);
+      detachDiagnostics = registerRendererDiagnostics(electronApp, diagnostics, { includeConsole: false });
       const child = electronApp.process();
       if (child && child.stderr) {
         child.stderr.on('data', (chunk) => diagnostics.push(`[electron:stderr] ${chunk.toString()}`));
@@ -162,7 +164,7 @@ const test = base.extend({
 
       window = await electronApp.firstWindow();
       await window.locator('[data-testid="environment-page"][data-state="loaded"]').waitFor();
-      await use(window);
+      await use({ electronApp, window });
     } catch (error) {
       primaryError = error;
       throw error;
@@ -186,6 +188,12 @@ const test = base.extend({
         }
       }
     }
+  },
+  window: async ({ electronContext }, use) => {
+    await use(electronContext.window);
+  },
+  readScenarioState: async ({ electronContext }, use) => {
+    await use(() => electronContext.electronApp.evaluate(({ app }) => app.__srtE2EState));
   }
 });
 
