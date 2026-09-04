@@ -44,6 +44,7 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
       let child;
       let settled = false;
       let timer = null;
+      let pendingFailure = null;
       let stdout = Buffer.alloc(0);
       let stderr = Buffer.alloc(0);
 
@@ -51,10 +52,25 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         return buffer.toString('utf8');
       }
 
+      function removeStreamListeners() {
+        if (child && child.stdout) child.stdout.removeListener('data', onStdout);
+        if (child && child.stderr) child.stderr.removeListener('data', onStderr);
+      }
+
+      function cleanup() {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        removeStreamListeners();
+        if (child) {
+          child.removeListener('error', onError);
+          child.removeListener('close', onClose);
+        }
+      }
+
       function finish(error) {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        cleanup();
         if (error) {
           error.stdout = outputText(stdout);
           error.stderr = outputText(stderr);
@@ -62,6 +78,25 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
           return;
         }
         resolve({ stdout: outputText(stdout), stderr: outputText(stderr) });
+      }
+
+      function requestTermination(error) {
+        if (settled || pendingFailure) return;
+        pendingFailure = error;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        removeStreamListeners();
+
+        let killed;
+        try {
+          killed = child && typeof child.kill === 'function' && child.kill('SIGKILL');
+        } catch (_) {
+          finish(runnerError('Unable to terminate command', 'EKILL', 'probe_error', '', ''));
+          return;
+        }
+        if (killed !== true) {
+          finish(runnerError('Unable to terminate command', 'EKILL', 'probe_error', '', ''));
+        }
       }
 
       function capture(channel, chunk) {
@@ -73,30 +108,29 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         else stderr = next;
         if (value.length > remaining) {
           const error = runnerError('Command output exceeded the limit', 'ENOBUFS', 'probe_error', '', '');
-          if (child && typeof child.kill === 'function') child.kill();
-          finish(error);
+          requestTermination(error);
         }
       }
 
-      try {
-        child = spawnImpl(program, args.slice(), {
-          shell: false,
-          windowsHide: true,
-          env
-        });
-      } catch (error) {
-        error.reason = error.code === 'ENOENT' ? 'absent' : 'probe_error';
-        finish(error);
-        return;
+      function onStdout(chunk) {
+        capture('stdout', chunk);
       }
 
-      if (child.stdout) child.stdout.on('data', (chunk) => capture('stdout', chunk));
-      if (child.stderr) child.stderr.on('data', (chunk) => capture('stderr', chunk));
-      child.once('error', (error) => {
+      function onStderr(chunk) {
+        capture('stderr', chunk);
+      }
+
+      function onError(error) {
+        if (pendingFailure) return;
         error.reason = error.code === 'ENOENT' ? 'absent' : 'probe_error';
         finish(error);
-      });
-      child.once('close', (exitCode, signal) => {
+      }
+
+      function onClose(exitCode, signal) {
+        if (pendingFailure) {
+          finish(pendingFailure);
+          return;
+        }
         if (exitCode === 0) {
           finish(null);
           return;
@@ -111,17 +145,37 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         error.exitCode = exitCode;
         error.signal = signal;
         finish(error);
-      });
+      }
+
+      try {
+        child = spawnImpl(program, args.slice(), {
+          shell: false,
+          windowsHide: true,
+          env
+        });
+      } catch (error) {
+        error.reason = error.code === 'ENOENT' ? 'absent' : 'probe_error';
+        finish(error);
+        return;
+      }
+
+      if (child.stdout) child.stdout.on('data', onStdout);
+      if (child.stderr) child.stderr.on('data', onStderr);
+      child.on('error', onError);
+      child.once('close', onClose);
 
       if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
         timer = setTimeout(() => {
-          const error = runnerError('Command timed out', 'ETIMEDOUT', 'probe_error', '', '');
-          if (typeof child.kill === 'function') child.kill();
-          finish(error);
+          requestTermination(runnerError('Command timed out', 'ETIMEDOUT', 'probe_error', '', ''));
         }, timeoutMs);
       }
     });
   };
+}
+
+function isPathWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
 function inspectBundledTools(bundledRoot, platform = process.platform, fsApi = fs) {
@@ -129,8 +183,17 @@ function inspectBundledTools(bundledRoot, platform = process.platform, fsApi = f
   const resolvedRoot = path.resolve(bundledRoot);
   const manifestPath = path.join(resolvedRoot, 'tools-versions.json');
   let manifest;
+  let canonicalRoot;
   try {
-    manifest = JSON.parse(fsApi.readFileSync(manifestPath, 'utf8'));
+    const rootStat = fsApi.lstatSync(resolvedRoot);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return {};
+    canonicalRoot = fsApi.realpathSync(resolvedRoot);
+
+    const manifestStat = fsApi.lstatSync(manifestPath);
+    if (!manifestStat.isFile() || manifestStat.isSymbolicLink()) return {};
+    const canonicalManifest = fsApi.realpathSync(manifestPath);
+    if (!isPathWithin(canonicalRoot, canonicalManifest)) return {};
+    manifest = JSON.parse(fsApi.readFileSync(canonicalManifest, 'utf8'));
   } catch (_) {
     return {};
   }
@@ -138,14 +201,18 @@ function inspectBundledTools(bundledRoot, platform = process.platform, fsApi = f
 
   const tools = {};
   for (const [name, entry] of Object.entries(manifest.bundled)) {
-    if (!entry || typeof entry.exe !== 'string' || path.basename(entry.exe) !== entry.exe ||
+    if (name === '.' || name === '..' || !entry || typeof entry.exe !== 'string' ||
+        entry.exe === '.' || entry.exe === '..' || entry.exe.includes('/') || entry.exe.includes('\\') ||
         typeof entry.version !== 'string' || !Number.isFinite(entry.size) || entry.size < 0) {
       continue;
     }
-    const candidatePath = path.join(resolvedRoot, entry.exe);
+    const candidatePath = path.resolve(resolvedRoot, entry.exe);
+    if (!isPathWithin(resolvedRoot, candidatePath)) continue;
     try {
       const stat = fsApi.lstatSync(candidatePath);
       if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      const canonicalCandidate = fsApi.realpathSync(candidatePath);
+      if (!isPathWithin(canonicalRoot, canonicalCandidate)) continue;
       if (stat.size !== entry.size) {
         tools[name] = { available: true, version: null, path: candidatePath, reason: 'incompatible' };
         continue;
