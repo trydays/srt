@@ -3,8 +3,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('srtAPI', {
   openVideo: () => ipcRenderer.invoke('dialog:openVideo'),
   execCommand: (cmd, timeout) => ipcRenderer.invoke('cli:exec', cmd, timeout),
-  installTool: (tool) => ipcRenderer.invoke('tools:install', tool),
-  queryBundledTools: () => ipcRenderer.invoke('tools:queryBundled'),
+  detectEnvironment: () => ipcRenderer.invoke('environment:detect'),
+  describeInstall: (toolId) => ipcRenderer.invoke('installation:describe', toolId),
+  installTool: (toolId, confirmationId) => ipcRenderer.invoke(
+    'installation:execute',
+    { toolId, confirmationId }
+  ),
   queryAIConfig: () => ipcRenderer.invoke('ai:config:query'),
   detectOllama: () => ipcRenderer.invoke('ai:ollama:detect'),
   translateCloud: (text, provider, key, endpoint, model) =>

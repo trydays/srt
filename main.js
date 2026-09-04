@@ -5,9 +5,9 @@ const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 const { loadConfig } = require('./config-loader');
+const { createProductionEnvironment } = require('./src/environment/node-adapter');
 
 let mainWindow = null;
 
@@ -64,159 +64,6 @@ ipcMain.handle('cli:exec', async (_event, cmd, timeout) => {
         if (err) resolve({ ok: false, stdout: (stdout||'').trim(), stderr: (stderr||'').trim(), exitCode: err.code||1 });
         else resolve({ ok: true, stdout: (stdout||'').trim(), stderr: (stderr||'').trim(), exitCode: 0 });
       });
-  });
-});
-
-/* ── 工具安装 ── 复制 bundled 工具到 AppData ── */
-function getAppDataDir() {
-  return path.join(os.homedir(), 'AppData', 'Roaming', 'srt', 'tools');
-}
-
-function getToolsVersionsPath(relative) {
-  var bundled = path.join(__dirname, 'resources', 'tools', 'tools-versions.json');
-  var appdata = path.join(getAppDataDir(), 'tools-versions.json');
-  if (relative === 'bundled') return bundled;
-  if (relative === 'appdata') return appdata;
-  return bundled;
-}
-
-function ensureVCRedist() {
-  var vcPath = path.join(__dirname, 'resources', 'tools', 'VC_redist.x64.exe');
-  if (!fs.existsSync(vcPath)) {
-    console.log('[main] VC++ Redist 不存在，跳过');
-    return;
-  }
-  try {
-    console.log('[main] 正在安装 VC++ Redist...');
-    execSync('"' + vcPath + '" /quiet /norestart', { windowsHide: true, timeout: 300000 });
-    console.log('[main] VC++ Redist 安装完成');
-  } catch (e) {
-    console.error('[main] VC++ Redist 安装失败:', e.message);
-  }
-}
-
-function ensureTools() {
-  var bundledVersions = path.join(__dirname, 'resources', 'tools', 'tools-versions.json');
-  var appdataDir = getAppDataDir();
-  var appdataVersions = path.join(appdataDir, 'tools-versions.json');
-
-  if (!fs.existsSync(bundledVersions)) {
-    console.log('[main] tools-versions.json 不存在，跳过工具安装');
-    return;
-  }
-
-  var versions;
-  try { versions = JSON.parse(fs.readFileSync(bundledVersions, 'utf-8')); }
-  catch (e) { console.error('[main] 解析 tools-versions.json 失败:', e.message); return; }
-
-  if (!fs.existsSync(appdataDir)) fs.mkdirSync(appdataDir, { recursive: true });
-
-  var toolsDir = path.join(__dirname, 'resources', 'tools');
-  var names = Object.keys(versions.bundled);
-  for (var i = 0; i < names.length; i++) {
-    var n = names[i];
-    var info = versions.bundled[n];
-    if (info.size === 0) continue; // 未下载的工具（whisper/vcredist）
-
-    var src = path.join(toolsDir, info.exe);
-    var dst = path.join(appdataDir, info.exe);
-    if (!fs.existsSync(src)) continue;
-
-    // 原子复制：.tmp → rename → size 校验
-    var tmp = dst + '.tmp';
-    try {
-      fs.copyFileSync(src, tmp);
-      var stat = fs.statSync(tmp);
-      if (stat.size === info.size || info.size <= 6) {
-        // size=6 是 dummy marker，表示文件大小未知，直接 rename
-        if (fs.existsSync(dst)) fs.unlinkSync(dst);
-        fs.renameSync(tmp, dst);
-        console.log('[main] 工具已安装: ' + n + ' → ' + dst);
-      } else {
-        fs.unlinkSync(tmp);
-        console.error('[main] 工具大小校验失败: ' + n + ' expected=' + info.size + ' got=' + stat.size);
-      }
-    } catch (e) {
-      console.error('[main] 安装工具失败: ' + n, e.message);
-      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
-    }
-  }
-
-  // 写入 AppData 版本文件
-  try {
-    fs.writeFileSync(appdataVersions, JSON.stringify(versions, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('[main] 写入 AppData tools-versions.json 失败:', e.message);
-  }
-
-  cleanupBundledTools();
-}
-
-function cleanupBundledTools() {
-  var bundledVersions = path.join(__dirname, 'resources', 'tools', 'tools-versions.json');
-  if (!fs.existsSync(bundledVersions)) return;
-  var versions;
-  try { versions = JSON.parse(fs.readFileSync(bundledVersions, 'utf-8')); }
-  catch (e) { return; }
-
-  var toolsDir = path.join(__dirname, 'resources', 'tools');
-  var names = Object.keys(versions.bundled);
-  for (var i = 0; i < names.length; i++) {
-    var n = names[i];
-    var info = versions.bundled[n];
-    if (info.size === 0) continue;
-    var src = path.join(toolsDir, info.exe);
-    try {
-      if (fs.existsSync(src)) {
-        fs.unlinkSync(src);
-        console.log('[main] 已清理 bundled 工具: ' + n);
-      }
-    } catch (e) {
-      console.error('[main] 清理失败: ' + n, e.message);
-    }
-  }
-}
-
-function ensureWhisper() {
-  var whisperDir = path.join(__dirname, 'resources', 'whisper');
-  if (!fs.existsSync(whisperDir)) {
-    console.log('[main] Whisper 模型目录不存在');
-    return;
-  }
-  var appdataWhisper = path.join(os.homedir(), 'AppData', 'Roaming', 'srt', 'whisper');
-  if (fs.existsSync(appdataWhisper)) {
-    console.log('[main] Whisper 模型已在 AppData');
-    return;
-  }
-  // Whisper 预装在包体中，不需要额外操作
-  console.log('[main] Whisper 模型位于 bundled resources/whisper');
-}
-
-/* ── IPC: 查询捆绑工具列表 ── */
-ipcMain.handle('tools:queryBundled', async () => {
-  var fp = getToolsVersionsPath('bundled');
-  if (!fs.existsSync(fp)) return { versions: null, appdataExists: false };
-  try {
-    var versions = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-    var appdataFp = getToolsVersionsPath('appdata');
-    return { versions: versions, appdataExists: fs.existsSync(appdataFp) };
-  } catch (e) {
-    return { versions: null, appdataExists: false, error: e.message };
-  }
-});
-
-/* ── IPC: 手动安装工具 ── */
-ipcMain.handle('tools:install', async (_event, tool) => {
-  return new Promise(function(resolve) {
-    var cmd;
-    if (tool === 'ffmpeg') cmd = 'echo "use bundled ffmpeg"';
-    else if (tool === 'python') cmd = 'echo "use bundled python"';
-    else if (tool === 'node') cmd = 'echo "use bundled node"';
-    else if (tool === 'whisper') cmd = 'echo "whisper is pre-installed"';
-    else { resolve({ ok: false, error: 'Unknown tool: ' + tool }); return; }
-    exec(cmd, { timeout: 10000, windowsHide: true }, function(err, stdout, stderr) {
-      resolve({ ok: !err, stdout: (stdout||'').trim(), stderr: (stderr||'').trim() });
-    });
   });
 });
 
@@ -372,18 +219,34 @@ ipcMain.handle('update:install', async () => {
   }
 });
 
-/* ── 应用生命周期 ── */
-app.whenReady().then(async () => {
-  ensureVCRedist();
-  ensureTools();
-  ensureWhisper();
-  createWindow();
-});
+function startApplication({ environmentModule } = {}) {
+  const userDataDir = app.getPath('userData');
+  const bundledRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'tools')
+    : path.join(__dirname, 'resources', 'tools');
+  const activeEnvironment = environmentModule || createProductionEnvironment({
+    targetPath: userDataDir,
+    userDataDir,
+    bundledRoot
+  });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  ipcMain.handle('environment:detect', () => activeEnvironment.detectEnvironment());
+  ipcMain.handle('installation:describe', (_event, toolId) => activeEnvironment.describeInstall(toolId));
+  ipcMain.handle('installation:execute', (_event, request) => activeEnvironment.installTool(request));
 
-app.on('activate', () => {
-  if (mainWindow === null) createWindow();
-});
+  app.whenReady().then(async () => {
+    createWindow();
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+
+  app.on('activate', () => {
+    if (mainWindow === null) createWindow();
+  });
+}
+
+module.exports = { startApplication };
+
+if (require.main === module) startApplication();
