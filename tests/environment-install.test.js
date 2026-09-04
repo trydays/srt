@@ -82,6 +82,24 @@ test('未知工具和额外请求字段在执行前被拒绝', async () => {
   assert.equal(calls.length, callsBeforeRequest);
 });
 
+test('安装请求必须恰好包含两个字符串字段且不会提前执行', async () => {
+  const { environment, calls } = installFixture('darwin');
+  const plan = await environment.describeInstall('ffmpeg');
+  const invalidRequests = [
+    { confirmationId: plan.confirmationId },
+    { toolId: 'ffmpeg' },
+    { toolId: 42, confirmationId: plan.confirmationId },
+    { toolId: 'ffmpeg', confirmationId: 42 }
+  ];
+
+  for (const request of invalidRequests) {
+    await assert.rejects(() => environment.installTool(request), /请求格式/);
+  }
+
+  assert.equal(calls.filter((call) => call.timeoutMs === 300000).length, 0);
+  assert.equal(calls.length, 1);
+});
+
 test('伪造确认和工具不匹配的确认在执行前被拒绝', async () => {
   const { environment, calls } = installFixture('darwin');
   const plan = await environment.describeInstall('ffmpeg');
@@ -111,6 +129,53 @@ test('缺少平台包管理器时仅返回对应的手动指引', async () => {
   assert.equal(windowsPlan.confirmationId, null);
   assert.match(windowsPlan.summary, /winget/);
   assert.match(windowsPlan.steps.join(' '), /Microsoft Store|应用安装程序/);
+});
+
+test('自动与手动计划都只公开固定的可读字段', async () => {
+  const expectedKeys = [
+    'canAutomate',
+    'confirmationId',
+    'downloadEstimate',
+    'durationEstimate',
+    'installLocation',
+    'steps',
+    'summary',
+    'toolId'
+  ];
+  const automatic = await installFixture('darwin').environment.describeInstall('ffmpeg');
+  const manual = await installFixture('win32', { managerAvailable: false }).environment.describeInstall('whisper');
+
+  assert.deepEqual(Object.keys(automatic).sort(), expectedKeys);
+  assert.deepEqual(Object.keys(manual).sort(), expectedKeys);
+  assert.equal(typeof automatic.confirmationId, 'string');
+  assert.equal(manual.confirmationId, null);
+  for (const plan of [automatic, manual]) {
+    assert.equal(typeof plan.summary, 'string');
+    assert.equal(typeof plan.downloadEstimate, 'string');
+    assert.equal(typeof plan.installLocation, 'string');
+    assert.equal(typeof plan.durationEstimate, 'string');
+    assert.ok(Array.isArray(plan.steps) && plan.steps.length > 0);
+    assert.equal('program' in plan, false);
+    assert.equal('args' in plan, false);
+    assert.equal('arguments' in plan, false);
+    assert.equal('command' in plan, false);
+    assert.equal('actions' in plan, false);
+  }
+});
+
+test('Whisper 首个固定动作失败时不会启动后续动作', async () => {
+  const { environment, calls } = installFixture('darwin', {
+    runAction: async () => {
+      throw new Error('first action failed');
+    }
+  });
+  const plan = await environment.describeInstall('whisper');
+  const result = await environment.installTool({ toolId: 'whisper', confirmationId: plan.confirmationId });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(calls.slice(1), [
+    { program: 'brew', args: ['install', 'python@3.12'], timeoutMs: 300000 }
+  ]);
 });
 
 test('固定动作失败后停止且只返回通用错误', async () => {
