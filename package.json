@@ -8,7 +8,9 @@
     "dev": "electron . --dev",
     "build": "CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_CACHE=./.electron-cache electron-builder",
     "test": "node --test \"tests/*.test.js\"",
-    "test:unit": "node --test \"tests/*.test.js\""
+    "test:unit": "node --test \"tests/*.test.js\"",
+    "test:e2e": "playwright test tests/e2e/environment-flow.spec.js",
+    "test:e2e:real-mac": "SRT_REAL_MAC_SMOKE=1 playwright test tests/e2e/real-mac-smoke.spec.js"
   },
   "license": "MIT",
   "author": "三天remotion",
@@ -38,6 +40,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "electron-updater": "^6.3.9"

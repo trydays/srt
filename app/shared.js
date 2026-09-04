@@ -67,15 +67,12 @@ function closeTab(e, idx) {
   }
 }
 
-/* ── CLI 执行（Electron IPC 优先，fetch 回退）── */
+/* ── CLI 执行（仅 Electron 桌面版）── */
 function cliExec(cmd, timeout, cb) {
-  if (window.electronAPI && window.electronAPI.exec) {
-    window.electronAPI.exec(cmd).then(function(r) { cb(r); })
+  if (window.srtAPI && window.srtAPI.execCommand) {
+    window.srtAPI.execCommand(cmd, timeout).then(function(r) { cb(r); })
       .catch(function(e) { cb({ ok: false, stderr: e.message || 'IPC 错误', exitCode: 1 }); });
   } else {
-    fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd: cmd, timeout: timeout || 15000 }) })
-      .then(function(r) { return r.json(); })
-      .then(cb)
-      .catch(function(e) { cb({ ok: false, stderr: '无法连接本地服务 (server.js :3456)', exitCode: 1 }); });
+    cb({ ok: false, stdout: '', stderr: '请在桌面版执行媒体命令', exitCode: 1 });
   }
 }
