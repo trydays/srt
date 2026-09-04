@@ -43,8 +43,12 @@ function createScenarioDependencies(name) {
   const state = {
     calls: [],
     confirmationCount: 0,
-    ffmpegInstallCount: 0
+    ffmpegInstallCount: 0,
+    nodeInstallCount: 0
   };
+  const windowsNodeDir = 'C:\\Program Files\\nodejs';
+  const windowsNodeExe = `${windowsNodeDir}\\node.exe`;
+  const windowsNpmCli = `${windowsNodeDir}\\node_modules\\npm\\bin\\npm-cli.js`;
 
   function run(program, args) {
     const callArgs = Array.isArray(args) ? args.slice() : [];
@@ -75,7 +79,28 @@ function createScenarioDependencies(name) {
       }
       return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
     }
-    if (program === 'node' && sameArgs(callArgs, ['--version'])) return Promise.resolve(successful('v22.18.0'));
+    if (scenario.platform === 'win32' && program === windowsNodeExe && sameArgs(callArgs, ['--version'])) {
+      if (name === 'windows-npm-missing' && state.nodeInstallCount === 1) {
+        return Promise.resolve(successful('v22.18.0'));
+      }
+      return Promise.reject(commandError('standard Node installation is absent', 'ENOENT'));
+    }
+    if (scenario.platform === 'win32' && program === windowsNodeExe && sameArgs(callArgs, [windowsNpmCli, '--version'])) {
+      if (name === 'windows-npm-missing' && state.nodeInstallCount === 1) {
+        return Promise.resolve(successful('10.9.3'));
+      }
+      return Promise.reject(commandError('standard npm installation is absent', 'ENOENT'));
+    }
+    if (program === 'node' && sameArgs(callArgs, ['--version'])) {
+      if (name === 'windows-npm-missing' && state.nodeInstallCount !== 1) {
+        return Promise.reject(commandError('Node.js is absent', 'ENOENT'));
+      }
+      return Promise.resolve(successful('v22.18.0'));
+    }
+    if (scenario.platform === 'win32' && program === 'cmd.exe' && sameArgs(callArgs, ['/d', '/s', '/c', 'npm', '--version'])) {
+      if (name === 'windows-ready') return Promise.resolve(successful('10.9.3'));
+      return Promise.reject(commandError('npm is absent from inherited PATH', 'ECOMMAND'));
+    }
     if (program === 'npm' && sameArgs(callArgs, ['--version'])) {
       if (name === 'windows-npm-missing') return Promise.reject(commandError('npm is absent', 'ENOENT'));
       return Promise.resolve(successful('10.9.3'));
@@ -111,9 +136,17 @@ function createScenarioDependencies(name) {
     if (program === 'brew' && (
       sameArgs(callArgs, ['install', 'node@20']) || sameArgs(callArgs, ['install', 'python@3.12'])
     )) return Promise.resolve(successful('package installed'));
+    if (program === 'winget' && sameArgs(callArgs, [
+      'install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--accept-package-agreements', '--accept-source-agreements'
+    ])) {
+      state.nodeInstallCount += 1;
+      if (name === 'windows-npm-missing' && state.nodeInstallCount > 1) {
+        return Promise.reject(commandError('Node.js install ran more than once'));
+      }
+      return Promise.resolve(successful('package installed'));
+    }
     if (program === 'winget' && (
       sameArgs(callArgs, ['install', '--id', 'Gyan.FFmpeg', '--exact', '--accept-package-agreements', '--accept-source-agreements']) ||
-      sameArgs(callArgs, ['install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--accept-package-agreements', '--accept-source-agreements']) ||
       sameArgs(callArgs, ['install', '--id', 'Python.Python.3.12', '--exact', '--accept-package-agreements', '--accept-source-agreements'])
     )) return Promise.resolve(successful('package installed'));
     if (program === 'python3.12' && callArgs[0] === '-m' && callArgs[1] === 'venv' && callArgs.length === 3) {
@@ -134,6 +167,7 @@ function createScenarioDependencies(name) {
     arch: scenario.arch,
     targetPath: '/scenario-target',
     userDataDir: '/scenario-user-data',
+    windowsNodeDir: scenario.platform === 'win32' ? windowsNodeDir : null,
     osApi: {
       version: () => scenario.version,
       release: () => scenario.version,

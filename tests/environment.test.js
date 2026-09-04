@@ -19,6 +19,7 @@ function makeFixture(overrides) {
     arch: options.arch || (platform === 'win32' ? 'x64' : 'arm64'),
     targetPath: options.targetPath || (platform === 'win32' ? 'C:\\app-data' : '/app-data'),
     userDataDir: options.userDataDir || (platform === 'win32' ? 'C:\\user-data' : '/user-data'),
+    windowsNodeDir: options.windowsNodeDir,
     osApi: {
       version: () => options.version || 'macOS 15.6',
       release: () => options.release || '24.6.0',
@@ -74,6 +75,9 @@ function macFixture(options) {
 function windowsFixture(options) {
   const settings = options || {};
   const versions = settings.versions || {};
+  const nodeDir = settings.windowsNodeDir || 'C:\\Program Files\\nodejs';
+  const nodeExe = `${nodeDir}\\node.exe`;
+  const npmCli = `${nodeDir}\\node_modules\\npm\\bin\\npm-cli.js`;
   const whisperOutput = settings.whisperVersion
     ? `Name: faster-whisper\nVersion: ${settings.whisperVersion}`
     : settings.whisper ? 'Name: faster-whisper' : Object.assign(commandError('ECOMMAND'), {
@@ -82,9 +86,13 @@ function windowsFixture(options) {
   return makeFixture({
     ...settings,
     platform: 'win32',
+    windowsNodeDir: nodeDir,
     commandResults: {
       'ffmpeg -version': versions.ffmpeg ? `ffmpeg version ${versions.ffmpeg}` : commandError('ENOENT'),
+      [`${nodeExe} --version`]: versions.node ? `v${versions.node}` : commandError('ENOENT'),
+      [`${nodeExe} ${npmCli} --version`]: versions.npm || commandError('ENOENT'),
       'node --version': versions.node ? `v${versions.node}` : commandError('ENOENT'),
+      'cmd.exe /d /s /c npm --version': versions.npm || commandError('ECOMMAND'),
       'npm --version': versions.npm || commandError('ENOENT'),
       'C:\\user-data\\python\\Scripts\\python.exe --version': settings.managedPython ? `Python ${settings.managedPython}` : commandError('ENOENT'),
       'py -3 --version': versions.py ? `Python ${versions.py}` : commandError('ENOENT'),
@@ -132,7 +140,7 @@ test('Windows 优先使用校验通过的捆绑工具', async () => {
   assert.equal(fixture.calls.some((call) => call.program === 'ffmpeg'), false);
 });
 
-test('Windows 校验失败的捆绑工具不会遮蔽可用的系统工具', async () => {
+test('Windows 校验失败的捆绑 FFmpeg、Node 与 Python 不会遮蔽可用的系统工具', async () => {
   const fixture = windowsFixture({
     bundled: {
       ffmpeg: {
@@ -140,16 +148,50 @@ test('Windows 校验失败的捆绑工具不会遮蔽可用的系统工具', asy
         version: null,
         path: 'C:\\bundle\\ffmpeg.exe',
         reason: 'incompatible'
-      }
+      },
+      node: { available: true, version: null, path: 'C:\\bundle\\node.exe', reason: 'incompatible' },
+      python: { available: true, version: null, path: 'C:\\bundle\\python.exe', reason: 'incompatible' }
     },
-    versions: { ffmpeg: '8.0.1' }
+    versions: { ffmpeg: '8.0.1', node: '22.18.0', py: '3.12.9' }
+  });
+  const report = await createEnvironmentModule(fixture).detectEnvironment();
+  for (const toolId of ['ffmpeg', 'node', 'python']) {
+    assert.deepEqual([report.tools[toolId].status, report.tools[toolId].source], ['ready', 'system']);
+  }
+  assert.equal(fixture.calls.some((call) => call.program === 'ffmpeg'), true);
+});
+
+test('Windows 系统候选都失败时保留捆绑 FFmpeg、Node 与 Python 的不兼容状态', async () => {
+  const fixture = windowsFixture({
+    bundled: {
+      ffmpeg: { available: true, version: null, path: 'C:\\bundle\\ffmpeg.exe', reason: 'incompatible' },
+      node: { available: true, version: null, path: 'C:\\bundle\\node.exe', reason: 'incompatible' },
+      python: { available: true, version: null, path: 'C:\\bundle\\python.exe', reason: 'incompatible' }
+    }
+  });
+  const report = await createEnvironmentModule(fixture).detectEnvironment();
+  for (const toolId of ['ffmpeg', 'node', 'python']) {
+    assert.deepEqual(
+      [report.tools[toolId].status, report.tools[toolId].reason, report.tools[toolId].source],
+      ['limited', 'incompatible', 'bundled']
+    );
+  }
+  assert.equal(fixture.calls.some((call) => call.program === 'C:\\bundle\\python.exe'), false);
+});
+
+test('Windows 多个系统候选失败时 probe_error 不会被后续 absent 覆盖', async () => {
+  const nodeExe = 'C:\\Program Files\\nodejs\\node.exe';
+  const fixture = windowsFixture({
+    commandResults: {
+      [`${nodeExe} --version`]: commandError('EACCES'),
+      'node --version': commandError('ENOENT')
+    }
   });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
   assert.deepEqual(
-    [report.tools.ffmpeg.status, report.tools.ffmpeg.source, report.tools.ffmpeg.command],
-    ['ready', 'system', 'ffmpeg']
+    [report.tools.node.status, report.tools.node.reason, report.tools.node.command],
+    ['missing', 'probe_error', nodeExe]
   );
-  assert.equal(fixture.calls.some((call) => call.program === 'ffmpeg'), true);
 });
 
 test('低资源与探测失败有不同 reason，但都不阻止继续', async () => {
@@ -232,6 +274,67 @@ test('Windows 应用管理的 Python 优先于捆绑 Python', async () => {
     ['ready', 'managed', 'C:\\user-data\\python\\Scripts\\python.exe']
   );
   assert.equal(fixture.calls.some((call) => call.program === 'C:\\bundle\\python.exe'), false);
+});
+
+test('Windows 确认 Node 白名单安装后同一环境全量复检可恢复 node 与 npm', async () => {
+  const nodeDir = 'C:\\Program Files\\nodejs';
+  const nodeExe = `${nodeDir}\\node.exe`;
+  const npmCli = `${nodeDir}\\node_modules\\npm\\bin\\npm-cli.js`;
+  const fixture = windowsFixture({
+    windowsNodeDir: nodeDir,
+    versions: { py: '3.12.9' }
+  });
+  const baseRun = fixture.run;
+  let installCount = 0;
+  fixture.run = async (program, args, options) => {
+    const joinedArgs = args.join(' ');
+    if (program === 'winget' && joinedArgs === '--version') {
+      fixture.calls.push({ program, args, options });
+      return 'v1.10.340';
+    }
+    if (program === 'winget' && joinedArgs === 'install --id OpenJS.NodeJS.LTS --exact --accept-package-agreements --accept-source-agreements') {
+      fixture.calls.push({ program, args, options });
+      installCount += 1;
+      return 'installed';
+    }
+    if (program === nodeExe && joinedArgs === '--version') {
+      fixture.calls.push({ program, args, options });
+      if (installCount === 1) return 'v22.18.0';
+      throw commandError('ENOENT');
+    }
+    if (program === nodeExe && args.length === 2 && args[0] === npmCli && args[1] === '--version') {
+      fixture.calls.push({ program, args, options });
+      if (installCount === 1) return '10.9.3';
+      throw commandError('ENOENT');
+    }
+    if (program === 'cmd.exe' && joinedArgs === '/d /s /c npm --version') {
+      fixture.calls.push({ program, args, options });
+      throw commandError('ECOMMAND');
+    }
+    return baseRun(program, args, options);
+  };
+
+  const environment = createEnvironmentModule({ ...fixture, tokenFactory: () => 'node-install' });
+  const before = await environment.detectEnvironment();
+  assert.deepEqual([before.tools.node.status, before.tools.npm.status], ['missing', 'missing']);
+  assert.deepEqual(
+    fixture.calls.find((call) => call.program === 'cmd.exe').args,
+    ['/d', '/s', '/c', 'npm', '--version']
+  );
+
+  const plan = await environment.describeInstall('node');
+  assert.deepEqual(await environment.installTool({ toolId: 'node', confirmationId: plan.confirmationId }), {
+    ok: true,
+    toolId: 'node'
+  });
+
+  const after = await environment.detectEnvironment();
+  assert.deepEqual(
+    [after.tools.node.status, after.tools.node.command, after.tools.npm.status, after.tools.npm.command],
+    ['ready', nodeExe, 'ready', npmCli]
+  );
+  assert.equal(installCount, 1);
+  assert.equal(fixture.calls.filter((call) => call.program === 'winget' && call.args[0] === 'install').length, 1);
 });
 
 test('探测结果区分不兼容、缺失和探测失败且不拒绝报告', async () => {

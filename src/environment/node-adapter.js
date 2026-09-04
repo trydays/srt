@@ -241,11 +241,15 @@ function inspectBundledTools(bundledRoot, platform = process.platform, fsApi = f
 
 function createProductionEnvironment({ targetPath, userDataDir, bundledRoot } = {}) {
   const bundledTools = inspectBundledTools(bundledRoot, process.platform);
+  const windowsNodeDir = process.platform === 'win32'
+    ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs')
+    : null;
   return createEnvironmentModule({
     platform: process.platform,
     arch: process.arch,
     targetPath: targetPath || userDataDir,
     userDataDir,
+    windowsNodeDir,
     osApi: os,
     fsApi: { statfs: fs.promises.statfs.bind(fs.promises) },
     run: createNodeRunner(childProcess.spawn, process.env, process.platform),

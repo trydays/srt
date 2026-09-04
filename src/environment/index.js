@@ -132,24 +132,34 @@ function createEnvironmentModule(dependencies) {
       return null;
     }
     const candidate = bundled[name];
-    if (!candidate || !candidate.available || candidate.reason || typeof candidate.version !== 'string') return null;
+    if (!candidate || !candidate.available) return null;
     return evaluatedTool(candidate.path || name, 'bundled', candidate.version, compatible);
   }
 
   async function probeTool(name, program, args, compatible) {
     const bundled = bundledTool(name, compatible);
-    if (bundled) return bundled;
-    const candidates = Array.isArray(program) ? program : [program];
-    let last = blankTool(candidates[candidates.length - 1], 'system', 'absent');
+    if (bundled && bundled.compatible) return bundled;
+    const candidates = (Array.isArray(program) ? program : [program]).map((candidate) => (
+      typeof candidate === 'string'
+        ? { program: candidate, args, command: candidate }
+        : { program: candidate.program, args: candidate.args, command: candidate.command || candidate.program }
+    ));
+    let installedFallback = bundled || null;
+    let strongestFailure = blankTool(candidates[candidates.length - 1].command, 'system', 'absent');
     for (const candidate of candidates) {
       try {
-        const output = await dependencies.run(candidate, args, runOptions);
-        return evaluatedTool(candidate, 'system', output && output.stdout !== undefined ? output.stdout : output, compatible);
+        const output = await dependencies.run(candidate.program, candidate.args, runOptions);
+        const tool = evaluatedTool(candidate.command, 'system', output && output.stdout !== undefined ? output.stdout : output, compatible);
+        if (tool.compatible) return tool;
+        if (!installedFallback) installedFallback = tool;
       } catch (error) {
-        last = blankTool(candidate, 'system', errorReason(error));
+        const failure = blankTool(candidate.command, 'system', errorReason(error));
+        if (strongestFailure.reason !== 'probe_error' || failure.reason === 'probe_error') {
+          strongestFailure = failure;
+        }
       }
     }
-    return last;
+    return installedFallback || strongestFailure;
   }
 
   async function probePython() {
@@ -178,27 +188,41 @@ function createEnvironmentModule(dependencies) {
           { program: 'python', args: [], source: 'system' }
         ];
 
-    let last = blankTool(candidates[candidates.length - 1].program, 'system', 'absent');
+    let strongestFailure = blankTool(candidates[candidates.length - 1].program, 'system', 'absent');
+    let installedFallback = null;
     for (const candidate of candidates) {
       if (candidate.tool) {
+        if (candidate.tool.compatible) {
+          candidate.tool.prefixArgs = [];
+          return candidate.tool;
+        }
         candidate.tool.prefixArgs = [];
-        return candidate.tool;
+        if (!installedFallback) installedFallback = candidate.tool;
+        continue;
       }
       try {
         const output = await dependencies.run(candidate.program, candidate.args.concat('--version'), runOptions);
         const tool = evaluatedTool(candidate.program, candidate.source, output && output.stdout !== undefined ? output.stdout : output, compatible);
         tool.prefixArgs = candidate.args;
-        return tool;
+        if (tool.compatible) return tool;
+        if (!installedFallback) installedFallback = tool;
       } catch (error) {
-        last = blankTool(candidate.program, candidate.source, errorReason(error));
+        const failure = blankTool(candidate.program, candidate.source, errorReason(error));
+        if (strongestFailure.reason !== 'probe_error' || failure.reason === 'probe_error') {
+          strongestFailure = failure;
+        }
       }
     }
-    last.prefixArgs = [];
-    return last;
+    if (installedFallback) return installedFallback;
+    strongestFailure.prefixArgs = [];
+    return strongestFailure;
   }
 
   async function probeWhisper(python) {
     if (!python.installed) return blankTool(python.command, python.source, python.reason);
+    if (python.source === 'bundled' && !python.compatible) {
+      return blankTool(python.command, python.source, python.reason);
+    }
     try {
       const args = (python.prefixArgs || []).concat(['-m', 'pip', 'show', 'faster-whisper']);
       const output = await dependencies.run(python.command, args, runOptions);
@@ -307,12 +331,23 @@ function createEnvironmentModule(dependencies) {
       disk = { path: dependencies.targetPath, freeGB: null, totalGB: null, status: 'missing', reason: 'probe_error' };
     }
 
+    const isWindows = dependencies.platform === 'win32';
+    const windowsNodeDir = String(dependencies.windowsNodeDir || 'C:\\Program Files\\nodejs').replace(/[\\/]+$/, '');
+    const windowsNodeExe = `${windowsNodeDir}\\node.exe`;
+    const windowsNpmCli = `${windowsNodeDir}\\node_modules\\npm\\bin\\npm-cli.js`;
     const nodePrograms = dependencies.platform === 'darwin'
       ? ['/opt/homebrew/opt/node@20/bin/node', '/usr/local/opt/node@20/bin/node', 'node']
-      : 'node';
+      : isWindows
+        ? [{ program: windowsNodeExe, args: ['--version'] }, 'node']
+        : 'node';
     const npmPrograms = dependencies.platform === 'darwin'
       ? ['/opt/homebrew/opt/node@20/bin/npm', '/usr/local/opt/node@20/bin/npm', 'npm']
-      : 'npm';
+      : isWindows
+        ? [
+            { program: windowsNodeExe, args: [windowsNpmCli, '--version'], command: windowsNpmCli },
+            { program: 'cmd.exe', args: ['/d', '/s', '/c', 'npm', '--version'], command: 'npm' }
+          ]
+        : 'npm';
     const [graphics, ffmpeg, node, npm, python] = await Promise.all([
       probeGraphics(),
       probeTool('ffmpeg', 'ffmpeg', ['-version'], () => true),

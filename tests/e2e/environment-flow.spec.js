@@ -60,13 +60,28 @@ test.describe('Windows ready journey', () => {
 test.describe('Windows missing npm journey', () => {
   test.use({ scenario: 'windows-npm-missing' });
 
-  test('npm 缺失时提供现有的 Node.js 白名单安装方案', async ({ window }) => {
+  test('npm 缺失时确认 Node.js 白名单安装并在全量复检后恢复', async ({ window, readScenarioState }) => {
     const npmRow = window.getByTestId('row-npm');
+    await expect(window.getByTestId('row-node')).toHaveAttribute('data-status', 'missing');
     await expect(npmRow).toHaveAttribute('data-status', 'missing');
     await npmRow.getByRole('button', { name: '查看安装方案' }).click();
     await expect(window.getByTestId('install-dialog')).toBeVisible();
     await expect(window.locator('#installTitle')).toHaveText('安装 Node.js');
     await expect(window.getByTestId('install-dialog')).toContainText('Node.js 将通过 winget 安装');
+    await window.getByTestId('install-confirm').click();
+    await expect(window.getByTestId('install-dialog')).not.toBeVisible();
+    await expect(window.getByTestId('row-node')).toHaveAttribute('data-status', 'ready');
+    await expect(npmRow).toHaveAttribute('data-status', 'ready');
+    await expect(window.getByTestId('mode-remotion')).toHaveAttribute('data-status', 'ready');
+
+    const state = await readScenarioState();
+    const nodeInstalls = state.calls.filter(({ program, args }) =>
+      program === 'winget' && JSON.stringify(args) === JSON.stringify([
+        'install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--accept-package-agreements', '--accept-source-agreements'
+      ]));
+    expect(nodeInstalls).toHaveLength(1);
+    expect(state.installMethodCount).toBe(1);
+    expect(state.detectionCount).toBe(2);
   });
 });
 
