@@ -1,4 +1,4 @@
-const { test, expect } = require('./electron.fixture');
+const { test, expect, E2E_CLOUD_KEY } = require('./electron.fixture');
 
 test.describe('macOS ready', () => {
   test.use({ scenario: 'mac-ready' });
@@ -9,6 +9,19 @@ test.describe('macOS ready', () => {
     await expect(window.getByTestId('row-graphics')).toContainText('Metal');
     await expect(window.getByTestId('row-node')).toHaveAttribute('data-status', 'ready');
     await expect(window.getByTestId('row-python')).toHaveAttribute('data-status', 'ready');
+    await expect.soft(window.locator('#cliBadge')).toHaveText('✅ 可用');
+    await expect.soft(window.locator('#cliBadge')).toHaveClass(/\bok\b/);
+
+    await expect.soft(window.locator('#aiStatusTitle')).toContainText('检测到 1 个可用 AI 配置来源');
+    await expect.soft(window.locator('#aiSourceList')).toContainText('OpenAI API Key (Codex/Cursor 等)');
+    await expect.soft(window.locator('#aiSourceList')).toContainText('✅ 已设置');
+    await expect.soft(window.locator('#aiCollapseBadge')).toHaveText('✅ 已就绪');
+    await expect(window.locator('#aiStatus')).toContainText('当前 Key: ' + E2E_CLOUD_KEY.slice(0, 7) + '... (openai)');
+    await expect(window.locator('body')).not.toContainText(E2E_CLOUD_KEY);
+    const remoteResources = await window.evaluate(() => performance.getEntriesByType('resource')
+      .map((entry) => entry.name)
+      .filter((name) => /^https?:/i.test(name)));
+    expect(remoteResources).toEqual([]);
     await expect(window.getByTestId('continue')).toBeEnabled();
   });
 });

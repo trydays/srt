@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const { test: base, expect, _electron: electron } = require('@playwright/test');
 
+const E2E_CLOUD_KEY = 'sk-e2e-cloud-config-not-a-real-secret';
+
 function errorDetail(error) {
   if (error && error.stack) return error.stack;
   if (error && error.message) return error.message;
@@ -141,7 +143,14 @@ const test = base.extend({
         env: {
           ...process.env,
           SRT_E2E_SCENARIO: scenario,
-          SRT_E2E_USER_DATA: userDataDir
+          SRT_E2E_USER_DATA: userDataDir,
+          ...(scenario === 'mac-ready' ? {
+            PATH: '/usr/bin:/bin',
+            SRT_AI_KEY: E2E_CLOUD_KEY,
+            SRT_AI_PROVIDER: 'openai',
+            SRT_AI_ENDPOINT: 'https://e2e.invalid/v1',
+            SRT_AI_MODEL: 'e2e-model'
+          } : {})
         }
       });
 
@@ -183,5 +192,6 @@ const test = base.extend({
 module.exports = {
   test,
   expect,
+  E2E_CLOUD_KEY,
   __private: { cleanupElectronFixture, registerRendererDiagnostics }
 };

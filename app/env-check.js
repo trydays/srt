@@ -43,6 +43,7 @@ if (!environmentPage) {
   var modeList = document.getElementById('modeList');
   var retryButton = document.getElementById('btnRetry');
   var continueButton = document.getElementById('btnConfirm');
+  var cliBadge = document.getElementById('cliBadge');
   var installDialog = document.getElementById('installDialog');
   var installTitle = document.getElementById('installTitle');
   var installPlan = document.getElementById('installPlan');
@@ -208,6 +209,18 @@ if (!environmentPage) {
     modeList.innerHTML = html;
   }
 
+  function renderLocalModeBadge(report) {
+    var mode = report.modes && report.modes.ffmpeg || {};
+    var status = normalizedStatus(mode.status);
+    var states = {
+      ready: { text: '✅ 可用', className: 'ok' },
+      limited: { text: '⚠️ 可用但受限', className: 'warn' },
+      missing: { text: '❌ 不满足', className: 'bad' }
+    };
+    cliBadge.textContent = states[status].text;
+    cliBadge.className = 'mode-card__badge ' + states[status].className;
+  }
+
   function renderReport(report) {
     var renderedReport = report || {};
     var platform = renderedReport.platform || {};
@@ -219,6 +232,7 @@ if (!environmentPage) {
     renderHardware(renderedReport);
     renderTools(renderedReport);
     renderModes(renderedReport);
+    renderLocalModeBadge(renderedReport);
 
     var statuses = [];
     Object.keys(renderedReport.hardware || {}).forEach(function(key) { statuses.push(normalizedStatus(renderedReport.hardware[key].status)); });
@@ -396,6 +410,29 @@ if (!environmentPage) {
 
   /* ── AI 配置（自动探测）── */
   (function initAIDetection() {
+    function settled(call) {
+      try {
+        return Promise.resolve(call()).then(function(value) {
+          return { ok: true, value: value };
+        }).catch(function() {
+          return { ok: false, value: null };
+        });
+      } catch (_) {
+        return Promise.resolve({ ok: false, value: null });
+      }
+    }
+
+    function validCloudConfig(config) {
+      return Boolean(config && typeof config.provider === 'string' && config.provider.trim() &&
+        typeof config.key === 'string' && config.key.trim());
+    }
+
+    function cloudKeyHint(key) {
+      var value = String(key);
+      var visibleLength = Math.min(7, Math.max(0, value.length - 1));
+      return value.slice(0, visibleLength) + '...';
+    }
+
     function renderSources(detection) {
       var title = document.getElementById('aiStatusTitle');
       var desc = document.getElementById('aiStatusDesc');
@@ -471,17 +508,39 @@ if (!environmentPage) {
     }
 
     // Electron 环境 → IPC 探测
-    if (window.srtAPI && typeof window.srtAPI.detectOllama === 'function' && typeof window.srtAPI.queryAIConfig === 'function') {
-      window.srtAPI.detectOllama().then(function(result) { renderSources({ ollama: result }); })
-      .catch(function() { renderSources(null); });
-      // 同时查询当前配置（key hint）
-      window.srtAPI.queryAIConfig().then(function(config) {
-        if (config && (config.key || config.hasKey)) {
-          var st = document.getElementById('aiStatus');
-          var keyHint = config.keyHint || String(config.key).slice(0, 7) + '...';
-          if (st) st.textContent = '当前 Key: ' + keyHint + ' (' + config.provider + ')';
+    if (window.srtAPI && (typeof window.srtAPI.detectOllama === 'function' || typeof window.srtAPI.queryAIConfig === 'function')) {
+      var ollamaCall = typeof window.srtAPI.detectOllama === 'function'
+        ? settled(function() { return window.srtAPI.detectOllama(); })
+        : Promise.resolve({ ok: false, value: null });
+      var configCall = typeof window.srtAPI.queryAIConfig === 'function'
+        ? settled(function() { return window.srtAPI.queryAIConfig(); })
+        : Promise.resolve({ ok: false, value: null });
+
+      Promise.all([ollamaCall, configCall]).then(function(results) {
+        var ollamaResult = results[0];
+        var configResult = results[1];
+        if (!ollamaResult.ok && !configResult.ok) {
+          renderSources(null);
+          return;
         }
-      }).catch(function(){});
+
+        var detection = {};
+        if (ollamaResult.ok) detection.ollama = ollamaResult.value;
+        var config = configResult.ok ? configResult.value : null;
+        if (validCloudConfig(config)) {
+          if (config.provider.toLowerCase() === 'anthropic') {
+            detection.claudeCredentials = { available: true };
+          } else {
+            detection.openaiCredentials = { available: true };
+          }
+        }
+        renderSources(detection);
+
+        if (validCloudConfig(config)) {
+          var st = document.getElementById('aiStatus');
+          if (st) st.textContent = '当前 Key: ' + cloudKeyHint(config.key) + ' (' + config.provider + ')';
+        }
+      });
     } else {
       // 非 Electron → 手动模式
       renderSources(null);
