@@ -57,6 +57,19 @@ test.describe('Windows ready journey', () => {
   });
 });
 
+test.describe('Windows missing npm journey', () => {
+  test.use({ scenario: 'windows-npm-missing' });
+
+  test('npm 缺失时提供现有的 Node.js 白名单安装方案', async ({ window }) => {
+    const npmRow = window.getByTestId('row-npm');
+    await expect(npmRow).toHaveAttribute('data-status', 'missing');
+    await npmRow.getByRole('button', { name: '查看安装方案' }).click();
+    await expect(window.getByTestId('install-dialog')).toBeVisible();
+    await expect(window.locator('#installTitle')).toHaveText('安装 Node.js');
+    await expect(window.getByTestId('install-dialog')).toContainText('Node.js 将通过 winget 安装');
+  });
+});
+
 test.describe('missing FFmpeg journey', () => {
   test.use({ scenario: 'mac-missing' });
 

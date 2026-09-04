@@ -100,6 +100,8 @@ test('Node runner always uses an argument array and shell false', async () => {
   assert.equal(calls[0].options.shell, false);
   assert.match(calls[0].options.env.PATH, /\/opt\/homebrew\/bin/);
   assert.match(calls[0].options.env.PATH, /\/usr\/local\/bin/);
+  assert.match(calls[0].options.env.PATH, /\/opt\/homebrew\/opt\/node@20\/bin/);
+  assert.match(calls[0].options.env.PATH, /\/usr\/local\/opt\/node@20\/bin/);
 });
 
 test('Node runner maps missing programs and command failures to probe reasons', async () => {

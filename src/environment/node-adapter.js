@@ -29,7 +29,12 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
     if (platform === 'darwin') {
       const existing = env[pathKey] || '';
       const entries = existing.split(':').filter(Boolean);
-      for (const entry of ['/opt/homebrew/bin', '/usr/local/bin']) {
+      for (const entry of [
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/usr/local/opt/node@20/bin',
+        '/opt/homebrew/opt/node@20/bin'
+      ]) {
         if (!entries.includes(entry)) entries.unshift(entry);
       }
       env[pathKey] = entries.join(':');

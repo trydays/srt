@@ -24,6 +24,10 @@ function createScenarioDependencies(name) {
       platform: 'win32', arch: 'x64', version: '10.0.26100', chip: 'AMD Ryzen 9 9950X', cores: 16,
       memoryGB: 32, diskFreeGB: 240, diskTotalGB: 953, graphics: 'ready'
     },
+    'windows-npm-missing': {
+      platform: 'win32', arch: 'x64', version: '10.0.26100', chip: 'AMD Ryzen 9 9950X', cores: 16,
+      memoryGB: 32, diskFreeGB: 240, diskTotalGB: 953, graphics: 'ready'
+    },
     'mac-missing': {
       platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
       memoryGB: 24, diskFreeGB: 180, diskTotalGB: 494, graphics: 'ready'
@@ -72,7 +76,10 @@ function createScenarioDependencies(name) {
       return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
     }
     if (program === 'node' && sameArgs(callArgs, ['--version'])) return Promise.resolve(successful('v22.18.0'));
-    if (program === 'npm' && sameArgs(callArgs, ['--version'])) return Promise.resolve(successful('10.9.3'));
+    if (program === 'npm' && sameArgs(callArgs, ['--version'])) {
+      if (name === 'windows-npm-missing') return Promise.reject(commandError('npm is absent', 'ENOENT'));
+      return Promise.resolve(successful('10.9.3'));
+    }
 
     const managedMacPython = scenario.platform === 'darwin' && /\/python\/bin\/python$/.test(program);
     const managedWindowsPython = scenario.platform === 'win32' && /\\python\\Scripts\\python\.exe$/.test(program);

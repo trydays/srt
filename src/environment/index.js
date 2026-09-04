@@ -84,6 +84,14 @@ function createEnvironmentModule(dependencies) {
     return error && error.code === 'ENOENT' ? 'absent' : 'probe_error';
   }
 
+  function whisperErrorReason(error) {
+    if (errorReason(error) === 'absent') return 'absent';
+    const output = `${error && error.stdout || ''}\n${error && error.stderr || ''}`;
+    return error && error.code === 'ECOMMAND' && /Package\(s\) not found:\s*[^\r\n]*\bfaster-whisper\b/i.test(output)
+      ? 'absent'
+      : 'probe_error';
+  }
+
   function blankTool(command, source, reason) {
     return {
       installed: false,
@@ -124,38 +132,61 @@ function createEnvironmentModule(dependencies) {
       return null;
     }
     const candidate = bundled[name];
-    if (!candidate || !candidate.available) return null;
+    if (!candidate || !candidate.available || candidate.reason || typeof candidate.version !== 'string') return null;
     return evaluatedTool(candidate.path || name, 'bundled', candidate.version, compatible);
   }
 
   async function probeTool(name, program, args, compatible) {
     const bundled = bundledTool(name, compatible);
     if (bundled) return bundled;
-    try {
-      const output = await dependencies.run(program, args, runOptions);
-      return evaluatedTool(program, 'system', output && output.stdout !== undefined ? output.stdout : output, compatible);
-    } catch (error) {
-      return blankTool(program, 'system', errorReason(error));
+    const candidates = Array.isArray(program) ? program : [program];
+    let last = blankTool(candidates[candidates.length - 1], 'system', 'absent');
+    for (const candidate of candidates) {
+      try {
+        const output = await dependencies.run(candidate, args, runOptions);
+        return evaluatedTool(candidate, 'system', output && output.stdout !== undefined ? output.stdout : output, compatible);
+      } catch (error) {
+        last = blankTool(candidate, 'system', errorReason(error));
+      }
     }
+    return last;
   }
 
   async function probePython() {
     const isWindows = dependencies.platform === 'win32';
+    const compatible = (version) => {
+      const [major, minor] = version.split('.').map(Number);
+      return major === 3 && minor === 12;
+    };
     const managed = isWindows
       ? `${dependencies.userDataDir}\\python\\Scripts\\python.exe`
       : `${dependencies.userDataDir}/python/bin/python`;
+    const bundled = isWindows ? bundledTool('python', compatible) : null;
     const candidates = isWindows
-      ? [{ program: managed, args: [], source: 'managed' }, { program: 'py', args: ['-3'], source: 'system' }, { program: 'python', args: [], source: 'system' }]
-      : [{ program: managed, args: [], source: 'managed' }, { program: 'python3', args: [], source: 'system' }, { program: 'python', args: [], source: 'system' }];
+      ? [
+          { program: managed, args: [], source: 'managed' },
+          ...(bundled ? [{ tool: bundled }] : []),
+          { program: 'py', args: ['-3'], source: 'system' },
+          { program: 'python', args: [], source: 'system' }
+        ]
+      : [
+          { program: managed, args: [], source: 'managed' },
+          { program: '/opt/homebrew/opt/python@3.12/bin/python3.12', args: [], source: 'system' },
+          { program: '/usr/local/opt/python@3.12/bin/python3.12', args: [], source: 'system' },
+          { program: 'python3.12', args: [], source: 'system' },
+          { program: 'python3', args: [], source: 'system' },
+          { program: 'python', args: [], source: 'system' }
+        ];
 
     let last = blankTool(candidates[candidates.length - 1].program, 'system', 'absent');
     for (const candidate of candidates) {
+      if (candidate.tool) {
+        candidate.tool.prefixArgs = [];
+        return candidate.tool;
+      }
       try {
         const output = await dependencies.run(candidate.program, candidate.args.concat('--version'), runOptions);
-        const tool = evaluatedTool(candidate.program, candidate.source, output && output.stdout !== undefined ? output.stdout : output, (version) => {
-          const [major, minor] = version.split('.').map(Number);
-          return major === 3 && minor === 12;
-        });
+        const tool = evaluatedTool(candidate.program, candidate.source, output && output.stdout !== undefined ? output.stdout : output, compatible);
         tool.prefixArgs = candidate.args;
         return tool;
       } catch (error) {
@@ -187,7 +218,7 @@ function createEnvironmentModule(dependencies) {
         reason: compatible ? 'ok' : 'incompatible'
       };
     } catch (error) {
-      return blankTool(python.command, python.source, errorReason(error));
+      return blankTool(python.command, python.source, whisperErrorReason(error));
     }
   }
 
@@ -276,11 +307,17 @@ function createEnvironmentModule(dependencies) {
       disk = { path: dependencies.targetPath, freeGB: null, totalGB: null, status: 'missing', reason: 'probe_error' };
     }
 
+    const nodePrograms = dependencies.platform === 'darwin'
+      ? ['/opt/homebrew/opt/node@20/bin/node', '/usr/local/opt/node@20/bin/node', 'node']
+      : 'node';
+    const npmPrograms = dependencies.platform === 'darwin'
+      ? ['/opt/homebrew/opt/node@20/bin/npm', '/usr/local/opt/node@20/bin/npm', 'npm']
+      : 'npm';
     const [graphics, ffmpeg, node, npm, python] = await Promise.all([
       probeGraphics(),
       probeTool('ffmpeg', 'ffmpeg', ['-version'], () => true),
-      probeTool('node', 'node', ['--version'], (version) => versionAtLeast(version, 20, 0)),
-      probeTool('npm', 'npm', ['--version'], () => true),
+      probeTool('node', nodePrograms, ['--version'], (version) => versionAtLeast(version, 20, 0)),
+      probeTool('npm', npmPrograms, ['--version'], () => true),
       probePython()
     ]);
     const whisper = await probeWhisper(python);

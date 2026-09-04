@@ -31,7 +31,7 @@ if (!environmentPage) {
     { id: 'remotion', label: 'Remotion 渲染', description: '程序化视频渲染' },
     { id: 'subtitles', label: '语音字幕', description: '语音识别与字幕生成' }
   ];
-  var INSTALLABLE_TOOLS = { ffmpeg: true, node: true, python: true, whisper: true };
+  var INSTALL_TARGETS = { ffmpeg: 'ffmpeg', node: 'node', npm: 'node', python: 'python', whisper: 'whisper' };
   var detectionGeneration = 0;
   var pendingInstall = null;
 
@@ -173,9 +173,10 @@ if (!environmentPage) {
       if (!detailParts.length) detailParts.push(reasonLabel(tool.reason));
 
       var action = '<span class="tool-row__action"></span>';
-      if (INSTALLABLE_TOOLS[definition.id] && status !== 'ready') {
+      var installTarget = INSTALL_TARGETS[definition.id];
+      if (installTarget && status !== 'ready') {
         action = '<span class="tool-row__action"><button class="btn-install" type="button" ' +
-          'data-tool-id="' + definition.id + '">查看安装方案</button></span>';
+          'data-tool-id="' + installTarget + '">查看安装方案</button></span>';
       }
 
       html += '<div class="tool-row" data-testid="row-' + definition.id + '" data-status="' + status + '">' +
@@ -324,7 +325,7 @@ if (!environmentPage) {
   }
 
   function openInstallPlan(toolId) {
-    if (!INSTALLABLE_TOOLS[toolId] || !window.srtAPI || typeof window.srtAPI.describeInstall !== 'function') return;
+    if (!INSTALL_TARGETS[toolId] || !window.srtAPI || typeof window.srtAPI.describeInstall !== 'function') return;
     var request = { toolId: toolId, plan: null };
     pendingInstall = request;
     installTitle.textContent = '安装 ' + installToolLabel(toolId);
