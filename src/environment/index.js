@@ -1,5 +1,73 @@
 function createEnvironmentModule(dependencies) {
   const runOptions = { timeout: 5000, maxBuffer: 1024 * 1024 };
+  const installRunOptions = { timeoutMs: 300000 };
+  const confirmations = new Map();
+
+  function installationCatalog() {
+    const managedPython = dependencies.platform === 'win32'
+      ? `${dependencies.userDataDir}\\python\\Scripts\\python.exe`
+      : `${dependencies.userDataDir}/python/bin/python`;
+    const managedDirectory = dependencies.platform === 'win32'
+      ? `${dependencies.userDataDir}\\python`
+      : `${dependencies.userDataDir}/python`;
+    const wingetAgreements = ['--exact', '--accept-package-agreements', '--accept-source-agreements'];
+    const pipPackages = ['-m', 'pip', 'install', 'faster-whisper', 'soundfile', 'numpy'];
+
+    return {
+      darwin: {
+        ffmpeg: {
+          label: 'FFmpeg', downloadEstimate: '约 100–200 MB', installLocation: '由 Homebrew 管理', durationEstimate: '约 2–10 分钟',
+          steps: ['通过 Homebrew 下载并安装 FFmpeg。'],
+          actions: [{ program: 'brew', args: ['install', 'ffmpeg'] }]
+        },
+        node: {
+          label: 'Node.js', downloadEstimate: '约 50 MB', installLocation: '由 Homebrew 管理', durationEstimate: '约 1–5 分钟',
+          steps: ['通过 Homebrew 下载并安装 Node.js 20。'],
+          actions: [{ program: 'brew', args: ['install', 'node@20'] }]
+        },
+        python: {
+          label: 'Python', downloadEstimate: '约 100 MB', installLocation: '由 Homebrew 管理', durationEstimate: '约 1–5 分钟',
+          steps: ['通过 Homebrew 下载并安装 Python 3.12。'],
+          actions: [{ program: 'brew', args: ['install', 'python@3.12'] }]
+        },
+        whisper: {
+          label: 'Whisper', downloadEstimate: '约 1.5 GB', installLocation: '应用管理的 Python 环境', durationEstimate: '约 5–20 分钟',
+          steps: ['确保 Python 3.12 可用。', '创建应用专用的隔离 Python 环境。', '在隔离环境中安装语音识别依赖。'],
+          actions: [
+            { program: 'brew', args: ['install', 'python@3.12'] },
+            { program: 'python3.12', args: ['-m', 'venv', managedDirectory] },
+            { program: managedPython, args: pipPackages }
+          ]
+        }
+      },
+      win32: {
+        ffmpeg: {
+          label: 'FFmpeg', downloadEstimate: '约 100–200 MB', installLocation: '由 Windows 包管理器管理', durationEstimate: '约 2–10 分钟',
+          steps: ['通过 Windows 包管理器下载并安装 FFmpeg。'],
+          actions: [{ program: 'winget', args: ['install', '--id', 'Gyan.FFmpeg', ...wingetAgreements] }]
+        },
+        node: {
+          label: 'Node.js', downloadEstimate: '约 50 MB', installLocation: '由 Windows 包管理器管理', durationEstimate: '约 1–5 分钟',
+          steps: ['通过 Windows 包管理器下载并安装 Node.js LTS。'],
+          actions: [{ program: 'winget', args: ['install', '--id', 'OpenJS.NodeJS.LTS', ...wingetAgreements] }]
+        },
+        python: {
+          label: 'Python', downloadEstimate: '约 100 MB', installLocation: '由 Windows 包管理器管理', durationEstimate: '约 1–5 分钟',
+          steps: ['通过 Windows 包管理器下载并安装 Python 3.12。'],
+          actions: [{ program: 'winget', args: ['install', '--id', 'Python.Python.3.12', ...wingetAgreements] }]
+        },
+        whisper: {
+          label: 'Whisper', downloadEstimate: '约 1.5 GB', installLocation: '应用管理的 Python 环境', durationEstimate: '约 5–20 分钟',
+          steps: ['确保 Python 3.12 可用。', '创建应用专用的隔离 Python 环境。', '在隔离环境中安装语音识别依赖。'],
+          actions: [
+            { program: 'winget', args: ['install', '--id', 'Python.Python.3.12', ...wingetAgreements] },
+            { program: 'py', args: ['-3.12', '-m', 'venv', managedDirectory] },
+            { program: managedPython, args: pipPackages }
+          ]
+        }
+      }
+    };
+  }
 
   function versionFrom(output) {
     const match = String(output || '').match(/(?:^|[^0-9])(\d+)\.(\d+)(?:\.(\d+))?/);
@@ -226,7 +294,78 @@ function createEnvironmentModule(dependencies) {
     };
   }
 
-  return { detectEnvironment };
+  function requestedInstallation(toolId) {
+    if (typeof toolId !== 'string') throw new Error('不支持的工具');
+    const catalog = installationCatalog();
+    const platformCatalog = catalog[dependencies.platform];
+    if (!platformCatalog || !Object.prototype.hasOwnProperty.call(platformCatalog, toolId)) {
+      throw new Error('不支持的工具');
+    }
+    return platformCatalog[toolId];
+  }
+
+  async function describeInstall(toolId) {
+    const installation = requestedInstallation(toolId);
+    const isWindows = dependencies.platform === 'win32';
+    const manager = isWindows ? 'winget' : 'brew';
+    let canAutomate = true;
+    try {
+      await dependencies.run(manager, ['--version'], { timeoutMs: 5000 });
+    } catch (_) {
+      canAutomate = false;
+    }
+
+    let confirmationId = null;
+    if (canAutomate) {
+      confirmationId = dependencies.tokenFactory();
+      if (typeof confirmationId !== 'string' || !confirmationId) throw new Error('无法创建安装确认');
+      confirmations.set(confirmationId, { toolId, used: false });
+    }
+
+    const managerName = isWindows ? 'winget' : 'Homebrew';
+    const manualSteps = isWindows
+      ? ['请从 Microsoft Store 安装“应用安装程序”以启用 winget。', '安装完成后返回并重新检查环境。']
+      : ['请访问 Homebrew 官方网站 https://brew.sh/ 并按官方说明安装。', '安装完成后返回并重新检查环境。'];
+    return {
+      toolId,
+      canAutomate,
+      summary: canAutomate
+        ? `${installation.label} 将通过 ${managerName} 安装。`
+        : `未检测到 ${managerName}，无法自动安装 ${installation.label}。`,
+      downloadEstimate: installation.downloadEstimate,
+      installLocation: installation.installLocation,
+      durationEstimate: installation.durationEstimate,
+      steps: canAutomate ? installation.steps.slice() : manualSteps,
+      confirmationId
+    };
+  }
+
+  async function installTool(request) {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('安装请求格式无效');
+    const keys = Object.keys(request).sort();
+    if (keys.length !== 2 || keys[0] !== 'confirmationId' || keys[1] !== 'toolId' ||
+        typeof request.toolId !== 'string' || typeof request.confirmationId !== 'string') {
+      throw new Error('安装请求格式无效');
+    }
+
+    const installation = requestedInstallation(request.toolId);
+    const confirmation = confirmations.get(request.confirmationId);
+    if (!confirmation) throw new Error('安装确认无效');
+    if (confirmation.used) throw new Error('安装确认已使用');
+    if (confirmation.toolId !== request.toolId) throw new Error('安装确认与工具不匹配');
+    confirmation.used = true;
+
+    try {
+      for (const action of installation.actions) {
+        await dependencies.run(action.program, action.args.slice(), installRunOptions);
+      }
+      return { ok: true, toolId: request.toolId };
+    } catch (_) {
+      return { ok: false, error: '安装失败，请稍后重试。' };
+    }
+  }
+
+  return { detectEnvironment, describeInstall, installTool };
 }
 
 module.exports = { createEnvironmentModule };
