@@ -36,14 +36,14 @@ test('CLI 参数覆盖环境变量', () => {
   assert.strictEqual(result.provider, 'deepseek');
 });
 
-test('parseConfigFile 正确解析 JSON 配置文件', () => {
-  var tmpDir = os.tmpdir();
+test('parseConfigFile 正确解析 JSON 配置文件', (t) => {
+  var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'srt-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   var fp = path.join(tmpDir, '.srt.config.json');
   fs.writeFileSync(fp, JSON.stringify({ ai: { key: 'sk-cfg', provider: 'openai' } }), 'utf-8');
   var result = parseConfigFile(tmpDir);
   assert.strictEqual(result.key, 'sk-cfg');
   assert.strictEqual(result.provider, 'openai');
-  fs.unlinkSync(fp);
 });
 
 test('parseConfigFile 文件不存在时返回空对象', () => {
@@ -51,14 +51,14 @@ test('parseConfigFile 文件不存在时返回空对象', () => {
   assert.deepStrictEqual(result, {});
 });
 
-test('parseEnvFile 正确解析 .env 文件', () => {
-  var tmpDir = os.tmpdir();
+test('parseEnvFile 正确解析 .env 文件', (t) => {
+  var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'srt-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   var fp = path.join(tmpDir, '.env');
   fs.writeFileSync(fp, 'SRT_AI_KEY=sk-dotenv\nSRT_AI_PROVIDER=deepseek\n', 'utf-8');
   var result = parseEnvFile(tmpDir);
   assert.strictEqual(result.key, 'sk-dotenv');
   assert.strictEqual(result.provider, 'deepseek');
-  fs.unlinkSync(fp);
 });
 
 test('loadConfig 无配置时返回 null', () => {
@@ -75,14 +75,14 @@ test('loadConfig 只有 key 时自动补全 provider/endpoint/model', () => {
   assert.ok(result.model);
 });
 
-test('parseEnvFile 自动去掉值两端的引号', () => {
-  var tmpDir = os.tmpdir();
+test('parseEnvFile 自动去掉值两端的引号', (t) => {
+  var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'srt-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   var fp = path.join(tmpDir, '.env');
   fs.writeFileSync(fp, 'SRT_AI_KEY="sk-quoted"\nSRT_AI_PROVIDER=\'deepseek\'\n', 'utf-8');
   var result = parseEnvFile(tmpDir);
   assert.strictEqual(result.key, 'sk-quoted');
   assert.strictEqual(result.provider, 'deepseek');
-  fs.unlinkSync(fp);
 });
 
 test('parseClaudeCredentials 文件不存在时返回空对象', () => {
@@ -90,20 +90,20 @@ test('parseClaudeCredentials 文件不存在时返回空对象', () => {
   assert.deepStrictEqual(result, {});
 });
 
-test('parseClaudeCredentials 无 accessToken 字段时返回空对象', () => {
-  var tmpDir = os.tmpdir();
+test('parseClaudeCredentials 无 accessToken 字段时返回空对象', (t) => {
+  var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'srt-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   var claudeDir = path.join(tmpDir, '.claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   var fp = path.join(claudeDir, 'credentials.json');
   fs.writeFileSync(fp, JSON.stringify({ otherField: 'test' }), 'utf-8');
   var result = parseClaudeCredentials(tmpDir);
   assert.deepStrictEqual(result, {});
-  fs.unlinkSync(fp);
-  fs.rmdirSync(claudeDir);
 });
 
-test('parseClaudeCredentials 正确读取 ~/.claude/credentials.json', () => {
-  var tmpDir = os.tmpdir();
+test('parseClaudeCredentials 正确读取 ~/.claude/credentials.json', (t) => {
+  var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'srt-config-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   var claudeDir = path.join(tmpDir, '.claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   var fp = path.join(claudeDir, 'credentials.json');
@@ -111,6 +111,4 @@ test('parseClaudeCredentials 正确读取 ~/.claude/credentials.json', () => {
   var result = parseClaudeCredentials(tmpDir);
   assert.strictEqual(result.key, 'test-token-123');
   assert.strictEqual(result.provider, 'anthropic');
-  fs.unlinkSync(fp);
-  fs.rmdirSync(claudeDir);
 });

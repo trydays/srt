@@ -6,7 +6,9 @@
   "scripts": {
     "start": "npx electron .",
     "dev": "npx electron . --dev",
-    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_CACHE=./.electron-cache electron-builder"
+    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_CACHE=./.electron-cache electron-builder",
+    "test": "node --test \"tests/*.test.js\"",
+    "test:unit": "node --test \"tests/*.test.js\""
   },
   "license": "MIT",
   "author": "三天remotion",
