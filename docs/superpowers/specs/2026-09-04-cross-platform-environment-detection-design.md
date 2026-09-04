@@ -23,6 +23,18 @@ SRTP 当前的环境检测页主要按 Windows 编写：磁盘列表是静态的
 - 本轮不重写视频时间轴、AI 翻译或导出算法。
 - 本轮不自动安装 Homebrew，也不使用 `sudo`。
 - 本轮不把 CUDA 设为 Windows 的硬性要求，也不把独立显卡设为 macOS 的硬性要求。
+- 本轮不重写桌面端现有的媒体命令执行链。
+- 本轮不建设通用安装平台、极端并发/恢复机制、新 CI 矩阵或 macOS 签名发布链。
+
+## 本阶段范围冻结
+
+1. **唯一目的**：让 SRTP 在 Windows 与 macOS 上正确展示剪辑必要环境，并以受限安装流程补齐缺失工具。
+2. **可见成果**：真实 Electron 页面可查看当前设备，可查看/取消/确认安装计划，并能继续进入主页和编辑器。
+3. **明确不做**：不借机重写编辑器、媒体执行、AI 翻译、更新、构建发布或通用基础设施。
+4. **工作上限**：实施限为六个纵向切片，只新增一个核心环境模块、一个 Node 适配器和必要的测试支架；任一支撑切片超过两倍预估就停止并报告。
+5. **立即结束条件**：下方验收标准全部通过后即结束，不再因“还可以更完善”继续扩展。
+
+新需求只在“不做则无法验收”、“不做会带来现实安全/数据损失”或“用户了解成本后明确批准”时进入本阶段，否则记入延期清单。
 
 ## 产品行为
 
@@ -33,9 +45,11 @@ SRTP 当前的环境检测页主要按 Windows 编写：磁盘列表是静态的
 - 操作系统名称、版本与架构。
 - 芯片或 CPU 型号、逻辑核心数。
 - 总内存。
-- 当前工作目录所在磁盘的总量与可用空间。
+- 应用数据目录所在磁盘的总量与可用空间；未来打开具体项目后，可优先显示项目目录所在磁盘。
 - macOS 的 Metal 支持与 Apple Silicon/Intel 类型。
 - Windows 的 GPU 名称；CUDA 只作为可选加速能力展示。
+
+每项同时包含三级 `status` 与机器可读的 `reason`。`reason` 用于区分 `absent`、`incompatible`、`probe_error` 和 `unsupported`；页面不会把检测失败误写成未安装。芯片不按核心数设置门槛，只根据架构是否受支持提示。
 
 默认等级规则：
 
@@ -54,23 +68,20 @@ SRTP 当前的环境检测页主要按 Windows 编写：磁盘列表是静态的
 - Remotion 渲染要求 Node.js 20 及以上与 npm。
 - Whisper 字幕要求受支持的 Python 3 与 `faster-whisper`；优先建议项目管理的 Python 3.12 环境，不把系统 Python 当作唯一选择。
 - AI 配置与 Ollama 均为可选能力，不降低基础模式的可用等级。
-- macOS 同时识别 `python3` 与 `python`，优先使用 `python3`；Windows 同时识别 `py -3` 与 `python`。
+- 若应用管理的 Python 环境存在则优先使用；否则 macOS 依次识别 `python3` 与 `python`，Windows 依次识别 `py -3` 与 `python`。Whisper 必须使用同一个已选 Python 进行探测。
 - Electron 进程显式补充常见 Homebrew 路径，包括 Apple Silicon 的 `/opt/homebrew/bin` 与 Intel Mac 的 `/usr/local/bin`，避免图形应用没有继承登录 shell PATH 时误报。
 
 页面先展示硬件概览，再展示三种功能模式的就绪状态。单个工具缺失时，文案直接说明受影响的功能，而不是把整台设备判定为不可用。
+
+三种功能模式只是能力状态，不新增选择或存储字段；现有 `cli`/`browser` 选择器及 `RENDER_MODE` 保持原行为。
 
 ## 架构
 
 ### 统一检测核心
 
-新增独立的 CommonJS 环境模块，由 Electron 主进程和安全的开发服务器适配层共同调用。模块包含四个职责清晰的单元：
+新增一个深模块，对调用者只暴露 `detectEnvironment()`、`describeInstall(toolId)` 和 `installTool({ toolId, confirmationId })` 三个方法。系统采集、工具探测、三档评估和一次性确认都留在该模块内部，不拆成一组浅层转发模块。
 
-1. 系统采集器：读取操作系统、CPU、内存、磁盘和 GPU/Metal 信息。
-2. 工具探测器：以参数数组运行固定探测程序，解析版本并返回结构化结果。
-3. 就绪度评估器：将原始数据映射为三级状态和模式可用性。
-4. 安装服务：根据平台和工具标识生成安装计划，并在确认后执行白名单动作。
-
-所有系统调用都通过可注入的执行器边界完成。测试使用固定夹具替代真实系统命令，但不模拟模块内部协作。
+另有一个 Node 适配器负责真实 `os`/文件系统/进程调用。核心模块只接收注入的系统边界；测试替换最外层边界，但必须穿过真实检测、评估和安装实现。
 
 ### 公共数据契约
 
@@ -80,23 +91,24 @@ SRTP 当前的环境检测页主要按 Windows 编写：磁盘列表是静态的
 {
   platform: { os: 'darwin', version: '15.6', arch: 'arm64' },
   hardware: {
-    chip: { name: 'Apple M-series', cores: 10, status: 'ready' },
-    memory: { totalGB: 16, status: 'ready', message: '' },
-    disk: { path: '/project', freeGB: 177, totalGB: 460, status: 'ready' },
-    graphics: { name: 'Apple GPU', metal: true, status: 'ready' }
+    chip: { name: 'Apple M-series', cores: 10, status: 'ready', reason: 'ok' },
+    memory: { totalGB: 16, status: 'ready', reason: 'ok', message: '' },
+    disk: { path: '/app-data', freeGB: 177, totalGB: 460, status: 'ready', reason: 'ok' },
+    graphics: { name: 'Apple GPU', metal: true, status: 'ready', reason: 'ok' }
   },
   tools: {
-    ffmpeg: { installed: true, version: '8.0.1', status: 'ready' },
-    node: { installed: true, version: '26.4.0', status: 'ready' },
-    npm: { installed: true, version: '11.17.0', status: 'ready' },
-    python: { installed: true, command: 'python3', version: '3.14.6', status: 'limited' },
-    whisper: { installed: false, status: 'missing' }
+    ffmpeg: { installed: true, version: '8.0.1', status: 'ready', reason: 'ok' },
+    node: { installed: true, version: '26.4.0', status: 'ready', reason: 'ok' },
+    npm: { installed: true, version: '11.17.0', status: 'ready', reason: 'ok' },
+    python: { installed: true, command: 'python3', version: '3.14.6', status: 'limited', reason: 'incompatible' },
+    whisper: { installed: false, status: 'missing', reason: 'absent' }
   },
   modes: {
-    ffmpeg: { status: 'ready', blockers: [] },
-    remotion: { status: 'ready', blockers: [] },
-    subtitles: { status: 'limited', blockers: ['whisper'] }
-  }
+    ffmpeg: { status: 'ready', reason: 'ok', blockers: [] },
+    remotion: { status: 'ready', reason: 'ok', blockers: [] },
+    subtitles: { status: 'limited', reason: 'absent', blockers: ['whisper'] }
+  },
+  canContinue: true
 }
 ```
 
@@ -117,7 +129,7 @@ installTool(toolId, confirmationId)
 - `installTool(toolId, confirmationId)` 在主进程再次校验平台、工具白名单和确认标识后执行固定动作。
 - 页面永远不能把命令字符串传给安装接口。
 
-已有视频渲染能力不得复用安装接口。开发服务器绑定 `127.0.0.1`，环境检测改用专用只读端点，安装端点沿用同一白名单服务；删除环境页对 `/api/exec` 的依赖。通用命令执行接口不再用于环境检测或安装，并从开发服务器公共 API 中移除。若编辑器仍需要执行 FFmpeg，应使用独立的媒体执行边界，只接受允许的程序与参数，不经过 shell。
+已有视频渲染能力不得复用安装接口。环境页不再依赖 `/api/exec`；开发服务器改为只绑定 `127.0.0.1` 并移除公开的 `/api/exec` 与 `/api/install`。浏览器预览不再执行本机命令；桌面端现有媒体执行链暂作为兼容路径保留，后续作为独立安全任务处理。
 
 ## 白名单安装流程
 
@@ -125,8 +137,8 @@ installTool(toolId, confirmationId)
 2. 页面调用 `describeInstall(toolId)`，显示下载量、安装位置、固定动作和可能需要的时间。
 3. 用户在模态框中明确确认。
 4. 页面只提交 `toolId` 与一次性 `confirmationId`。
-5. 主进程重新校验后执行动作，并流式展示有限、脱敏的进度。
-6. 完成后只重新检测该工具及受影响的模式。
+5. 主进程重新校验后执行动作，页面显示不确定进度状态；本轮不新增日志流或通用进度通道。
+6. 完成后执行一次完整环境重检，以统一刷新该工具和受影响的模式。
 7. 失败时展示可复制的手动指引，不自动重试、不请求管理员密码。
 
 macOS 策略：
@@ -134,6 +146,8 @@ macOS 策略：
 - 已有 Homebrew 时，FFmpeg、Node.js 和指定 Python 可使用固定的 `brew install` 参数数组。
 - 没有 Homebrew 时，只展示 Homebrew 官方安装入口和手动安装指引，不自动安装 Homebrew。
 - Whisper 安装到应用管理的 Python 3.12 虚拟环境，避免污染系统 Python。
+
+Windows 安装包中已随应用提供且校验通过的工具直接标为 `ready`，不复制、不删除，也不触发安装确认；缺失时才进入白名单安装流程。
 
 Windows 策略：
 
@@ -146,13 +160,13 @@ Windows 策略：
 保留现有环境检测页的整体视觉语言，但替换静态 Windows 数据：
 
 - 顶部显示当前系统与芯片摘要。
-- 磁盘卡只显示当前工作目录所在磁盘，不再显示虚构盘符。
+- 磁盘卡默认显示应用数据目录所在磁盘，未来打开具体项目后可改为项目目录；不再显示虚构盘符。
 - 硬件区展示芯片、内存、磁盘和图形能力。
 - 工具区展示 FFmpeg、Node.js/npm、Python 3 与 Whisper。
 - 模式区分别显示基础剪辑、Remotion 和字幕是否就绪。
 - `ready` 使用成功样式，`limited` 使用警告样式，`missing` 使用缺失样式。
 - 每条警告必须包含实际影响和下一步，而不是只显示“未安装”。
-- “继续”按钮始终可用；页面保存检测摘要与用户选择的模式后进入主页。
+- “继续”按钮始终可用；页面保存检测已完成状态后进入主页，并保留现有 `cli`/`browser` 选择与 `RENDER_MODE` 存储行为。
 
 ## 错误处理
 
@@ -162,34 +176,30 @@ Windows 策略：
 - 安装结果不得回传环境变量、用户主目录明文、令牌或完整诊断日志。
 - 安装中断后保留已完成工具的状态，并提供重新检测按钮。
 - 不支持的平台返回明确的 `unsupported` 平台信息，页面仍可进入基础界面。
+- 安装确认标识绑定工具且只能使用一次；本地单用户应用不新增过期、恢复或并发协调机制。
 
 ## TDD 公共边界
 
-测试只针对以下已确认的公共边界：
+测试只针对以下公共接口和可见行为：
 
-1. `detectEnvironment(dependencies)`：给定 macOS 或 Windows 系统边界返回统一报告与三级状态。
-2. `evaluateReadiness(report)`：给定独立的已知样例，返回三种模式的固定可用性结果。
-3. `describeInstall(platform, toolId)` 与 `installTool(request, dependencies)`：只接受白名单工具，要求有效确认标识，并产生固定程序与参数。
-4. `window.srtAPI`：Electron 页面可以调用三个环境/安装接口，但不能提交任意命令字符串。
+1. 环境深模块的 `detectEnvironment()`：macOS/Windows 边界返回统一报告、三档状态和模式评估。
+2. 同一模块的 `describeInstall(toolId)` 与 `installTool(request)`：只接受白名单工具，要求一次性确认，并产生固定程序与参数。
+3. Node 适配器：真实进程始终以参数数组且 `shell: false` 运行，并补充 macOS GUI 常见 PATH。
+4. `window.srtAPI`：Electron 页面可以调用三个环境/安装方法，但不能提交任意安装命令。
 5. 环境检测页面：根据报告显示系统、硬件、工具、三级状态、安装确认和继续入口。
 
 外部系统边界可以替换：操作系统命令、文件系统、真实包管理器和下载网络。项目自己的检测、评估、IPC 与页面逻辑不得用内部 mock 互相替代。
 
 ## 端到端测试
 
-Electron 端到端测试使用真实窗口和预加载层，通过测试专用依赖注入提供确定性的 macOS/Windows 报告与安装结果。测试专用入口仅在测试环境启用，生产构建不能读取任意夹具路径。
+Electron 端到端测试使用真实窗口、预加载层和环境核心模块；只替换最外层 OS/进程调用，不伪造三个公共方法。四条场景足以覆盖必要链路：
 
-覆盖以下完整链路：
+1. macOS 就绪：首次启动显示 Apple/Metal/应用数据磁盘和 Node.js/Python，继续进入主页，上传测试视频并打开编辑器。
+2. Windows 就绪：同一份页面显示 Windows CPU/GPU/盘符语义，没有 Apple/Metal 必需项。
+3. FFmpeg 缺失：查看计划后取消不执行；再次生成计划并确认时，只执行白名单动作一次，然后全量重检。
+4. 低配置且存在检测失败：区分“不满足”与“检测失败”，继续按钮仍可进入主页。
 
-1. macOS 首次启动：自动进入环境检测页，显示 Apple 芯片、Metal、真实磁盘语义和已安装的 `python3`/Node.js，三级状态正确。
-2. Windows 首次启动：显示 Windows CPU/GPU/盘符语义，原有能力不退化。
-3. 工具缺失：点击查看安装方式，出现系统对应计划；取消不会执行安装。
-4. 确认安装：有效确认标识触发白名单动作，完成后该工具和模式状态更新。
-5. 非法安装请求：未知工具、过期确认标识或命令字符串均被拒绝。
-6. 低配置设备：页面显示“可用但受限”或“不满足”，继续按钮仍可进入主页。
-7. 全部满足：选择模式、确认环境、进入主页，再打开一个编辑项目入口，证明导航链路完整。
-
-单元与集成测试在 macOS、Windows CI 矩阵运行；Electron 端到端测试至少覆盖一个 macOS runner 和一个 Windows runner。真实当前设备另跑一次不注入夹具的烟雾测试，确认 Homebrew PATH、`python3`、磁盘和 Metal 均能被实际识别。
+未知工具、伪造确认和命令字符串拒绝由核心模块行为测试覆盖，不为每个细分异常再启动 Electron。真实当前 Mac 另跑一次只读烟雾测试，直接调用 `window.srtAPI.detectEnvironment()` 确认 Homebrew PATH、`python3`、磁盘和 Metal。
 
 ## 验收标准
 
@@ -199,7 +209,7 @@ Electron 端到端测试使用真实窗口和预加载层，通过测试专用�
 - 所有硬件等级只提示，不阻止继续。
 - 任意安装都先展示计划并等待用户确认。
 - 安装 API 无法执行页面传入的任意命令。
-- 已确认的五个 TDD 公共边界都有行为测试。
-- 七条 Electron 端到端场景通过，并保存失败截图与日志供排查。
+- 环境核心模块的三个公共方法和页面行为均有测试。
+- 四条 Electron 端到端场景与当前 Mac 只读烟雾测试通过，失败时保存截图与错误摘要。
 - 现有配置加载、特效映射和工具版本测试继续通过。
-
+- 以上条件满足后立即结束本阶段；延期清单不得阻塞交付。
