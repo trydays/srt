@@ -225,7 +225,10 @@ function createEnvironmentModule(dependencies) {
       const name = display._name || display.sppci_model || null;
       const metalStatus = String(display.spdisplays_metal || '').trim();
       const metalFamilyStatus = String(display.spdisplays_mtlgpufamilysupport || '').trim();
-      const metal = metalStatus === 'spdisplays_supported' || /^supported(?:\s*,|\s*$)/i.test(metalStatus) || /^spdisplays_metal\d+$/.test(metalFamilyStatus);
+      const primaryMetalStatusPresent = Object.prototype.hasOwnProperty.call(display, 'spdisplays_metal');
+      const metal = primaryMetalStatusPresent
+        ? metalStatus === 'spdisplays_supported' || /^supported(?:\s*,|\s*$)/i.test(metalStatus)
+        : /^spdisplays_metal\d+$/.test(metalFamilyStatus);
       return { name, supported: metal, metal, status: metal ? 'ready' : 'limited', reason: metal ? 'ok' : 'unsupported' };
     } catch (_) {
       return { name: null, supported: false, metal: false, status: 'missing', reason: 'probe_error' };

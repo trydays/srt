@@ -236,6 +236,17 @@ test('Metal 识别 Electron 的明确 Metal family 令牌', async () => {
   assert.deepEqual([unknown.hardware.graphics.metal, unknown.hardware.graphics.status, unknown.hardware.graphics.reason], [false, 'limited', 'unsupported']);
 });
 
+test('Metal primary 状态优先于 Electron Metal family 令牌', async () => {
+  const report = await createEnvironmentModule(macFixture({
+    commandResults: { 'system_profiler SPDisplaysDataType -json': JSON.stringify({ SPDisplaysDataType: [{
+      _name: 'Apple M4',
+      spdisplays_metal: 'Unsupported',
+      spdisplays_mtlgpufamilysupport: 'spdisplays_metal4'
+    }] }) }
+  })).detectEnvironment();
+  assert.deepEqual([report.hardware.graphics.metal, report.hardware.graphics.supported, report.hardware.graphics.status, report.hardware.graphics.reason], [false, false, 'limited', 'unsupported']);
+});
+
 test('app-managed Python 优先于系统 Python，并用于 Whisper 探测', async () => {
   const fixture = macFixture({ versions: { python3: '3.12.4' }, managedPython: '3.12.2', whisperVersion: '1.2.3' });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
