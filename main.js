@@ -249,4 +249,14 @@ function startApplication({ environmentModule } = {}) {
 
 module.exports = { startApplication };
 
-if (require.main === module) startApplication();
+function isDirectApplicationEntry() {
+  if (require.main === module) return true;
+  if (process.type !== 'browser') return false;
+  if (app.isPackaged) return true;
+  if (!process.defaultApp || !process.argv[1]) return false;
+
+  const entryPath = path.resolve(process.argv[1]);
+  return entryPath === __dirname || entryPath === __filename;
+}
+
+if (isDirectApplicationEntry()) startApplication();
