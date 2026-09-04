@@ -7,6 +7,7 @@ const path = require('node:path');
 const { createEnvironmentModule } = require('./index');
 
 const DEFAULT_MAX_BUFFER = 1024 * 1024;
+const TERMINATION_CLEANUP_MS = 100;
 
 function runnerError(message, code, reason, stdout, stderr) {
   const error = new Error(message);
@@ -63,6 +64,7 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         removeStreamListeners();
         if (child) {
           child.removeListener('error', onError);
+          child.removeListener('exit', onExit);
           child.removeListener('close', onClose);
         }
       }
@@ -96,7 +98,9 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         }
         if (killed !== true) {
           finish(runnerError('Unable to terminate command', 'EKILL', 'probe_error', '', ''));
+          return;
         }
+        if (!settled) timer = setTimeout(() => finish(pendingFailure), TERMINATION_CLEANUP_MS);
       }
 
       function capture(channel, chunk) {
@@ -124,6 +128,10 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
         if (pendingFailure) return;
         error.reason = error.code === 'ENOENT' ? 'absent' : 'probe_error';
         finish(error);
+      }
+
+      function onExit() {
+        if (pendingFailure) finish(pendingFailure);
       }
 
       function onClose(exitCode, signal) {
@@ -162,6 +170,7 @@ function createNodeRunner(spawnImpl = childProcess.spawn, baseEnv = process.env,
       if (child.stdout) child.stdout.on('data', onStdout);
       if (child.stderr) child.stderr.on('data', onStderr);
       child.on('error', onError);
+      child.once('exit', onExit);
       child.once('close', onClose);
 
       if (Number.isFinite(timeoutMs) && timeoutMs > 0) {

@@ -22,6 +22,9 @@ function fakeSpawn(calls, behavior = {}) {
       child.killCalls.push(signal);
       if (behavior.killThrows) throw new Error('kill failed');
       if (behavior.killResult === false) return false;
+      if (behavior.exitOnKill) {
+        process.nextTick(() => child.emit('exit', null, signal));
+      }
       if (behavior.closeOnKill !== false) {
         process.nextTick(() => child.emit('close', null, signal));
       }
@@ -44,6 +47,20 @@ function fakeSpawn(calls, behavior = {}) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function settleWithin(promise, timeoutMs) {
+  let deadline;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('runner did not settle')), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 function recordingFs(records) {
@@ -121,6 +138,70 @@ test('Node runner waits for close after forced timeout termination', async () =>
   assert.equal(settled, false);
   child.emit('close', null, 'SIGKILL');
   await assert.rejects(result, (error) => error.code === 'ETIMEDOUT' && error.reason === 'probe_error');
+  assert.equal(child.listenerCount('close'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.stdout.listenerCount('data'), 0);
+  assert.equal(child.stderr.listenerCount('data'), 0);
+});
+
+test('Node runner settles forced termination when exit arrives without close', async () => {
+  let child;
+  const result = createNodeRunner(fakeSpawn([], {
+    hang: true,
+    closeOnKill: false,
+    exitOnKill: true,
+    onChild(value) { child = value; }
+  }), {}, 'win32')('slow.exe', [], { timeoutMs: 5 });
+
+  await assert.rejects(
+    settleWithin(result, 200),
+    (error) => error.code === 'ETIMEDOUT' && error.reason === 'probe_error'
+  );
+  assert.deepEqual(child.killCalls, ['SIGKILL']);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('close'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+});
+
+test('Node runner has a bounded fallback when forced termination emits no terminal event', { timeout: 350 }, async () => {
+  let child;
+  const result = createNodeRunner(fakeSpawn([], {
+    hang: true,
+    closeOnKill: false,
+    onChild(value) { child = value; }
+  }), {}, 'win32')('silent.exe', [], { timeoutMs: 5 });
+
+  await assert.rejects(
+    settleWithin(result, 300),
+    (error) => error.code === 'ETIMEDOUT' && error.reason === 'probe_error'
+  );
+  assert.deepEqual(child.killCalls, ['SIGKILL']);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('close'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.stdout.listenerCount('data'), 0);
+  assert.equal(child.stderr.listenerCount('data'), 0);
+});
+
+test('Node runner ignores late events after bounded termination cleanup', { timeout: 350 }, async () => {
+  let child;
+  let settlements = 0;
+  const result = createNodeRunner(fakeSpawn([], {
+    hang: true,
+    closeOnKill: false,
+    onChild(value) { child = value; }
+  }), {}, 'win32')('silent.exe', [], { timeoutMs: 5 });
+  result.then(() => { settlements += 1; }, () => { settlements += 1; });
+
+  await assert.rejects(settleWithin(result, 300), (error) => error.reason === 'probe_error');
+  child.emit('exit', null, 'SIGKILL');
+  child.emit('close', null, 'SIGKILL');
+  child.stdout.write('late stdout');
+  child.stderr.write('late stderr');
+  await delay(0);
+
+  assert.equal(settlements, 1);
+  assert.equal(child.listenerCount('exit'), 0);
   assert.equal(child.listenerCount('close'), 0);
   assert.equal(child.listenerCount('error'), 0);
   assert.equal(child.stdout.listenerCount('data'), 0);
