@@ -13,14 +13,28 @@ const MIME = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm'
 };
+const ERROR_CONTENT_TYPE = 'text/plain; charset=utf-8';
+
+function isWithinRoot(root, target) {
+  const relative = path.relative(root, target);
+  return relative === '' || (
+    relative !== '..' &&
+    !relative.startsWith('..' + path.sep) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function sendError(req, res, statusCode, message) {
+  res.writeHead(statusCode, { 'Content-Type': ERROR_CONTENT_TYPE });
+  res.end(req.method === 'HEAD' ? undefined : message);
+}
 
 function createStaticServer({ root = path.join(__dirname, 'app') } = {}) {
-  const staticRoot = path.resolve(root);
+  const staticRoot = fs.realpathSync(path.resolve(root));
 
-  return http.createServer((req, res) => {
+  return http.createServer(async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.writeHead(404);
-      res.end('Not Found');
+      sendError(req, res, 404, 'Not Found');
       return;
     }
 
@@ -28,29 +42,41 @@ function createStaticServer({ root = path.join(__dirname, 'app') } = {}) {
     try {
       pathname = decodeURIComponent((req.url || '/').split('?')[0]);
     } catch (_) {
-      res.writeHead(400);
-      res.end('Bad Request');
+      sendError(req, res, 400, 'Bad Request');
+      return;
+    }
+    if (pathname.includes('\0')) {
+      sendError(req, res, 400, 'Bad Request');
       return;
     }
 
-    const requestPath = pathname === '/' ? '/主页.html' : pathname;
-    const filePath = path.resolve(staticRoot, '.' + (requestPath.startsWith('/') ? requestPath : '/' + requestPath));
-    if (filePath !== staticRoot && !filePath.startsWith(staticRoot + path.sep)) {
-      res.writeHead(403);
-      res.end('Forbidden');
+    let filePath;
+    try {
+      const requestPath = pathname === '/' ? '/主页.html' : pathname;
+      filePath = path.resolve(staticRoot, '.' + (requestPath.startsWith('/') ? requestPath : '/' + requestPath));
+    } catch (_) {
+      sendError(req, res, 400, 'Bad Request');
+      return;
+    }
+    if (!isWithinRoot(staticRoot, filePath)) {
+      sendError(req, res, 403, 'Forbidden');
       return;
     }
 
-    fs.readFile(filePath, (error, data) => {
-      if (error) {
-        res.writeHead(404);
-        res.end('Not Found');
+    try {
+      const canonicalFile = await fs.promises.realpath(filePath);
+      if (!isWithinRoot(staticRoot, canonicalFile)) {
+        sendError(req, res, 403, 'Forbidden');
         return;
       }
-      const contentType = MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+      const data = await fs.promises.readFile(canonicalFile);
+      const contentType = MIME[path.extname(canonicalFile).toLowerCase()] || 'application/octet-stream';
       res.writeHead(200, { 'Content-Type': contentType });
       res.end(req.method === 'HEAD' ? undefined : data);
-    });
+    } catch (_) {
+      if (!res.headersSent) sendError(req, res, 404, 'Not Found');
+      else res.destroy();
+    }
   });
 }
 

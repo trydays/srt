@@ -32,7 +32,7 @@ if (!environmentPage) {
     { id: 'subtitles', label: '语音字幕', description: '语音识别与字幕生成' }
   ];
   var INSTALLABLE_TOOLS = { ffmpeg: true, node: true, python: true, whisper: true };
-  var currentReport = null;
+  var detectionGeneration = 0;
   var pendingInstall = null;
 
   var platformTitle = document.getElementById('platformTitle');
@@ -195,10 +195,11 @@ if (!environmentPage) {
       var modeReport = modes[definition.id] || {};
       var status = normalizedStatus(modeReport.status);
       var details = [definition.description];
-      if (modeReport.blockers && modeReport.blockers.length) {
-        details.push('受限项：' + modeReport.blockers.join('、'));
-      } else if (modeReport.reason && modeReport.reason !== 'ok') {
+      if (modeReport.reason && modeReport.reason !== 'ok') {
         details.push(reasonLabel(modeReport.reason));
+      }
+      if (modeReport.blockers && modeReport.blockers.length) {
+        details.push('受限项：' + modeReport.blockers.map(installToolLabel).join('、'));
       }
       html += '<div class="capability-card" data-testid="mode-' + definition.id + '" data-status="' + status + '">' +
         '<div class="capability-card__head"><span class="capability-card__title">' + escapeText(definition.label) + '</span>' +
@@ -208,20 +209,20 @@ if (!environmentPage) {
   }
 
   function renderReport(report) {
-    currentReport = report || {};
-    var platform = currentReport.platform || {};
-    var chip = currentReport.hardware && currentReport.hardware.chip || {};
+    var renderedReport = report || {};
+    var platform = renderedReport.platform || {};
+    var chip = renderedReport.hardware && renderedReport.hardware.chip || {};
     var systemName = platformLabel(platform.os);
     platformTitle.textContent = systemName + (platform.version ? ' ' + platform.version : '');
     platformMeta.textContent = [chip.name, platform.arch, '检测结果仅提供建议，不影响继续使用'].filter(Boolean).join(' · ');
 
-    renderHardware(currentReport);
-    renderTools(currentReport);
-    renderModes(currentReport);
+    renderHardware(renderedReport);
+    renderTools(renderedReport);
+    renderModes(renderedReport);
 
     var statuses = [];
-    Object.keys(currentReport.hardware || {}).forEach(function(key) { statuses.push(normalizedStatus(currentReport.hardware[key].status)); });
-    Object.keys(currentReport.tools || {}).forEach(function(key) { statuses.push(normalizedStatus(currentReport.tools[key].status)); });
+    Object.keys(renderedReport.hardware || {}).forEach(function(key) { statuses.push(normalizedStatus(renderedReport.hardware[key].status)); });
+    Object.keys(renderedReport.tools || {}).forEach(function(key) { statuses.push(normalizedStatus(renderedReport.tools[key].status)); });
     var readyCount = statuses.filter(function(status) { return status === 'ready'; }).length;
     var attentionCount = statuses.length - readyCount;
     statusBar.innerHTML = '<strong>' + readyCount + '/' + statuses.length + '</strong> 项满足' +
@@ -230,7 +231,6 @@ if (!environmentPage) {
   }
 
   function renderDesktopOnly() {
-    currentReport = null;
     platformTitle.textContent = '请在桌面版运行完整检测';
     platformMeta.textContent = '浏览器预览不会执行任何本机检测或安装命令。';
     statusBar.innerHTML = '<strong>浏览器模式</strong> 仍可继续使用预览功能';
@@ -242,7 +242,6 @@ if (!environmentPage) {
   }
 
   function renderDetectionError(error) {
-    currentReport = null;
     platformTitle.textContent = '环境检测未完成';
     platformMeta.textContent = '检测失败，请重试；你仍然可以继续进入主页。';
     statusBar.innerHTML = '<strong>检测失败</strong> ' + escapeText(error && error.message || '无法读取环境信息');
@@ -254,16 +253,17 @@ if (!environmentPage) {
   }
 
   function detectEnvironment() {
+    var generation = ++detectionGeneration;
     setLoadingState();
     if (!window.srtAPI || typeof window.srtAPI.detectEnvironment !== 'function') {
-      renderDesktopOnly();
+      if (generation === detectionGeneration) renderDesktopOnly();
       return Promise.resolve(null);
     }
     return window.srtAPI.detectEnvironment().then(function(report) {
-      renderReport(report);
+      if (generation === detectionGeneration) renderReport(report);
       return report;
     }).catch(function(error) {
-      renderDetectionError(error);
+      if (generation === detectionGeneration) renderDetectionError(error);
       return null;
     });
   }
@@ -394,79 +394,107 @@ if (!environmentPage) {
     location.href = '主页.html';
   });
 
-  /* AI configuration keeps its existing behavior through semantic srtAPI calls. */
+  /* ── AI 配置（自动探测）── */
   (function initAIDetection() {
-    function aiSourceRow(icon, label, available, availableLabel, missingLabel) {
-      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);' +
-        (available ? '' : 'opacity:.5') + '"><span style="font-size:14px">' + escapeText(icon) + '</span>' +
-        '<span style="font-size:12px;' + (available ? 'font-weight:600;color:var(--text-strong)' : '') + '">' + escapeText(label) + '</span>' +
-        '<span style="font-size:11px;color:' + (available ? 'var(--accent)' : 'var(--text-muted)') + ';margin-left:auto">' +
-        escapeText(available ? availableLabel : missingLabel) + '</span></div>';
-    }
-
-    function renderAISources(result) {
+    function renderSources(detection) {
       var title = document.getElementById('aiStatusTitle');
       var desc = document.getElementById('aiStatusDesc');
       var list = document.getElementById('aiSourceList');
       var manual = document.getElementById('aiManualSetup');
-      var badge = document.getElementById('aiCollapseBadge');
 
-      if (!result) {
+      if (!detection) {
         title.textContent = '⚠️ 开发模式 — 请在下方手动配置';
         desc.textContent = '使用浏览器开发时请手动填写 Key';
         list.innerHTML = '';
         manual.style.display = 'flex';
-        badge.textContent = '需配置';
-        badge.style.background = 'var(--amber-bg)';
-        badge.style.color = 'var(--amber)';
+        var badge = document.getElementById('aiCollapseBadge');
+        if (badge) { badge.textContent = '需配置'; badge.style.background = 'var(--amber-bg)'; badge.style.color = 'var(--amber)'; }
         document.getElementById('aiCollapse').open = true;
         return;
       }
 
-      var ollamaAvailable = Boolean(result.ollama && result.ollama.available);
-      var configAvailable = Boolean(result.config && result.config.key);
-      var found = (ollamaAvailable ? 1 : 0) + (configAvailable ? 1 : 0);
-      list.innerHTML = aiSourceRow('🦙', 'Ollama 本地模型', ollamaAvailable, '✅ 可用', '未检测到') +
-        aiSourceRow('🔑', '预设 AI 配置', configAvailable, '✅ 已加载', '未设置');
+      var html = '', found = 0;
 
-      if (found) {
+      // Ollama
+      if (detection.ollama && detection.ollama.available) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🦙</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">Ollama 本地模型</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 可用</span></div>';
+        found++;
+      } else {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🦙</span><span style="font-size:12px">Ollama 本地模型</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未检测到</span></div>';
+      }
+
+      // Claude Code 凭证
+      if (detection.claudeCredentials && detection.claudeCredentials.available) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🤖</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">Claude Code 凭证</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已检测到</span></div>';
+        found++;
+      } else {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🤖</span><span style="font-size:12px">Claude Code 凭证</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未检测到</span></div>';
+      }
+
+      // OpenAI API Key
+      if (detection.openaiCredentials && detection.openaiCredentials.available) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🔑</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">OpenAI API Key (Codex/Cursor 等)</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已设置</span></div>';
+        found++;
+      } else {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🔑</span><span style="font-size:12px">OpenAI API Key (Codex/Cursor 等)</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未设置</span></div>';
+      }
+
+      // 环境变量
+      if (detection.env && detection.env.available) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">🔧</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">环境变量 SRT_AI_KEY</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已设置</span></div>';
+        found++;
+      } else {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm);opacity:0.5"><span style="font-size:14px">🔧</span><span style="font-size:12px">环境变量 SRT_AI_KEY</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">未设置</span></div>';
+      }
+
+      // 配置文件
+      if (detection.configFile && detection.configFile.available) {
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-subtle);border-radius:var(--radius-sm)"><span style="font-size:14px">📄</span><span style="font-size:12px;font-weight:600;color:var(--text-strong)">配置文件 .srt.config.json</span><span style="font-size:11px;color:var(--accent);margin-left:auto">✅ 已配置</span></div>';
+        found++;
+      }
+
+      list.innerHTML = html;
+
+      var badge = document.getElementById('aiCollapseBadge');
+      if (found > 0) {
         title.textContent = '✅ 检测到 ' + found + ' 个可用 AI 配置来源';
         desc.textContent = '三天remotion 将自动使用以上来源进行效果翻译，无需额外配置。';
         manual.style.display = 'none';
-        badge.textContent = '✅ 已就绪';
-        badge.style.background = 'var(--green-bg)';
-        badge.style.color = 'var(--green)';
-        if (configAvailable) {
-          document.getElementById('aiStatus').textContent = '当前配置：' + (result.config.provider || '默认提供商');
-        }
+        if (badge) { badge.textContent = '✅ 已就绪'; badge.style.background = 'var(--green-bg)'; badge.style.color = 'var(--green)'; }
       } else {
         title.textContent = '📋 未检测到预设 AI 配置';
         desc.textContent = '可安装 Ollama（免费本地 AI），或让 Agent 运行 npx srt-setup，或下方手动填写。';
         manual.style.display = 'flex';
-        badge.textContent = '需配置';
-        badge.style.background = 'var(--amber-bg)';
-        badge.style.color = 'var(--amber)';
+        if (badge) { badge.textContent = '需配置'; badge.style.background = 'var(--amber-bg)'; badge.style.color = 'var(--amber)'; }
         document.getElementById('aiCollapse').open = true;
       }
     }
 
+    // Electron 环境 → IPC 探测
     if (window.srtAPI && typeof window.srtAPI.detectOllama === 'function' && typeof window.srtAPI.queryAIConfig === 'function') {
-      Promise.all([
-        window.srtAPI.detectOllama().catch(function() { return { available: false }; }),
-        window.srtAPI.queryAIConfig().catch(function() { return null; })
-      ]).then(function(results) {
-        renderAISources({ ollama: results[0], config: results[1] });
-      });
+      window.srtAPI.detectOllama().then(function(result) { renderSources({ ollama: result }); })
+      .catch(function() { renderSources(null); });
+      // 同时查询当前配置（key hint）
+      window.srtAPI.queryAIConfig().then(function(config) {
+        if (config && (config.key || config.hasKey)) {
+          var st = document.getElementById('aiStatus');
+          var keyHint = config.keyHint || String(config.key).slice(0, 7) + '...';
+          if (st) st.textContent = '当前 Key: ' + keyHint + ' (' + config.provider + ')';
+        }
+      }).catch(function(){});
     } else {
-      renderAISources(null);
+      // 非 Electron → 手动模式
+      renderSources(null);
     }
 
+    // localStorage 回退
     try {
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.AI_CONFIG));
       if (saved && saved.key) {
         document.getElementById('aiProvider').value = saved.provider || 'deepseek';
         document.getElementById('aiKey').value = saved.key;
-        document.getElementById('aiStatus').textContent = '已保存（仅本浏览器）';
+        var st2 = document.getElementById('aiStatus');
+        if (st2) st2.textContent = '已保存（仅本浏览器）';
       }
     } catch (_) {}
   })();

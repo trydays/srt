@@ -46,6 +46,13 @@ function createScenarioDependencies(name) {
     const callArgs = Array.isArray(args) ? args.slice() : [];
     state.calls.push({ program, args: callArgs });
 
+    if (program === 'brew' && scenario.platform !== 'darwin') {
+      return Promise.reject(commandError('Homebrew is unavailable on this platform', 'ENOENT'));
+    }
+    if (program === 'winget' && scenario.platform !== 'win32') {
+      return Promise.reject(commandError('winget is unavailable on this platform', 'ENOENT'));
+    }
+
     if (scenario.platform === 'darwin' && program === 'system_profiler' && sameArgs(callArgs, ['SPDisplaysDataType', '-json'])) {
       if (scenario.graphics === 'probe_error') throw commandError('graphics probe failed', 'EIO');
       return Promise.resolve(successful(JSON.stringify({

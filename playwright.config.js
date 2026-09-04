@@ -1,5 +1,3 @@
-delete process.env.NO_COLOR;
-
 const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
