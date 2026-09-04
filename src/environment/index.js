@@ -223,7 +223,8 @@ function createEnvironmentModule(dependencies) {
       const displays = JSON.parse(text).SPDisplaysDataType || [];
       const display = displays[0] || {};
       const name = display._name || display.sppci_model || null;
-      const metal = /^supported(?:\s*,|\s*$)/i.test(String(display.spdisplays_metal || '').trim());
+      const metalStatus = String(display.spdisplays_metal || '').trim();
+      const metal = metalStatus === 'spdisplays_supported' || /^supported(?:\s*,|\s*$)/i.test(metalStatus);
       return { name, supported: metal, metal, status: metal ? 'ready' : 'limited', reason: metal ? 'ok' : 'unsupported' };
     } catch (_) {
       return { name: null, supported: false, metal: false, status: 'missing', reason: 'probe_error' };

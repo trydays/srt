@@ -201,10 +201,24 @@ test('Whisper 解析版本，成功但不可解析的输出为不兼容', async 
 });
 
 test('Metal 仅接受明确的 Supported 状态', async () => {
-  const report = await createEnvironmentModule(macFixture({
+  const unsupported = await createEnvironmentModule(macFixture({
     commandResults: { 'system_profiler SPDisplaysDataType -json': JSON.stringify({ SPDisplaysDataType: [{ _name: 'Intel GPU', spdisplays_metal: 'Unsupported' }] }) }
   })).detectEnvironment();
-  assert.deepEqual([report.hardware.graphics.metal, report.hardware.graphics.status, report.hardware.graphics.reason], [false, 'limited', 'unsupported']);
+  const unsupportedToken = await createEnvironmentModule(macFixture({
+    commandResults: { 'system_profiler SPDisplaysDataType -json': JSON.stringify({ SPDisplaysDataType: [{ _name: 'Intel GPU', spdisplays_metal: 'spdisplays_unsupported' }] }) }
+  })).detectEnvironment();
+  assert.deepEqual([unsupported.hardware.graphics.metal, unsupported.hardware.graphics.status, unsupported.hardware.graphics.reason], [false, 'limited', 'unsupported']);
+  assert.deepEqual([unsupportedToken.hardware.graphics.metal, unsupportedToken.hardware.graphics.status, unsupportedToken.hardware.graphics.reason], [false, 'limited', 'unsupported']);
+});
+
+test('Metal 识别 system_profiler 的明确支持令牌', async () => {
+  const report = await createEnvironmentModule(macFixture({
+    commandResults: { 'system_profiler SPDisplaysDataType -json': JSON.stringify({ SPDisplaysDataType: [{ _name: 'Apple M4', spdisplays_metal: 'spdisplays_supported' }] }) }
+  })).detectEnvironment();
+  assert.deepEqual(
+    [report.hardware.graphics.name, report.hardware.graphics.metal, report.hardware.graphics.supported, report.hardware.graphics.status, report.hardware.graphics.reason],
+    ['Apple M4', true, true, 'ready', 'ok']
+  );
 });
 
 test('app-managed Python 优先于系统 Python，并用于 Whisper 探测', async () => {
