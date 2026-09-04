@@ -221,6 +221,21 @@ test('Metal 识别 system_profiler 的明确支持令牌', async () => {
   );
 });
 
+test('Metal 识别 Electron 的明确 Metal family 令牌', async () => {
+  const reportForFamily = async (family) => createEnvironmentModule(macFixture({
+    commandResults: { 'system_profiler SPDisplaysDataType -json': JSON.stringify({ SPDisplaysDataType: [{ _name: 'Apple M4', spdisplays_mtlgpufamilysupport: family }] }) }
+  })).detectEnvironment();
+  const supported = await reportForFamily('spdisplays_metal4');
+  const unsupported = await reportForFamily('spdisplays_unsupported');
+  const unknown = await reportForFamily('spdisplays_metal');
+  assert.deepEqual(
+    [supported.hardware.graphics.name, supported.hardware.graphics.metal, supported.hardware.graphics.supported, supported.hardware.graphics.status, supported.hardware.graphics.reason],
+    ['Apple M4', true, true, 'ready', 'ok']
+  );
+  assert.deepEqual([unsupported.hardware.graphics.metal, unsupported.hardware.graphics.status, unsupported.hardware.graphics.reason], [false, 'limited', 'unsupported']);
+  assert.deepEqual([unknown.hardware.graphics.metal, unknown.hardware.graphics.status, unknown.hardware.graphics.reason], [false, 'limited', 'unsupported']);
+});
+
 test('app-managed Python 优先于系统 Python，并用于 Whisper 探测', async () => {
   const fixture = macFixture({ versions: { python3: '3.12.4' }, managedPython: '3.12.2', whisperVersion: '1.2.3' });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
