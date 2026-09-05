@@ -1,586 +1,358 @@
 # Local CLI Detection and Selection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Detect only locally usable Codex CLI, Claude Code, and Gemini CLI, and preserve an explicit optional local default without running it for video work.
+**Goal:** Detect the fixed Codex CLI, Claude Code, and Gemini CLI catalog and let the user explicitly save one optional local default.
 
-**Architecture:** A focused main-process scanner owns fixed definitions, path verification, and version probes. A preference service owns scan-validated JSON selection. Existing Electron main, preload, and environment page expose only state, rescan, and selection. E2E uses temporary userData and fixture paths.
+**Architecture:** Add one small CommonJS module that owns the fixed scan and scan-validated preference state. `main.js` exposes its three narrow operations through the existing Electron pattern; `preload.js` exposes matching methods; the existing environment page renders only returned successful results. Reuse `node:test` and the current Playwright Electron fixture—no framework or lifecycle expansion.
 
-**Tech Stack:** Electron, Node.js CommonJS, node:test, Playwright Electron, existing npm scripts.
+**Tech Stack:** Electron 33, Node.js CommonJS and built-in `fs`/`child_process`, `node:test`, Playwright Electron.
 
 ## Global Constraints
 
-- Support exactly codex, claude, and gemini, in that order; no registry, authentication, installation, models, invocation, SSE, or more CLIs.
-- Return only id, label, available, and selectedCliId; no paths, versions, command output, environment, tokens, installation, models, or execution fields.
-- Never auto-select, auto-switch, or block Continue navigation.
-- Scan PATH plus only approved fixed directories; never recurse. Probe only fixed --version, 3,000 ms, 64 KiB, shell false.
-- Validate symbolic-link final targets with lstat, realpath, stat, and macOS X_OK, but run the original absolute candidate entry.
-- Windows only considers PATHEXT intersection .COM/.EXE/.BAT/.CMD, no extensionless file. Batch uses absolute ComSpec/cmd.exe, /d /s /c, windowsVerbatimArguments true, shell false, and quoteCmdArgument.
-- Never add, edit, delete, clean, or commit the existing untracked .superpowers directory.
+- Support only `codex`, `claude`, and `gemini`, in that order; probe each candidate only with fixed `--version` and a short fixed timeout.
+- Search ordinary `PATH` plus a few fixed common directories; do not recurse or accept user paths, commands, or registry entries.
+- Render only successful results. The exact empty result is `未扫描到可用本地 CLI`; display `目前仅支持 Codex CLI、Claude Code 和 Gemini CLI。`.
+- Selection is explicit and global: persist `selectedCliId`, never auto-select or auto-switch, and clear it when the selected CLI is absent from a later scan.
+- CLI detection/selection never blocks the existing Continue navigation or other SRTP use.
+- macOS is the manual verification target. Keep only a minimal `Path`/`PATHEXT` Windows branch with focused unit coverage; no Windows E2E or platform-grade claim.
+- Do not implement CLI invocation, natural-language translation, Remotion integration, installation/login/model UI, generic platform/plugin design, combined-stream runner, atomic writes, exhaustive Windows quoting, special-file/link validation, dynamic/restart harnesses, handler-call assertions, or unrelated refactors.
+- Time limit: visible page checkpoint by 60–90 minutes, hard stop at 3 hours, support work at most 25%; if support work exceeds twice its estimate, stop and report. Once acceptance passes, stop.
+- Preserve the untracked `.superpowers/` directory completely.
 
 ---
 
-## File structure mapping
+## Current file mapping
 
 | File | Action | Responsibility |
 | --- | --- | --- |
-| src/local-cli/scanner.js | Create | Fixed catalog, discovery/validation, native and batch version probes. |
-| src/local-cli/index.js | Create | JSON default persistence and scan-validated state. |
-| tests/local-cli-scanner.test.js | Create | Scanner, link, PATHEXT, and quoting tests. |
-| tests/local-cli-selection.test.js | Create | Explicit selection, persistence, invalidation tests. |
-| main.js | Modify | Create service from userData and register narrow handlers. |
-| preload.js | Modify | Expose exactly three local-CLI calls. |
-| tests/main-entry.test.js | Modify | Handler and preload boundary assertions. |
-| app/环境检测.html | Modify | Local CLI region and stable test IDs. |
-| app/env-check.js | Modify | Render, rescan, explicit selection, and error states. |
-| tests/e2e/electron.fixture.js | Modify | Temporary CLI fixture PATH, userData reuse, restart. |
-| tests/e2e/electron-main.js | Modify | Controlled outer scanner dependencies and counters. |
-| tests/e2e/local-cli-flow.spec.js | Create | Real Electron user journeys. |
-| docs/DEVELOPMENT_LOG.md | Modify | Existing delivery record. |
-| docs/PROJECT_STATUS.md | Modify | Existing approved-stage status. |
+| `src/local-cli.js` | Create | Fixed catalog, ordinary path candidate scan, fixed probe, and simple preference state. |
+| `tests/local-cli.test.js` | Create | Scanner and explicit-selection unit tests, including minimal Windows path/extension behavior. |
+| `main.js` | Modify | Construct the local CLI service from Electron `userData` and register three IPC handlers. |
+| `preload.js` | Modify | Add three fixed local-CLI bridge methods to the existing `srtAPI`. |
+| `tests/main-entry.test.js` | Modify | Assert the main entry registers the new channels and preload source has only the narrow calls. |
+| `app/环境检测.html` | Modify | Add a small local CLI region after existing environment information. |
+| `app/env-check.js` | Modify | Load, render, rescan, and explicitly select through the bridge without changing Continue behavior. |
+| `tests/e2e/electron-main.js` | Modify | Inject a deterministic local CLI service into the existing Electron E2E entry. |
+| `tests/e2e/electron.fixture.js` | Modify | Add one optional fixed local-CLI mode and pass it as an Electron environment variable. |
+| `tests/e2e/local-cli-flow.spec.js` | Create | Exactly one empty-state E2E and one choose-and-persist E2E. |
+| `package.json` | Modify | Include the new E2E file in the existing `test:e2e` script. |
 
-### Task 1: Fixed scanner and safe version probes
+### Task 1: Fixed scanner and explicit persisted state
 
 **Files:**
-- Create: src/local-cli/scanner.js
-- Create: tests/local-cli-scanner.test.js
+- Create: `src/local-cli.js`
+- Create: `tests/local-cli.test.js`
 
 **Interfaces:**
-- Produces CLI_DEFINITIONS, quoteCmdArgument(value), and createLocalCliScanner(dependencies).
-- scanner.scan() returns Promise of ordered objects shaped { id, label }.
+- Produces `CLI_DEFINITIONS`, `createLocalCliService(options)`.
+- `createLocalCliService({ platform, env, homeDir, userDataDir, fsApi, run })` returns `{ getState(), rescan(), select(id) }`.
+- Each returned state is `{ available: Array<{id: string, label: string}>, selectedCliId: string|null }`.
 
-- [ ] **Step 1: Write failing unit tests**
+- [ ] **Step 1: Write failing unit tests for fixed results and selection invalidation**
 
-~~~js
-test('returns only successful fixed definitions in stable order', async () => {
-  const calls = [];
-  const scanner = createLocalCliScanner({
-    platform: 'darwin', env: { PATH: '/tools' }, homeDir: '/home/a',
-    fsApi: fixture({ '/tools/codex': 'file', '/tools/gemini': 'file' }),
-    runNative: async (path, args, options) => { calls.push({ path, args, options }); return {}; },
-    runBatch: async () => {}
+```js
+test('returns only successful fixed CLIs in catalog order', async () => {
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/codex', '/bin/gemini']), run: async () => ({ exitCode: 0 })
   });
-  assert.deepEqual(await scanner.scan(), [
+  assert.deepEqual((await service.getState()).available, [
     { id: 'codex', label: 'Codex CLI' }, { id: 'gemini', label: 'Gemini CLI' }
   ]);
-  assert.deepEqual(calls.map((x) => [x.path, x.args, x.options]), [
-    ['/tools/codex', ['--version'], { timeoutMs: 3000, maxBuffer: 65536, shell: false }],
-    ['/tools/gemini', ['--version'], { timeoutMs: 3000, maxBuffer: 65536, shell: false }]
-  ]);
+  assert.equal((await service.getState()).selectedCliId, null);
 });
-test('validates a link target but probes the original macOS link', async () => {
-  const seen = [];
-  const scanner = createLocalCliScanner({
-    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/h',
-    fsApi: fixture({ '/bin/codex': { link: '/store/codex' }, '/store/codex': 'file' }),
-    runNative: async (candidate) => { seen.push(candidate); return {}; }, runBatch: async () => {}
-  });
-  assert.deepEqual(await scanner.scan(), [{ id: 'codex', label: 'Codex CLI' }]);
-  assert.deepEqual(seen, ['/bin/codex']);
+
+test('persists only an explicit available selection and clears a missing one', async () => {
+  const fsApi = fakeFs(['/bin/codex', '/bin/claude']);
+  const service = createLocalCliService({ platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs', fsApi, run: async () => ({ exitCode: 0 }) });
+  assert.equal((await service.select('claude')).selectedCliId, 'claude');
+  fsApi.remove('/bin/claude');
+  assert.equal((await service.rescan()).selectedCliId, null);
+  await assert.rejects(() => service.select('gemini'), { code: 'LOCAL_CLI_NOT_AVAILABLE' });
 });
-test('rejects dangling and non-file symbolic-link targets', async () => {
-  for (const target of ['missing', 'directory', 'device', 'fifo']) {
-    const scanner = createLocalCliScanner({ platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/h',
-      fsApi: fixture({ '/bin/codex': { link: '/target' }, '/target': target }),
-      runNative: async () => { throw new Error('must not run'); }, runBatch: async () => {} });
-    assert.deepEqual(await scanner.scan(), []);
-  }
+
+test('uses Windows Path and PATHEXT only as a minimal compatibility branch', async () => {
+  const calls = [];
+  const service = createLocalCliService({ platform: 'win32', env: { Path: 'C:\\tools', PATHEXT: '.EXE;.CMD' }, homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tools\\codex.EXE']), run: async (file, args) => { calls.push([file, args]); return { exitCode: 0 }; } });
+  assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
+  assert.deepEqual(calls, [['C:\\tools\\codex.EXE', ['--version']]]);
 });
-test('runs a cmd candidate through controlled cmd arguments', async () => {
-  const batch = [];
-  const scanner = createLocalCliScanner({ platform: 'win32',
-    env: { Path: 'C:\\Tool & ^ % Space', PATHEXT: '.EXE;.CMD' },
-    fsApi: fixture({ 'C:\\Tool & ^ % Space\\codex.cmd': 'file' }),
-    comSpecPath: 'C:\\Windows\\System32\\cmd.exe',
-    runNative: async () => { throw new Error('no native candidate'); },
-    runBatch: async (program, args, options) => { batch.push({ program, args, options }); return {}; }
-  });
-  await scanner.scan();
-  assert.deepEqual(batch[0].args.slice(0, 3), ['/d', '/s', '/c']);
-  assert.equal(batch[0].options.windowsVerbatimArguments, true);
-  assert.equal(batch[0].options.shell, false);
-  assert.match(batch[0].args[3], /^"/);
-});
-~~~
+```
 
-- [ ] **Step 2: Verify RED**
+- [ ] **Step 2: Run the focused unit test (RED)**
 
-Run: node --test tests/local-cli-scanner.test.js
+Run: `node --test tests/local-cli.test.js`
 
-Expected: FAIL because src/local-cli/scanner.js does not exist.
+Expected: FAIL with `Cannot find module '../src/local-cli'`.
 
-- [ ] **Step 3: Implement minimum scanner**
+- [ ] **Step 3: Implement the smallest service and built-in probe**
 
-~~~js
-const nodePath = require('node:path');
+```js
+const childProcess = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const CLI_DEFINITIONS = [
   { id: 'codex', label: 'Codex CLI', command: 'codex' },
   { id: 'claude', label: 'Claude Code', command: 'claude' },
   { id: 'gemini', label: 'Gemini CLI', command: 'gemini' }
 ];
-const PROBE = { timeoutMs: 3000, maxBuffer: 65536, shell: false };
-function quoteCmdArgument(value) {
-  const text = String(value);
-  return /[\s"&<>|^%]/.test(text) ? '"' + text.replace(/"/g, '""').replace(/%/g, '"^%"') + '"' : text;
-}
-function createLocalCliScanner(deps) {
-  const path = deps.platform === 'win32' ? nodePath.win32 : nodePath.posix;
-  const extensions = deps.platform === 'win32'
-    ? (deps.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((x) => x.toUpperCase()).filter((x) => ['.COM', '.EXE', '.BAT', '.CMD'].includes(x))
-    : [''];
-  async function valid(candidate) {
-    try {
-      const first = await deps.fsApi.lstat(candidate);
-      const finalPath = first.isSymbolicLink() ? await deps.fsApi.realpath(candidate) : candidate;
-      if (!(await deps.fsApi.stat(finalPath)).isFile()) return false;
-      if (deps.platform !== 'win32') await deps.fsApi.access(finalPath, deps.xOk);
-      return true;
-    } catch (_) { return false; }
-  }
-  async function probe(candidate) {
-    if (deps.platform === 'win32' && ['.CMD', '.BAT'].includes(path.extname(candidate).toUpperCase())) {
-      const inner = quoteCmdArgument(candidate) + ' ' + quoteCmdArgument('--version');
-      return deps.runBatch(deps.comSpecPath, ['/d', '/s', '/c', '"' + inner + '"'], { ...PROBE, windowsVerbatimArguments: true });
-    }
-    return deps.runNative(candidate, ['--version'], PROBE);
-  }
-  return { async scan() {
-    const pathKey = deps.platform === 'win32' ? Object.keys(deps.env).find((key) => key.toLowerCase() === 'path') : 'PATH';
-    const separator = deps.platform === 'win32' ? ';' : ':';
-    const base = String(deps.env[pathKey] || '').split(separator).filter(Boolean);
-    const fixed = deps.platform === 'win32'
-      ? [deps.env.APPDATA && path.join(deps.env.APPDATA, 'npm'), deps.env.LOCALAPPDATA && path.join(deps.env.LOCALAPPDATA, 'Programs', 'nodejs'), deps.env.ProgramFiles && path.join(deps.env.ProgramFiles, 'nodejs'), deps.env['ProgramFiles(x86)'] && path.join(deps.env['ProgramFiles(x86)'], 'nodejs')]
-      : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', deps.homeDir && path.join(deps.homeDir, '.local', 'bin')];
-    const dirs = [...base, ...fixed.filter(Boolean)].filter((x, i, all) => all.indexOf(x) === i);
-    const result = [];
-    for (const item of CLI_DEFINITIONS) {
-      const candidates = dirs.flatMap((dir) => extensions.map((ext) => path.join(dir, item.command + ext)));
-      if (deps.platform === 'darwin' && item.id === 'codex') candidates.push('/Applications/Codex.app/Contents/Resources/codex', path.join(deps.homeDir || '', 'Applications/Codex.app/Contents/Resources/codex'));
-      for (const candidate of candidates) try { if (await valid(candidate)) { await probe(candidate); result.push({ id: item.id, label: item.label }); break; } } catch (_) {}
-    }
-    return result;
-  } };
-}
-module.exports = { CLI_DEFINITIONS, createLocalCliScanner, quoteCmdArgument };
-~~~
 
-Place this complete helper above the tests; its fixture platform paths intentionally match the scanner's deps.platform path implementation.
+function defaultRun(file, args) {
+  return new Promise((resolve, reject) => childProcess.execFile(file, args, { timeout: 3000, windowsHide: true },
+    (error) => error ? reject(error) : resolve({ exitCode: 0 })));
+}
 
-~~~js
-function fixture(entries) {
-  function missing() { const error = new Error('missing'); error.code = 'ENOENT'; throw error; }
-  function entry(name) { if (!Object.prototype.hasOwnProperty.call(entries, name) || entries[name] === 'missing') missing(); return entries[name]; }
-  function statFor(value) { return { isFile: () => value === 'file', isSymbolicLink: () => Boolean(value && value.link) }; }
-  return { constants: { X_OK: 1 },
-    async lstat(name) { return statFor(entry(name)); },
-    async realpath(name) { const value = entry(name); if (!value || !value.link) return name; return value.link; },
-    async stat(name) { return statFor(entry(name)); },
-    async access(name, mode) { assert.equal(mode, 1); if (!(await this.stat(name)).isFile()) missing(); }
+function createLocalCliService({ platform = process.platform, env = process.env, homeDir = os.homedir(), userDataDir, fsApi = fs.promises, run = defaultRun }) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const preferencePath = pathApi.join(userDataDir, 'local-cli.json');
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  const extensions = platform === 'win32' ? String(env.PATHEXT || '.EXE;.CMD').split(';').filter((item) => /^\.(EXE|CMD)$/i.test(item)) : [''];
+  const extras = platform === 'win32'
+    ? [env.APPDATA && pathApi.join(env.APPDATA, 'npm'), env.LOCALAPPDATA && pathApi.join(env.LOCALAPPDATA, 'Programs', 'nodejs')]
+    : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', homeDir && pathApi.join(homeDir, '.local', 'bin')];
+  async function scan() {
+    const dirs = String(env[pathKey] || '').split(platform === 'win32' ? ';' : ':').concat(extras).filter(Boolean);
+    const available = [];
+    for (const definition of CLI_DEFINITIONS) {
+      const candidates = dirs.flatMap((dir) => extensions.map((ext) => pathApi.join(dir, definition.command + ext)));
+      if (platform === 'darwin' && definition.id === 'codex') candidates.push('/Applications/Codex.app/Contents/Resources/codex', homeDir && pathApi.join(homeDir, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex'));
+      for (const file of candidates.filter(Boolean)) {
+        try { if ((await fsApi.stat(file)).isFile()) { await run(file, ['--version']); available.push({ id: definition.id, label: definition.label }); break; } } catch (_) {}
+      }
+    }
+    return available;
+  }
+  async function read() { try { const value = JSON.parse(await fsApi.readFile(preferencePath, 'utf8')).selectedCliId; return CLI_DEFINITIONS.some((item) => item.id === value) ? value : null; } catch (_) { return null; } }
+  async function write(selectedCliId) { await fsApi.mkdir(pathApi.dirname(preferencePath), { recursive: true }); await fsApi.writeFile(preferencePath, JSON.stringify({ selectedCliId }), 'utf8'); }
+  async function state(requested) { const available = await scan(); let selectedCliId = await read(); if (selectedCliId && !available.some((item) => item.id === selectedCliId)) { selectedCliId = null; await write(null); } if (requested !== undefined) { if (!available.some((item) => item.id === requested)) { const error = new Error('Local CLI unavailable'); error.code = 'LOCAL_CLI_NOT_AVAILABLE'; throw error; } selectedCliId = requested; await write(selectedCliId); } return { available, selectedCliId }; }
+  return { getState: () => state(), rescan: () => state(), select: (id) => state(id) };
+}
+module.exports = { CLI_DEFINITIONS, createLocalCliService };
+```
+
+Place this complete fixture above the tests; it deliberately provides only the built-in filesystem surface used by the service:
+
+```js
+function fakeFs(files) {
+  const entries = new Set(files); let preference = null;
+  return {
+    async stat(file) { if (!entries.has(file)) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return { isFile: () => true }; },
+    async readFile() { if (preference === null) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return preference; },
+    async mkdir() {}, async writeFile(_file, value) { preference = value; },
+    remove(file) { entries.delete(file); }
   };
 }
-~~~
+```
+
+Do not add a process runner abstraction beyond the injected `run` seam above.
 
 - [ ] **Step 4: Verify GREEN and regression**
 
-Run: node --test tests/local-cli-scanner.test.js && npm run test:unit
+Run: `node --test tests/local-cli.test.js && npm run test:unit`
 
-Expected: PASS. A failed candidate has no effect on other successful items.
+Expected: PASS. The focused test proves no auto-selection, only successful entries, persistence, invalidation, and the minimal Windows branch.
 
-- [ ] **Step 5: Commit this slice**
+- [ ] **Step 5: Commit Task 1**
 
-~~~bash
-git add src/local-cli/scanner.js tests/local-cli-scanner.test.js
-git commit -m "feat: add local CLI scanner"
-~~~
+```bash
+git add src/local-cli.js tests/local-cli.test.js
+git commit -m "feat: add fixed local CLI detection"
+```
 
-### Task 2: Scan-validated default persistence
-
-**Files:**
-- Create: src/local-cli/index.js
-- Create: tests/local-cli-selection.test.js
-
-**Interfaces:**
-- Consumes scanner.scan().
-- Produces createLocalCliService({ scanner, fsApi, preferencePath }) with getState(), rescan(), select(id).
-
-- [ ] **Step 1: Write failing tests**
-
-~~~js
-test('requires explicit selection and persists after a restart', async () => {
-  const fsApi = memoryFile();
-  const scanner = sequence([[{ id: 'codex', label: 'Codex CLI' }, { id: 'claude', label: 'Claude Code' }]]);
-  const first = createLocalCliService({ scanner, fsApi, preferencePath: '/tmp/local-cli.json' });
-  assert.equal((await first.getState()).selectedCliId, null);
-  assert.equal((await first.select('claude')).selectedCliId, 'claude');
-  const second = createLocalCliService({ scanner, fsApi, preferencePath: '/tmp/local-cli.json' });
-  assert.equal((await second.getState()).selectedCliId, 'claude');
-});
-test('clears a disappeared selection and never selects remaining Codex', async () => {
-  const service = createLocalCliService({ scanner: sequence([[{ id: 'codex', label: 'Codex CLI' }]]),
-    fsApi: memoryFile({ selectedCliId: 'claude' }), preferencePath: '/tmp/local-cli.json' });
-  assert.equal((await service.rescan()).selectedCliId, null);
-});
-test('rejects unavailable id without overwriting current selection', async () => {
-  const service = createLocalCliService({ scanner: sequence([[{ id: 'codex', label: 'Codex CLI' }]]),
-    fsApi: memoryFile({ selectedCliId: 'codex' }), preferencePath: '/tmp/local-cli.json' });
-  await assert.rejects(() => service.select('gemini'), { code: 'LOCAL_CLI_NOT_AVAILABLE' });
-  assert.equal((await service.getState()).selectedCliId, 'codex');
-});
-~~~
-
-- [ ] **Step 2: Verify RED**
-
-Run: node --test tests/local-cli-selection.test.js
-
-Expected: FAIL because src/local-cli/index.js does not exist.
-
-- [ ] **Step 3: Implement service**
-
-~~~js
-const path = require('node:path');
-function persistenceError() { const error = new Error('Cannot persist local CLI preference'); error.code = 'LOCAL_CLI_PERSIST_FAILED'; return error; }
-function createLocalCliService({ scanner, fsApi, preferencePath }) {
-  async function read() { try { const json = JSON.parse(await fsApi.readFile(preferencePath, 'utf8')); return ['codex', 'claude', 'gemini'].includes(json.selectedCliId) ? json.selectedCliId : null; } catch (_) { return null; } }
-  async function write(selectedCliId) {
-    const temp = preferencePath + '.tmp';
-    try { await fsApi.mkdir(path.dirname(preferencePath), { recursive: true }); await fsApi.writeFile(temp, JSON.stringify({ selectedCliId }), 'utf8'); await fsApi.rename(temp, preferencePath); }
-    catch (_) { throw persistenceError(); }
-  }
-  async function state(requested) {
-    const available = await scanner.scan(); let selectedCliId = await read();
-    if (selectedCliId && !available.some((item) => item.id === selectedCliId)) { selectedCliId = null; await write(null); }
-    if (requested !== undefined) {
-      if (!available.some((item) => item.id === requested)) { const error = new Error('Selected local CLI is unavailable'); error.code = 'LOCAL_CLI_NOT_AVAILABLE'; throw error; }
-      selectedCliId = requested; await write(selectedCliId);
-    }
-    return { available, selectedCliId };
-  }
-  return { getState: () => state(), rescan: () => state(), select: (id) => state(id) };
-}
-module.exports = { createLocalCliService };
-~~~
-
-Put these complete test helpers before the Task 2 tests:
-
-~~~js
-function sequence(results) { let index = 0; return { scan: async () => results[Math.min(index++, results.length - 1)] }; }
-function memoryFile(initial = null) { let text = initial ? JSON.stringify(initial) : null; return {
-  async readFile() { if (text === null) { const error = new Error('missing'); error.code = 'ENOENT'; throw error; } return text; },
-  async mkdir() {}, async writeFile(_path, value) { text = value; }, async rename() {}
-}; }
-~~~
-
-- [ ] **Step 4: Verify GREEN and commit**
-
-Run: node --test tests/local-cli-selection.test.js && npm run test:unit
-
-Expected: PASS; corrupt/missing preference is null, and write failure exposes LOCAL_CLI_PERSIST_FAILED only.
-
-~~~bash
-git add src/local-cli/index.js tests/local-cli-selection.test.js
-git commit -m "feat: persist selected local CLI"
-~~~
-
-### Task 3: Narrow main-process and preload bridge
+### Task 2: Narrow Electron bridge and visible optional page checkpoint
 
 **Files:**
-- Modify: main.js:1-18, 142-166
-- Modify: preload.js:1-23
-- Modify: tests/main-entry.test.js:1-120
-- Modify: src/local-cli/scanner.js:1-90
+- Modify: `main.js:1-18,222-250`
+- Modify: `preload.js:3-22`
+- Modify: `tests/main-entry.test.js`
+- Modify: `app/环境检测.html:130-202`
+- Modify: `app/env-check.js:1-405`
 
 **Interfaces:**
-- Produces handlers local-cli:get-state, local-cli:rescan, local-cli:select and window.srtAPI methods getLocalCliState(), rescanLocalCli(), selectLocalCli(id).
+- `startApplication({ environmentModule, localCliService })` accepts an optional injected service for E2E.
+- IPC channels: `local-cli:get-state`, `local-cli:rescan`, `local-cli:select`.
+- Preload methods: `getLocalCliState()`, `rescanLocalCli()`, `selectLocalCli(id)`.
 
-- [ ] **Step 1: Add failing bridge tests**
+- [ ] **Step 1: Write failing bridge/page assertions**
 
-~~~js
-assert.deepEqual(localHandlers.sort(), ['local-cli:get-state', 'local-cli:rescan', 'local-cli:select']);
+```js
+assert.match(mainSource, /ipcMain\.handle\('local-cli:get-state'/);
 assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
+assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
 assert.equal(preloadSource.includes('local-cli:exec'), false);
-assert.equal(preloadSource.includes('local-cli:path'), false);
-~~~
+```
 
-- [ ] **Step 2: Verify RED**
+Add a page-level E2E assertion in Task 3; at this checkpoint, start the app and visually confirm the new static heading, support copy, rescan button, and enabled Continue control appear by 60–90 minutes.
 
-Run: node --test tests/main-entry.test.js
+- [ ] **Step 2: Run bridge test (RED)**
 
-Expected: FAIL because no local-cli handler is registered.
+Run: `node --test tests/main-entry.test.js`
 
-- [ ] **Step 3: Implement bridge and production adapter**
+Expected: FAIL because no `local-cli:*` channel or preload methods exist.
 
-~~~js
-// main.js requires
-const { createLocalCliScanner, createProductionLocalCliDependencies } = require('./src/local-cli/scanner');
+- [ ] **Step 3: Implement the three-channel bridge and local region**
+
+```js
+// main.js, beside existing environment construction
 const { createLocalCliService } = require('./src/local-cli');
-// change signature to function startApplication({ environmentModule, localCliService: injectedLocalCliService } = {})
-// inside startApplication after userDataDir
-const localCliService = injectedLocalCliService || createLocalCliService({
-  scanner: createLocalCliScanner(createProductionLocalCliDependencies({ userDataDir })),
-  fsApi: fs.promises, preferencePath: path.join(userDataDir, 'local-cli.json')
-});
-ipcMain.handle('local-cli:get-state', () => localCliService.getState());
-ipcMain.handle('local-cli:rescan', () => localCliService.rescan());
-ipcMain.handle('local-cli:select', (_event, id) => localCliService.select(id));
-~~~
-
-Add this complete shared runner and production dependency adapter to scanner.js; both native and batch paths call it. ComSpec must be an absolute existing ordinary file, otherwise Windows batch candidates fail closed.
-
-~~~js
-const childProcess = require('node:child_process'); const fs = require('node:fs'); const os = require('node:os');
-function createLimitedRunner(spawnImpl = childProcess.spawn) { return (program, args, options) => new Promise((resolve, reject) => {
-  let total = 0; let done = false; const child = spawnImpl(program, args, { shell: false, windowsHide: true, windowsVerbatimArguments: Boolean(options.windowsVerbatimArguments) });
-  const finish = (error) => { if (done) return; done = true; clearTimeout(timer); error ? reject(error) : resolve({}); };
-  const fail = (code) => { const error = new Error(code); error.code = code; try { child.kill(); } finally { finish(error); } };
-  const capture = (chunk) => { total += Buffer.byteLength(chunk); if (total > 65536) fail('ENOBUFS'); };
-  child.once('error', (error) => finish(error)); child.stdout.on('data', capture); child.stderr.on('data', capture);
-  child.once('close', (code) => { if (!done) code === 0 ? finish() : fail('ECOMMAND'); });
-  const timer = setTimeout(() => fail('ETIMEDOUT'), 3000);
-}); }
-function createProductionLocalCliDependencies() {
-  const comSpec = process.env.ComSpec;
-  const validComSpec = process.platform !== 'win32' ? null : (typeof comSpec === 'string' && nodePath.win32.isAbsolute(comSpec) && fs.existsSync(comSpec) && fs.statSync(comSpec).isFile() ? comSpec : null);
-  return { platform: process.platform, env: process.env, homeDir: os.homedir(), fsApi: fs.promises, xOk: fs.constants.X_OK,
-    runNative: createLimitedRunner(), runBatch: async (program, args, options) => { if (!validComSpec || program !== validComSpec) { const error = new Error('invalid ComSpec'); error.code = 'ENOENT'; throw error; } return createLimitedRunner()(program, args, options); }, comSpecPath: validComSpec };
+function startApplication({ environmentModule, localCliService } = {}) {
+  const userDataDir = app.getPath('userData');
+  const activeLocalCliService = localCliService || createLocalCliService({ userDataDir });
+  ipcMain.handle('local-cli:get-state', () => activeLocalCliService.getState());
+  ipcMain.handle('local-cli:rescan', () => activeLocalCliService.rescan());
+  ipcMain.handle('local-cli:select', (_event, id) => activeLocalCliService.select(id));
+  // retain existing environment handlers and lifecycle unchanged
 }
-~~~
 
-~~~js
-// preload.js inside existing window.srtAPI object
+// preload.js, inside window.srtAPI
 getLocalCliState: () => ipcRenderer.invoke('local-cli:get-state'),
 rescanLocalCli: () => ipcRenderer.invoke('local-cli:rescan'),
 selectLocalCli: (id) => ipcRenderer.invoke('local-cli:select', id),
-~~~
+```
 
-- [ ] **Step 4: Verify GREEN and commit**
-
-Run: node --test tests/main-entry.test.js && npm run test:unit
-
-Expected: PASS and no change to cli:exec, AI, or installation channels.
-
-~~~bash
-git add main.js preload.js tests/main-entry.test.js src/local-cli/scanner.js
-git commit -m "feat: expose local CLI selection IPC"
-~~~
-
-### Task 4: Optional environment-page selection UI
-
-**Files:**
-- Modify: app/环境检测.html:124-218
-- Modify: app/env-check.js:1-423
-- Create: tests/e2e/local-cli-flow.spec.js
-
-**Interfaces:**
-- Consumes the three window.srtAPI local-CLI methods.
-- Produces test IDs local-cli-section, local-cli-results, local-cli-rescan, and local-cli-{id}.
-
-- [ ] **Step 1: Write the initial failing E2E UI assertion**
-
-Create tests/e2e/local-cli-flow.spec.js with:
-
-~~~js
-const { test, expect } = require('./electron.fixture');
-test('environment page has a local CLI section', async ({ window }) => {
-  await expect(window.getByTestId('local-cli-section')).toBeVisible();
-  await expect(window.getByTestId('local-cli-results')).toBeVisible();
-  await expect(window.getByTestId('local-cli-rescan')).toBeVisible();
-});
-~~~
-
-This UI is intentionally verified through real Electron, preload, and renderer rather than a DOM mock.
-
-- [ ] **Step 2: Verify RED**
-
-Run: npx playwright test tests/e2e/local-cli-flow.spec.js
-
-Expected: FAIL because the local-CLI test IDs do not exist.
-
-- [ ] **Step 3: Add markup and renderer functions**
-
-~~~html
-<section data-testid="local-cli-section" aria-labelledby="local-cli-title">
-  <h2 id="local-cli-title">本地 CLI</h2>
+```html
+<section class="report-section" data-testid="local-cli-section">
+  <div class="mode-label">本地 CLI</div>
   <p>目前仅支持 Codex CLI、Claude Code 和 Gemini CLI。</p>
-  <div data-testid="local-cli-results" aria-live="polite"></div>
-  <div data-testid="local-cli-feedback" aria-live="polite"></div>
-  <button type="button" data-testid="local-cli-rescan">重新扫描</button>
+  <div id="localCliResults" data-testid="local-cli-results" aria-live="polite"></div>
+  <button class="btn-retry" id="localCliRescan" data-testid="local-cli-rescan" type="button">重新扫描</button>
 </section>
-~~~
+```
 
-~~~js
-var localCliResults = document.querySelector('[data-testid="local-cli-results"]');
-var localCliFeedback = document.querySelector('[data-testid="local-cli-feedback"]');
-function setLocalCliLoading() { localCliFeedback.textContent = ''; localCliResults.textContent = '正在扫描本地 CLI…'; }
+```js
 function renderLocalCli(state) {
-  if (!state.available.length) { localCliResults.textContent = '未扫描到可用本地 CLI'; return; }
-  localCliResults.innerHTML = state.available.map(function(item) {
-    return '<button type="button" data-testid="local-cli-' + item.id + '" data-cli-id="' + item.id + '">' +
-      escapeText(item.label) + (item.id === state.selectedCliId ? ' 已选为默认' : ' 可用') + '</button>';
+  var available = state && state.available || [];
+  if (!available.length) { localCliResults.textContent = '未扫描到可用本地 CLI'; return; }
+  localCliResults.innerHTML = available.map(function(item) {
+    return '<button type="button" data-cli-id="' + escapeText(item.id) + '" data-testid="local-cli-' + escapeText(item.id) + '">' + escapeText(item.label) + (item.id === state.selectedCliId ? ' 已选为默认' : ' 可用') + '</button>';
   }).join('');
 }
 function loadLocalCli(rescan) {
-  setLocalCliLoading();
-  if (!window.srtAPI) { localCliResults.textContent = '本地 CLI 扫描失败，请重新扫描。'; return Promise.resolve(); }
-  return (rescan ? window.srtAPI.rescanLocalCli() : window.srtAPI.getLocalCliState()).then(renderLocalCli)
-    .catch(function() { localCliResults.textContent = '本地 CLI 扫描失败，请重新扫描。'; });
+  var call = rescan ? window.srtAPI.rescanLocalCli : window.srtAPI.getLocalCliState;
+  return call().then(renderLocalCli).catch(function() { localCliResults.textContent = '本地 CLI 扫描失败，请重新扫描。'; });
 }
-document.querySelector('[data-testid="local-cli-rescan"]').addEventListener('click', function() { loadLocalCli(true); });
-localCliResults.addEventListener('click', function(event) {
-  var button = event.target.closest('[data-cli-id]'); if (!button) return;
-  window.srtAPI.selectLocalCli(button.dataset.cliId).then(renderLocalCli).catch(function() {
-    localCliFeedback.textContent = '所选 CLI 当前不可用，请重新扫描。';
-    setTimeout(function() { loadLocalCli(false); }, 0);
-  });
-});
+localCliRescan.addEventListener('click', function() { loadLocalCli(true); });
+localCliResults.addEventListener('click', function(event) { var button = event.target.closest('[data-cli-id]'); if (button) window.srtAPI.selectLocalCli(button.dataset.cliId).then(renderLocalCli); });
 loadLocalCli(false);
-~~~
+```
 
-Keep existing Continue enabled and its navigation listener unchanged. Do not add unavailable cards, installation, login, model, run, or test-command controls.
+Keep the existing `btnConfirm` listener and environment/install/AI sections unchanged. The renderer must not create cards for missing entries and must not add installation, login, model, run, or test-command controls.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [ ] **Step 4: Verify GREEN and checkpoint**
 
-Run: npx playwright test tests/e2e/local-cli-flow.spec.js && npm run test:e2e
+Run: `node --test tests/main-entry.test.js && npm run test:unit`
 
-Expected: PASS; only success cards render and empty/error/unselected states still reach home.
+Expected: PASS. Then run `npm start` and manually confirm the visible page checkpoint and that Continue still reaches the home page with no local CLI selected.
 
-~~~bash
-git add app/环境检测.html app/env-check.js tests/e2e/local-cli-flow.spec.js
-git commit -m "feat: render optional local CLI selection"
-~~~
+- [ ] **Step 5: Commit Task 2**
 
-### Task 5: Full Electron E2E with temporary fixture CLIs
+```bash
+git add main.js preload.js tests/main-entry.test.js app/环境检测.html app/env-check.js
+git commit -m "feat: show optional local CLI selection"
+```
+
+### Task 3: Two focused Electron journeys and final Mac acceptance
 
 **Files:**
-- Modify: tests/e2e/electron.fixture.js
-- Modify: tests/e2e/electron-main.js
-- Modify: tests/e2e/local-cli-flow.spec.js
-- Modify: package.json:6-10
+- Modify: `tests/e2e/electron-main.js:1-47`
+- Modify: `tests/e2e/electron.fixture.js:109-147`
+- Create: `tests/e2e/local-cli-flow.spec.js`
+- Modify: `package.json:5-10`
 
 **Interfaces:**
-- Uses real scanner, service, handlers, preload, and renderer.
-- E2E state exposes localCliCalls with native, batch, cliExec, ai, installation counts for assertions only.
+- E2E entry passes an injected `localCliService` with deterministic `getState`, `rescan`, and `select` behavior; it does not replace preload or renderer.
+- Test IDs: `local-cli-section`, `local-cli-results`, `local-cli-rescan`, `local-cli-codex`, `local-cli-claude`, `local-cli-gemini`.
 
-- [ ] **Step 1: Write failing journeys**
+- [ ] **Step 1: Write exactly the two failing E2E scenarios**
 
-~~~js
+```js
 const { test, expect } = require('./electron.fixture');
-test.describe('local CLI journeys', () => {
-  test.use({ scenario: 'local-cli-two' });
-  test('shows only successful entries, persists explicit choice, and remains optional', async ({ window, restartElectron }) => {
-    await expect(window.getByTestId('local-cli-codex')).toContainText('Codex CLI 可用');
-    await expect(window.getByTestId('local-cli-claude')).toContainText('Claude Code 可用');
-    await expect(window.getByTestId('local-cli-gemini')).toHaveCount(0);
+
+test('empty local CLI result uses the exact copy and remains optional', async ({ window }) => {
+  await expect(window.getByTestId('local-cli-results')).toHaveText('未扫描到可用本地 CLI');
+  await expect(window.getByTestId('local-cli-codex')).toHaveCount(0);
+  await window.getByTestId('continue').click();
+  await expect(window.getByTestId('home-page')).toBeVisible();
+});
+
+test.describe('two available CLIs', () => {
+  test.use({ localCliMode: 'two' });
+  test('visible explicit choice persists across a rescan', async ({ window }) => {
+    await expect(window.getByTestId('local-cli-codex')).toContainText('可用');
+    await expect(window.getByTestId('local-cli-claude')).toContainText('可用');
     await window.getByTestId('local-cli-claude').click();
     await expect(window.getByTestId('local-cli-claude')).toContainText('已选为默认');
-    const reopened = await restartElectron();
-    await expect(reopened.getByTestId('local-cli-claude')).toContainText('已选为默认');
-    await reopened.getByTestId('continue').click(); await expect(reopened.getByTestId('home-page')).toBeVisible();
-  });
-  test('clears missing Claude without selecting remaining Codex', async ({ window, setLocalCliScenario }) => {
-    await window.getByTestId('local-cli-claude').click();
-    await setLocalCliScenario('local-cli-codex-only');
     await window.getByTestId('local-cli-rescan').click();
-    await expect(window.getByTestId('local-cli-claude')).toHaveCount(0);
-    await expect(window.getByTestId('local-cli-codex')).not.toContainText('已选为默认');
-  });
-  test('uses exact empty copy and never invokes unrelated handlers', async ({ window, setLocalCliScenario, readScenarioState }) => {
-    await setLocalCliScenario('local-cli-empty'); await window.getByTestId('local-cli-rescan').click();
-    await expect(window.getByTestId('local-cli-results')).toHaveText('未扫描到可用本地 CLI');
-    await window.getByTestId('continue').click(); await expect(window.getByTestId('home-page')).toBeVisible();
-    expect((await readScenarioState()).localCliCalls).toMatchObject({ cliExec: 0, ai: 0, installation: 0 });
+    await expect(window.getByTestId('local-cli-claude')).toContainText('已选为默认');
   });
 });
-~~~
+```
 
-- [ ] **Step 2: Verify RED**
+- [ ] **Step 2: Run E2E (RED)**
 
-Run: npx playwright test tests/e2e/local-cli-flow.spec.js
+Run: `npx playwright test tests/e2e/local-cli-flow.spec.js`
 
-Expected: FAIL because restartElectron, setLocalCliScenario, and the injected fixture scenario do not yet exist.
+Expected: FAIL because the E2E entry does not yet inject deterministic empty/two-CLI local states.
 
-- [ ] **Step 3: Implement controlled E2E setup**
+- [ ] **Step 3: Add only an injected service fixture and script inclusion**
 
-Replace the fixture launch helper with a single launch(userDataDir, cliDir, scenario) function that calls electron.launch with PATH set to cliDir plus path.delimiter plus process.env.PATH. In the existing electronContext fixture create cliDir with fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-local-cli-')), pass it to launch, and add fs.promises.rm(cliDir, { recursive: true, force: true }) to cleanupElectronFixture. Expose restartElectron as async () => { await electronApp.close(); electronApp = await launch(userDataDir, cliDir, scenario); window = await electronApp.firstWindow(); return window; }; expose setLocalCliScenario as async (name) => electronApp.evaluate(({ app }, value) => app.__srtSetLocalCliScenario(value), name). This preserves the real scanner/service/IPC/preload/renderer and changes only outer fixture files/process state.
+```js
+// tests/e2e/electron-main.js, before startApplication
+const localCliStates = process.env.SRT_E2E_LOCAL_CLI === 'two'
+  ? [{ id: 'codex', label: 'Codex CLI' }, { id: 'claude', label: 'Claude Code' }]
+  : [];
+let selectedCliId = null;
+const localCliService = {
+  async getState() { return { available: localCliStates, selectedCliId }; },
+  async rescan() { return { available: localCliStates, selectedCliId }; },
+  async select(id) { if (!localCliStates.some((item) => item.id === id)) { const error = new Error('Local CLI unavailable'); error.code = 'LOCAL_CLI_NOT_AVAILABLE'; throw error; } selectedCliId = id; return { available: localCliStates, selectedCliId }; }
+};
+startApplication({ environmentModule, localCliService });
+```
 
-In electron-main.js import createLocalCliScanner and createLocalCliService, construct localCliService from fixture-backed fs/run dependencies, and call startApplication({ environmentModule, localCliService }). Define app.__srtSetLocalCliScenario = (name) => { state.localCliScenario = name; }; Make each outer runner increment state.localCliCalls.native or batch and return success only when the candidate exists in the current scenario. Wrap the existing cli:exec, AI, and installation handler registrations to increment state.localCliCalls.cliExec, ai, installation before delegating. Never replace scanner.scan, service methods, IPC, preload, or renderer.
+Add one option to the existing `base.extend` call and one launch environment property; do not add process restart or scenario mutation helpers:
 
-Change package.json test:e2e exactly to: "test:e2e": "playwright test tests/e2e/environment-flow.spec.js tests/e2e/local-cli-flow.spec.js".
+```js
+localCliMode: ['empty', { option: true }],
+electronContext: async ({ scenario, realEnvironment, localCliMode }, use, testInfo) => {
+  // retain the existing launch and cleanup code
+  electronApp = await electron.launch({ args: [path.join(__dirname, 'electron-main.js')], env: {
+    ...process.env,
+    SRT_E2E_USER_DATA: userDataDir,
+    SRT_E2E_LOCAL_CLI: localCliMode,
+    SRT_E2E_REAL_MAC: realEnvironment ? '1' : '0',
+    SRT_E2E_SCENARIO: realEnvironment ? '' : scenario
+  }});
+}
+```
 
-- [ ] **Step 4: Verify GREEN and E2E regression**
+Change the existing script to:
 
-Run: npx playwright test tests/e2e/local-cli-flow.spec.js && npm run test:e2e
+```json
+"test:e2e": "playwright test tests/e2e/environment-flow.spec.js tests/e2e/local-cli-flow.spec.js"
+```
 
-Expected: PASS; all fixture paths and userData are temporary.
+- [ ] **Step 4: Verify GREEN and all accepted checks**
 
-- [ ] **Step 5: Commit this slice**
+Run: `npx playwright test tests/e2e/local-cli-flow.spec.js && npm run test:e2e && npm run test:unit`
 
-~~~bash
-git add tests/e2e/electron.fixture.js tests/e2e/electron-main.js tests/e2e/local-cli-flow.spec.js package.json
-git commit -m "test: cover local CLI Electron journeys"
-~~~
+Expected: PASS. Run `SRT_REAL_MAC_SMOKE=1 npm run test:e2e:real-mac` for the existing environment smoke, then manually verify on this Mac: scan the three fixed definitions, observe only successful cards, choose one, rescan, make the selected executable unavailable if safely possible, rescan and observe the cleared selection, and enter the home page in both empty and unselected states.
 
-### Task 6: Final acceptance and existing project records
+- [ ] **Step 5: Stop/commit gate**
 
-**Files:**
-- Modify: docs/DEVELOPMENT_LOG.md
-- Modify: docs/PROJECT_STATUS.md
+Before committing, confirm all completion criteria from the approved design are met. If acceptance passes, stop; do not add scope. If support work has exceeded twice estimate or the 3-hour cap, stop and report instead.
 
-**Interfaces:**
-- Consumes actual final output counts; does not create a new record system.
-
-- [ ] **Step 1: Draft record after results are known**
-
-Append a dated local-CLI section to DEVELOPMENT_LOG.md stating: fixed successful-only three-CLI detection; explicit Electron userData default and disappearance clearing; fixed PATH/directory scanning and controlled Windows batch invocation; and the exact unit/E2E outcomes from Step 2.
-
-Replace PROJECT_STATUS.md conclusion with: 2026-09-05 已完成本地 CLI 检测与选择阶段：固定三项发现、显式全局默认值、失效清除、窄 IPC 与 Electron 端到端链路均通过验收。自然语言调用、认证、安装、模型与更多 CLI 仍未开始。 Add those five non-goals to its existing 范围控制 list.
-
-- [ ] **Step 2: Run final acceptance**
-
-Run: npm run test:unit
-
-Expected: PASS, including local-cli-scanner and local-cli-selection tests.
-
-Run: npx playwright test tests/e2e/local-cli-flow.spec.js && npm run test:e2e
-
-Expected: PASS. Do not claim an unrun build, real-Mac smoke, or Windows smoke.
-
-- [ ] **Step 3: Record observed counts and commit only records**
-
-Add the exact passing counts from Step 2 to the record prose; do not write a count until it has been observed.
-
-~~~bash
-git add docs/DEVELOPMENT_LOG.md docs/PROJECT_STATUS.md
-git commit -m "docs: record local CLI detection delivery"
-~~~
-
-- [ ] **Step 4: Verify worktree scope**
-
-Run: git status --short && git log --oneline -6
-
-Expected: task commits are visible; .superpowers remains untracked; no unrelated file is staged or modified.
+```bash
+git add tests/e2e/electron-main.js tests/e2e/electron.fixture.js tests/e2e/local-cli-flow.spec.js package.json
+git commit -m "test: cover local CLI selection journeys"
+```
 
 ## Plan self-review
 
-- [ ] Coverage: Task 1 fixes catalog/order, PATH/fixed directories, Codex.app, links, PATHEXT, native/batch command rules, timeout/output/failure isolation; Task 2 handles persistence/invalidation/no auto-select; Task 3 owns IPC/preload; Task 4 owns successful-only UI/exact copy/non-blocking behavior; Task 5 proves full Electron behavior and no unrelated handler calls.
-- [ ] Task 6 updates only existing DEVELOPMENT_LOG.md and PROJECT_STATUS.md; no new governance structure is introduced.
-- [ ] Scan for TBD, TODO, similar, appropriate, as needed, and undefined interface names; correct every match before commit.
-- [ ] Verify all later tasks use createLocalCliScanner, createLocalCliService, getLocalCliState, rescanLocalCli, selectLocalCli, available, and selectedCliId as defined above.
-
-## Execution handoff
-
-## Third-review authoritative corrections
-
-This section supersedes every earlier abbreviated implementation fragment in this plan. The implementation must use `pathApi = platform === 'win32' ? nodePath.win32 : nodePath.posix`; scanner dependencies are `{ platform, env, fsApi, xOk, runNative, runBatch, homeDir, comSpecPath }`. Every macOS fixture passes `xOk: 1`; `fixture(entries, platform)` normalizes keys with `platform === 'win32' ? nodePath.win32.normalize(name).toLowerCase() : nodePath.posix.normalize(name)`, making the `codex.cmd` fixture match PATHEXT-generated `.CMD` candidates. Its full stat contract is `isFile: () => value === 'file'`, `isSymbolicLink: () => Boolean(value.link)`; `realpath` returns `value.link`; unknown entries throw an Error with `code = 'ENOENT'`.
-
-The cmd assertion is exact: `assert.equal(batch[0].args[3], '""C:\\Tool "^&" "^^" "^%" Space\\codex.cmd" --version"')`; the Windows actual-launch test is `test('cmd launches', { skip: process.platform !== 'win32' }, async () => { /* use a temp .cmd that exits 0 */ })`, and it must never be counted as a macOS smoke result. Scanner RED coverage additionally creates tests for fixed Homebrew/local/Codex.app paths, missing PATHEXT defaults, a failed codex candidate followed by successful claude, ETIMEDOUT, ENOBUFS, and ECOMMAND.
-
-`createLimitedRunner({ spawnImpl, env })` must pass `env`, create `let timer = null` before child listeners, count `Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)`, call `child.kill('SIGKILL')` exactly once for timeout/overflow/nonzero, and reject respectively with codes ETIMEDOUT, ENOBUFS, ECOMMAND. Its test injects an EventEmitter child with stdout/stderr EventEmitters and asserts kill signal, combined 65537 bytes, and timeout. `createProductionLocalCliDependencies({ platform = process.platform, env = process.env, fsApi = fs.promises, spawnImpl = childProcess.spawn, homeDir = os.homedir() })` passes `xOk: fs.constants.X_OK`; it reads `env.ComSpec || env.COMSPEC`, accepts it only when win32.isAbsolute and synchronous lstat confirms a regular non-link file, otherwise batch probes reject ENOENT.
-
-Task 3 creates `tests/local-cli-ipc.test.js` instead of undefined localHandlers/preloadSource. Its helper stubs Electron via Module._load, captures `ipcMain.handle(name, fn)` in a Map, calls `startApplication({ environmentModule: fakeEnvironment, localCliService })`, asserts all three names, invokes each captured function and asserts delegation to getState/rescan/select, then reads preload.js with `fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')` and asserts exactly the three invoke strings. `startApplication` has the sole injection signature `({ environmentModule, localCliService: injectedLocalCliService } = {})`; production creation is only the fallback. Task 3 files and commit include this test.
-
-Task 5 uses a separate `localCliScenario` fixture option, never the existing environment `scenario`: every test declares `test.use({ scenario: 'mac-ready', localCliScenario: 'local-cli-two' })`. Its fixture launch function owns temp userData and cliDir, registers diagnostics after every launch, waits for environment-page loaded, and updates electronApp/window after restart. E2E injects the real scanner and service through Task 3's localCliService parameter; its outer fs API returns ENOENT for every non-fixture PATH/fixed directory, and outer runners only accept fixture paths. Before requiring main, the E2E entry wraps `ipcMain.handle` and increments counters for cli:exec, ai:config:query, ai:ollama:detect, ai:translate:cloud, ai:translate:ollama, installation:describe, and installation:execute before delegating. package.json is included in Task 5 and changes test:e2e to `playwright test tests/e2e/environment-flow.spec.js tests/e2e/local-cli-flow.spec.js`.
-
-Plan complete and saved to docs/superpowers/plans/2026-09-05-local-cli-detection.md. Two execution options:
-
-1. Subagent-Driven (recommended) — dispatch a fresh subagent per task and review between tasks.
-2. Inline Execution — execute in this session using executing-plans, in batches with review checkpoints.
+- **Spec coverage:** Task 1 covers the fixed catalog, ordinary scan/probe, only-success return, simple persistence, explicit choice, no auto-select, selected-item clearing, and minimum Windows branch. Task 2 covers the three narrow Electron calls, successful-results-only UI, exact copy, and optional/nonblocking behavior. Task 3 supplies exactly one empty-state E2E, one visible choose-and-persist E2E, plus manual Mac acceptance.
+- **Explicit deferrals:** Global constraints and task steps exclude every deferred item: invocation/translation/Remotion, install/login/model UI, catalog expansion, generic architecture, complex runner/Windows/filesystem behavior, atomic writes, dynamic/restart harnesses, handler counts, real Windows E2E, and unrelated refactors.
+- **Consistency:** The state field is consistently `selectedCliId`; service methods are consistently `getState`, `rescan`, and `select`; the renderer and IPC use only the same three names. The exact empty copy is identical in every occurrence.
+- **Placeholder scan:** No `TBD`, `TODO`, “implement later”, or undefined interface is left in this plan.
