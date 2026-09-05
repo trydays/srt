@@ -70,3 +70,41 @@ test('uses Windows Path and PATHEXT only as a minimal compatibility branch', asy
   assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
   assert.deepEqual(calls, [['C:\\tools\\codex.EXE', ['--version']]]);
 });
+
+test('probes a fixed Windows CMD shim through ComSpec and rejects command metacharacter paths', async () => {
+  const calls = [];
+  const execFile = (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(null, '', '');
+  };
+  const service = createLocalCliService({
+    platform: 'win32',
+    env: { Path: 'C:\\tools', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tools\\codex.CMD']), execFile
+  });
+
+  assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
+  assert.deepEqual(calls, [{
+    file: 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', '"C:\\tools\\codex.CMD" --version'],
+    options: { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }
+  }]);
+
+  const unsafe = createLocalCliService({
+    platform: 'win32',
+    env: { Path: 'C:\\tool&bad', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tool&bad\\codex.CMD']), execFile
+  });
+  assert.deepEqual((await unsafe.getState()).available, []);
+  assert.equal(calls.length, 1);
+});
+
+test('omits a candidate when a probe resolves with a nonzero exit code', async () => {
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/codex', '/bin/claude']),
+    run: async (file) => ({ exitCode: file === '/bin/codex' ? 1 : 0 })
+  });
+
+  assert.deepEqual((await service.getState()).available, [{ id: 'claude', label: 'Claude Code' }]);
+});

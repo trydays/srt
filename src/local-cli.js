@@ -9,13 +9,27 @@ const CLI_DEFINITIONS = [
   { id: 'gemini', label: 'Gemini CLI', command: 'gemini' }
 ];
 
-function defaultRun(file, args) {
-  return new Promise((resolve, reject) => {
-    childProcess.execFile(file, args, { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }, (error) => {
-      if (error) reject(error);
-      else resolve({ exitCode: 0 });
+function createDefaultRun(execFile, platform, env) {
+  return function run(file, args) {
+    let program = file;
+    let probeArgs = args;
+
+    if (platform === 'win32' && path.win32.extname(file).toUpperCase() === '.CMD') {
+      const comSpec = env.ComSpec || env.COMSPEC;
+      if (typeof comSpec !== 'string' || !path.win32.isAbsolute(comSpec) || /[\r\n"&|<>^%]/.test(file)) {
+        return Promise.reject(new Error('Unsafe Windows command shim'));
+      }
+      program = comSpec;
+      probeArgs = ['/d', '/s', '/c', '"' + file + '" --version'];
+    }
+
+    return new Promise((resolve, reject) => {
+      execFile(program, probeArgs, { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }, (error) => {
+        if (error) reject(error);
+        else resolve({ exitCode: 0 });
+      });
     });
-  });
+  };
 }
 
 function unavailableError() {
@@ -30,10 +44,12 @@ function createLocalCliService({
   homeDir = os.homedir(),
   userDataDir,
   fsApi = fs.promises,
-  run = defaultRun
+  run,
+  execFile = childProcess.execFile
 }) {
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const preferencePath = pathApi.join(userDataDir, 'local-cli.json');
+  const probe = run || createDefaultRun(execFile, platform, env);
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
   const extensions = platform === 'win32'
     ? String(env.PATHEXT || '.EXE;.CMD').split(';').filter((item) => /^\.(EXE|CMD)$/i.test(item))
@@ -69,7 +85,8 @@ function createLocalCliService({
       for (const file of candidates.filter(Boolean)) {
         try {
           if (!(await fsApi.stat(file)).isFile()) continue;
-          await run(file, ['--version']);
+          const result = await probe(file, ['--version']);
+          if (!result || result.exitCode !== 0) continue;
           available.push({ id: definition.id, label: definition.label });
           break;
         } catch (_) {
