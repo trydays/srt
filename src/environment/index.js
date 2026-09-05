@@ -29,8 +29,8 @@ function createEnvironmentModule(dependencies) {
       `target=Path(${JSON.stringify(subtitleModelDir)})`,
       `required=${JSON.stringify(SUBTITLE_MODEL_FILES)}`,
       'snapshot_download(repo_id="Systran/faster-whisper-small", local_dir=str(target), allow_patterns=required)',
-      'assert all((target/name).is_file() and (target/name).stat().st_size > 0 for name in required), "incomplete model"'
-    ].join('; ');
+      'if not all((target/name).is_file() and (target/name).stat().st_size > 0 for name in required): raise RuntimeError("incomplete model")'
+    ].join('\n');
     const downloadModelAction = {
       program: managedPython,
       args: ['-c', downloadModelCode],
