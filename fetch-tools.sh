@@ -49,6 +49,36 @@ log()  { echo "[fetch-tools] $*"; }
 skip() { echo "[fetch-tools] SKIP: $* (already exists, use --force to re-download)"; }
 fail() { echo "[fetch-tools] FAIL: $*" >&2; }
 
+update_manifest_sizes() {
+  local manifest_path="$TOOLS_DIR/tools-versions.json"
+  local manifest_w tools_w
+  manifest_w="$(winpath "$manifest_path")"
+  tools_w="$(winpath "$TOOLS_DIR")"
+  "$PYTHON" - "$manifest_w" "$tools_w" <<'PY'
+import json
+import os
+import sys
+
+manifest_path, tools_dir = sys.argv[1:]
+with open(manifest_path, encoding='utf-8') as source:
+    manifest = json.load(source)
+
+for entry in manifest.get('bundled', {}).values():
+    file_name = entry.get('exe')
+    if not isinstance(file_name, str):
+        continue
+    tool_path = os.path.join(tools_dir, file_name)
+    if os.path.isfile(tool_path):
+        entry['size'] = os.path.getsize(tool_path)
+
+temporary_path = manifest_path + '.tmp'
+with open(temporary_path, 'w', encoding='utf-8', newline='\n') as destination:
+    json.dump(manifest, destination, ensure_ascii=False, separators=(',', ':'))
+    destination.write('\n')
+os.replace(temporary_path, manifest_path)
+PY
+}
+
 # ── 下载辅助函数 ──────────────────────────────────────────
 # download URL FILENAME [expected_size_kb]
 #   下载到 $TOOLS_DIR/FILENAME，支持断点续传(不强制)
@@ -245,6 +275,7 @@ download_node
 download_python
 download_whisper
 download_vcredist
+update_manifest_sizes
 
 log "=== fetch-tools.sh done ==="
 log ""

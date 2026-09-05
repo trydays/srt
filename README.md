@@ -23,15 +23,31 @@ npx create-srt
 
 | 方式 | 命令 | 适合 |
 |------|------|------|
-| 🔥 npx（推荐） | `npx create-srt` | 任何有 Node.js 的电脑 |
+| 🔥 npx（推荐） | `npx create-srt` | 装有 Node.js 20+ 的 Windows 电脑 |
 | 📦 便携版 | [GitHub Releases](https://github.com/trydays/srt/releases) 下载 zip 解压即用 | 不装 Node 的用户 |
 | 🛠 开发 | `git clone` → `npm install` → `node server.js` | 开发者 |
 
 ## 系统要求
 
-- Windows 10+（macOS / Linux 待支持）
-- 如果使用安装包：无需任何前置依赖
-- 如果使用 npx：需要 Node.js 20+
+- Windows 10+：支持 npx 安装和预构建便携版
+- macOS：支持从源码开发运行和环境检测，暂不提供签名的预构建安装包
+- Linux：待支持
+- 使用 Windows 安装包无需前置依赖；从源码运行或使用 npx 需要 Node.js 20+
+
+## Windows 与 macOS 环境检测
+
+桌面版首次启动时会检测 Windows 或 macOS 的硬件与本机工具，并用三档状态说明结果：`满足` 表示当前可用，`可用但受限` 表示可以继续但部分能力受影响，`不满足` 表示对应能力暂不可用。硬件结果只提供建议，不会阻止“继续进入主页”。
+
+缺少可自动安装的工具时，应用会先展示下载量、安装位置、耗时与步骤；只有用户确认后才会执行安装。开发时可运行：
+
+```bash
+npm test
+npm run test:e2e
+```
+
+当前预构建发布仍仅面向 Windows；macOS 支持指源码开发运行与环境检测，不代表已经提供签名安装包。
+
+相关文档：[研发记录](docs/DEVELOPMENT_LOG.md) / [当前项目状态](docs/PROJECT_STATUS.md)
 
 ## 项目结构
 
@@ -41,7 +57,7 @@ srt/
 ├── server.js         # 开发模式服务器
 ├── app/              # 渲染进程页面
 ├── resources/tools/  # 捆绑工具（构建时下载）
-├── tests/            # 测试套件（26 tests）
+├── tests/            # 测试套件
 └── .github/workflows # CI/CD 自动构建
 ```
 
