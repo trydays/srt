@@ -50,6 +50,8 @@ if (!environmentPage) {
   var installError = document.getElementById('installError');
   var installCancel = document.getElementById('installCancel');
   var installConfirm = document.getElementById('installConfirm');
+  var localCliResults = document.getElementById('localCliResults');
+  var localCliRescan = document.getElementById('localCliRescan');
 
   function escapeText(value) {
     return String(value === undefined || value === null || value === '' ? '—' : value)
@@ -296,6 +298,32 @@ if (!environmentPage) {
     });
   }
 
+  function renderLocalCli(state) {
+    var available = state && Array.isArray(state.available) ? state.available : [];
+    if (!available.length) {
+      localCliResults.innerHTML = '<span class="local-cli-empty">未扫描到可用本地 CLI</span>';
+      return;
+    }
+    localCliResults.innerHTML = available.map(function(item) {
+      var selected = item.id === state.selectedCliId;
+      return '<button class="local-cli-choice' + (selected ? ' is-selected' : '') + '" type="button" data-cli-id="' +
+        escapeText(item.id) + '" data-testid="local-cli-' + escapeText(item.id) + '">' +
+        escapeText(item.label) + (selected ? ' 已选为默认' : ' 可用') + '</button>';
+    }).join('');
+  }
+
+  function loadLocalCli(rescan) {
+    if (!window.srtAPI) {
+      localCliResults.innerHTML = '<span class="local-cli-empty">本地 CLI 扫描失败，请重新扫描。</span>';
+      return Promise.resolve();
+    }
+    var call = rescan ? window.srtAPI.rescanLocalCli : window.srtAPI.getLocalCliState;
+    localCliResults.innerHTML = '<span class="local-cli-empty">正在扫描本地 CLI…</span>';
+    return call().then(renderLocalCli).catch(function() {
+      localCliResults.innerHTML = '<span class="local-cli-empty">本地 CLI 扫描失败，请重新扫描。</span>';
+    });
+  }
+
   function closeInstallDialog() {
     if (installDialog.open && typeof installDialog.close === 'function') installDialog.close();
     else installDialog.removeAttribute('open');
@@ -399,6 +427,14 @@ if (!environmentPage) {
   });
 
   retryButton.addEventListener('click', function() { detectEnvironment(); });
+  localCliRescan.addEventListener('click', function() { loadLocalCli(true); });
+  localCliResults.addEventListener('click', function(event) {
+    var button = event.target.closest('[data-cli-id]');
+    if (!button || !window.srtAPI) return;
+    window.srtAPI.selectLocalCli(button.dataset.cliId).then(renderLocalCli).catch(function() {
+      loadLocalCli(false);
+    });
+  });
 
   /* Existing cli/browser render-mode chooser. */
   var renderMode = localStorage.getItem(STORAGE_KEYS.RENDER_MODE);
@@ -421,6 +457,8 @@ if (!environmentPage) {
     localStorage.setItem(STORAGE_KEYS.RENDER_MODE, renderMode);
     location.href = '主页.html';
   });
+
+  loadLocalCli(false);
 
   /* ── AI 配置（自动探测）── */
   (function initAIDetection() {

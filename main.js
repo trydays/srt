@@ -8,6 +8,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const { loadConfig } = require('./config-loader');
 const { createProductionEnvironment } = require('./src/environment/node-adapter');
+const { createLocalCliService } = require('./src/local-cli');
 
 let mainWindow = null;
 
@@ -219,7 +220,7 @@ ipcMain.handle('update:install', async () => {
   }
 });
 
-function startApplication({ environmentModule } = {}) {
+function startApplication({ environmentModule, localCliService } = {}) {
   const userDataDir = app.getPath('userData');
   const bundledRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'tools')
@@ -229,10 +230,14 @@ function startApplication({ environmentModule } = {}) {
     userDataDir,
     bundledRoot
   });
+  const activeLocalCliService = localCliService || createLocalCliService({ userDataDir });
 
   ipcMain.handle('environment:detect', () => activeEnvironment.detectEnvironment());
   ipcMain.handle('installation:describe', (_event, toolId) => activeEnvironment.describeInstall(toolId));
   ipcMain.handle('installation:execute', (_event, request) => activeEnvironment.installTool(request));
+  ipcMain.handle('local-cli:get-state', () => activeLocalCliService.getState());
+  ipcMain.handle('local-cli:rescan', () => activeLocalCliService.rescan());
+  ipcMain.handle('local-cli:select', (_event, id) => activeLocalCliService.select(id));
 
   app.whenReady().then(async () => {
     createWindow();
