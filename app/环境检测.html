@@ -67,6 +67,10 @@
     .capability-card__head{display:flex;align-items:center;justify-content:space-between;gap:8px}
     .capability-card__title{font-size:12.5px;font-weight:650;color:var(--text-strong)}
     .capability-card__detail{font-size:11.5px;color:var(--text-muted);line-height:1.45}
+    .local-cli-list{display:flex;flex-wrap:wrap;gap:8px}
+    .local-cli-choice{appearance:none;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+    .local-cli-choice:hover,.local-cli-choice.is-selected{border-color:var(--accent);background:var(--accent-tint);color:var(--accent-strong)}
+    .local-cli-empty{font-size:12px;color:var(--text-muted)}
 
     /* AI collapsible (OD details/summary pattern) */
     .ai-collapse{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);box-shadow:var(--shadow-xs)}
@@ -152,6 +156,13 @@
       <section class="report-section">
         <div class="mode-label">功能可用性</div>
         <div class="capability-list" id="modeList" data-testid="mode-list" aria-live="polite"></div>
+      </section>
+
+      <section class="report-section" data-testid="local-cli-section">
+        <div class="mode-label">本地 CLI</div>
+        <p class="panel-sub">目前仅支持 Codex CLI、Claude Code 和 Gemini CLI。</p>
+        <div class="local-cli-list" id="localCliResults" data-testid="local-cli-results" aria-live="polite"></div>
+        <button class="btn-retry" id="localCliRescan" data-testid="local-cli-rescan" type="button">重新扫描</button>
       </section>
 
       <!-- Mode selection -->

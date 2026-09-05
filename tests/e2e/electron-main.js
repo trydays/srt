@@ -43,5 +43,26 @@ const environmentModule = {
     return baseEnvironment.installTool(...args);
   }
 };
+const localCliStates = process.env.SRT_E2E_LOCAL_CLI === 'two'
+  ? [{ id: 'codex', label: 'Codex CLI' }, { id: 'claude', label: 'Claude Code' }]
+  : [];
+let selectedCliId = null;
+const localCliService = {
+  async getState() {
+    return { available: localCliStates, selectedCliId };
+  },
+  async rescan() {
+    return { available: localCliStates, selectedCliId };
+  },
+  async select(id) {
+    if (!localCliStates.some((item) => item.id === id)) {
+      const error = new Error('Local CLI unavailable');
+      error.code = 'LOCAL_CLI_NOT_AVAILABLE';
+      throw error;
+    }
+    selectedCliId = id;
+    return { available: localCliStates, selectedCliId };
+  }
+};
 app.__srtE2EState = state;
-startApplication({ environmentModule });
+startApplication({ environmentModule, localCliService });

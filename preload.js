@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('srtAPI', {
   openVideo: () => ipcRenderer.invoke('dialog:openVideo'),
   execCommand: (cmd, timeout) => ipcRenderer.invoke('cli:exec', cmd, timeout),
   detectEnvironment: () => ipcRenderer.invoke('environment:detect'),
+  getLocalCliState: () => ipcRenderer.invoke('local-cli:get-state'),
+  rescanLocalCli: () => ipcRenderer.invoke('local-cli:rescan'),
+  selectLocalCli: (id) => ipcRenderer.invoke('local-cli:select', id),
   describeInstall: (toolId) => ipcRenderer.invoke('installation:describe', toolId),
   installTool: (toolId, confirmationId) => ipcRenderer.invoke(
     'installation:execute',

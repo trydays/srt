@@ -1,11 +1,24 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const projectRoot = path.join(__dirname, '..');
 const mainPath = path.join(projectRoot, 'main.js');
 const e2eEntryPath = path.join(projectRoot, 'tests', 'e2e', 'electron-main.js');
+const mainSource = fs.readFileSync(mainPath, 'utf8');
+const preloadSource = fs.readFileSync(path.join(projectRoot, 'preload.js'), 'utf8');
+
+test('main and preload expose only narrow local CLI operations', () => {
+  assert.match(mainSource, /ipcMain\.handle\('local-cli:get-state'/);
+  assert.match(mainSource, /ipcMain\.handle\('local-cli:rescan'/);
+  assert.match(mainSource, /ipcMain\.handle\('local-cli:select'/);
+  assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
+  assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
+  assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
+  assert.equal(preloadSource.includes('local-cli:exec'), false);
+});
 
 function observeAutomaticStart(scenario) {
   const script = `
