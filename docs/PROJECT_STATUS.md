@@ -4,7 +4,7 @@
 
 ## 结论
 
-Windows / macOS 环境检测阶段的五项必要底线与退出条件已全部满足，本阶段已结束。当前成果已提交至 [Pull Request #1](https://github.com/trydays/srt/pull/1)，状态为 Open，不再以“还可以更完善”为由扩大本阶段。
+Windows / macOS 环境检测阶段的五项必要底线与退出条件已全部满足，本阶段已结束。当前成果已通过 [Pull Request #1](https://github.com/trydays/srt/pull/1) 合并进入 `main`，仓库默认主页已展示本轮新版本，不再以“还可以更完善”为由扩大本阶段。
 
 ## 内部完成度
 
@@ -31,12 +31,11 @@ Windows / macOS 环境检测阶段的五项必要底线与退出条件已全部�
 
 ## 后续工作
 
-当前只保留两个下一步：
+当前只保留一个发布前补充验证：
 
-1. 审查并合并 [Pull Request #1](https://github.com/trydays/srt/pull/1)。
-2. 集成后在真实 Windows 设备上运行烟雾测试，作为发布前的平台补充验证。
+1. 在真实 Windows 设备上运行烟雾测试，作为发布前的平台补充验证。
 
-真实 Windows 烟雾、可选 CUDA、签名/发布链路以及通用 helper / policy 重构都不是本阶段的合并阻断项。
+真实 Windows 烟雾、可选 CUDA、签名/发布链路以及通用 helper / policy 重构都不是本阶段的完成阻断项。
 
 ## 范围控制
 
