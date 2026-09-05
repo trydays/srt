@@ -258,6 +258,8 @@ test('Whisper 只下载固定 Small 到固定应用目录', async () => {
   assert.ok(download.args[1].includes('target=Path("/user-data/models/faster-whisper-small")'));
   assert.match(download.args[1], /import faster_whisper/);
   assert.match(download.args[1], /model\.bin/);
+  assert.match(download.args[1], /vocabulary\.txt/);
+  assert.doesNotMatch(download.args[1], /vocabulary\.json/);
   assert.match(download.args[1], /if not all\(\(target\/name\)\.is_file\(\) and \(target\/name\)\.stat\(\)\.st_size > 0 for name in required\): raise RuntimeError\("incomplete model"\)/);
   assert.doesNotMatch(download.args[1], /\bassert\b/);
   assert.match(download.args[1], /st_size > 0/);

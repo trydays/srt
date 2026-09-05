@@ -17,7 +17,7 @@
 - 保持现有暖白与陶土橙配色；不改 `app/环境检测.html` 的布局与颜色。
 - 不改变 main/preload 的 IPC 形状；renderer 不能提供模型 ID、目录、Python 代码或命令参数。
 - 固定模型目录为 `<userDataDir>/models/faster-whisper-small`。
-- 就绪条件只有三个：应用管理的 Python 3.12 可用、`faster_whisper` 可导入、`model.bin`、`config.json`、`tokenizer.json`、`vocabulary.json` 都是非空文件。
+- 就绪条件只有三个：应用管理的 Python 3.12 可用、`faster_whisper` 可导入、`model.bin`、`config.json`、`tokenizer.json`、`vocabulary.txt` 都是非空文件（依据真实官方仓库 tree 清单的事实校正）。
 - 自动测试不联网、不下载模型、不写入真实用户目录。
 - 主动实施目标 50 分钟、硬上限 55 分钟；真实模型传输另给一次最多 20 分钟，总目标 60 分钟、总硬上限 75 分钟。
 - 支撑工作仅限 `fsApi.stat`、单元测试 fixture 和一条 E2E 场景，累计上限 12 分钟，不得超过主动实施目标的 25%。
@@ -85,7 +85,7 @@ Task 1 不创建中间提交，避免出现“界面宣称可准备、后端尚�
 
   ```js
   const SUBTITLE_MODEL_FILES = [
-    'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'
   ];
   const FASTER_WHISPER_PROBE =
     'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
@@ -197,7 +197,7 @@ Task 1 不创建中间提交，避免出现“界面宣称可准备、后端尚�
   const path = require('node:path');
 
   const SUBTITLE_MODEL_FILES = [
-    'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'
   ];
   const FASTER_WHISPER_PROBE =
     'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
@@ -509,7 +509,7 @@ Task 1 不创建中间提交，避免出现“界面宣称可准备、后端尚�
 
   ```js
   const SUBTITLE_MODEL_FILES = [
-    'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'
   ];
   const FASTER_WHISPER_PROBE =
     'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';

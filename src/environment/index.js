@@ -1,7 +1,7 @@
 const path = require('node:path');
 
 const SUBTITLE_MODEL_FILES = [
-  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'
 ];
 const FASTER_WHISPER_PROBE =
   'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';

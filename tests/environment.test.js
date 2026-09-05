@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { createEnvironmentModule } = require('../src/environment');
 
 const SUBTITLE_MODEL_FILES = [
-  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.txt'
 ];
 const FASTER_WHISPER_PROBE =
   'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
@@ -372,6 +372,15 @@ test('Whisper 只在托管 Python 可导入且四文件非空时可用', async (
   const cases = [
     { modelFiles: {}, expected: 'missing' },
     { modelFiles: { ...complete, 'model.bin': 0 }, expected: 'missing' },
+    {
+      modelFiles: {
+        'model.bin': 1,
+        'config.json': 1,
+        'tokenizer.json': 1,
+        'vocabulary.json': 1
+      },
+      expected: 'missing'
+    },
     { modelFiles: complete, expected: 'ready' }
   ];
 
