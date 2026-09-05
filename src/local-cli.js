@@ -13,18 +13,22 @@ function createDefaultRun(execFile, platform, env) {
   return function run(file, args) {
     let program = file;
     let probeArgs = args;
+    let windowsVerbatimArguments = false;
 
     if (platform === 'win32' && path.win32.extname(file).toUpperCase() === '.CMD') {
       const comSpec = env.ComSpec || env.COMSPEC;
-      if (typeof comSpec !== 'string' || !path.win32.isAbsolute(comSpec) || /[\r\n"&|<>^%]/.test(file)) {
+      if (typeof comSpec !== 'string' || !path.win32.isAbsolute(comSpec) || /[\r\n"!&|<>^%]/.test(file)) {
         return Promise.reject(new Error('Unsafe Windows command shim'));
       }
       program = comSpec;
-      probeArgs = ['/d', '/s', '/c', '"' + file + '" --version'];
+      probeArgs = ['/d', '/s', '/c', '""' + file + '" --version"'];
+      windowsVerbatimArguments = true;
     }
 
     return new Promise((resolve, reject) => {
-      execFile(program, probeArgs, { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }, (error) => {
+      const options = { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true };
+      if (windowsVerbatimArguments) options.windowsVerbatimArguments = true;
+      execFile(program, probeArgs, options, (error) => {
         if (error) reject(error);
         else resolve({ exitCode: 0 });
       });

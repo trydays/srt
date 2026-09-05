@@ -61,14 +61,22 @@ test('persists only an explicit available selection and clears a missing one', a
 
 test('uses Windows Path and PATHEXT only as a minimal compatibility branch', async () => {
   const calls = [];
+  const execFile = (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(null, '', '');
+  };
   const service = createLocalCliService({
     platform: 'win32', env: { Path: 'C:\\tools', PATHEXT: '.EXE;.CMD' }, homeDir: '', userDataDir: 'C:\\prefs',
     fsApi: fakeFs(['C:\\tools\\codex.EXE']),
-    run: async (file, args) => { calls.push([file, args]); return { exitCode: 0 }; }
+    execFile
   });
 
   assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
-  assert.deepEqual(calls, [['C:\\tools\\codex.EXE', ['--version']]]);
+  assert.deepEqual(calls, [{
+    file: 'C:\\tools\\codex.EXE',
+    args: ['--version'],
+    options: { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }
+  }]);
 });
 
 test('probes a fixed Windows CMD shim through ComSpec and rejects command metacharacter paths', async () => {
@@ -79,21 +87,21 @@ test('probes a fixed Windows CMD shim through ComSpec and rejects command metach
   };
   const service = createLocalCliService({
     platform: 'win32',
-    env: { Path: 'C:\\tools', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
-    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tools\\codex.CMD']), execFile
+    env: { Path: 'C:\\tool space', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tool space\\codex.CMD']), execFile
   });
 
   assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
   assert.deepEqual(calls, [{
     file: 'C:\\Windows\\System32\\cmd.exe',
-    args: ['/d', '/s', '/c', '"C:\\tools\\codex.CMD" --version'],
-    options: { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true }
+    args: ['/d', '/s', '/c', '""C:\\tool space\\codex.CMD" --version"'],
+    options: { timeout: 3000, maxBuffer: 64 * 1024, windowsHide: true, windowsVerbatimArguments: true }
   }]);
 
   const unsafe = createLocalCliService({
     platform: 'win32',
-    env: { Path: 'C:\\tool&bad', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
-    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tool&bad\\codex.CMD']), execFile
+    env: { Path: 'C:\\tool!bad', PATHEXT: '.CMD', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    homeDir: '', userDataDir: 'C:\\prefs', fsApi: fakeFs(['C:\\tool!bad\\codex.CMD']), execFile
   });
   assert.deepEqual((await unsafe.getState()).available, []);
   assert.equal(calls.length, 1);
