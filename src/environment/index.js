@@ -1,17 +1,41 @@
+const path = require('node:path');
+
+const SUBTITLE_MODEL_FILES = [
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+];
+const FASTER_WHISPER_PROBE =
+  'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
+
 function createEnvironmentModule(dependencies) {
   const runOptions = { timeout: 5000, maxBuffer: 1024 * 1024 };
   const installRunOptions = { timeoutMs: 300000 };
   const confirmations = new Map();
+  const pathApi = dependencies.platform === 'win32' ? path.win32 : path.posix;
+  const managedDirectory = pathApi.join(dependencies.userDataDir, 'python');
+  const managedPython = dependencies.platform === 'win32'
+    ? pathApi.join(managedDirectory, 'Scripts', 'python.exe')
+    : pathApi.join(managedDirectory, 'bin', 'python');
+  const subtitleModelDir = pathApi.join(
+    dependencies.userDataDir, 'models', 'faster-whisper-small'
+  );
 
   function installationCatalog() {
-    const managedPython = dependencies.platform === 'win32'
-      ? `${dependencies.userDataDir}\\python\\Scripts\\python.exe`
-      : `${dependencies.userDataDir}/python/bin/python`;
-    const managedDirectory = dependencies.platform === 'win32'
-      ? `${dependencies.userDataDir}\\python`
-      : `${dependencies.userDataDir}/python`;
     const wingetAgreements = ['--exact', '--accept-package-agreements', '--accept-source-agreements'];
     const pipPackages = ['-m', 'pip', 'install', 'faster-whisper', 'soundfile', 'numpy'];
+    const downloadModelCode = [
+      'from pathlib import Path',
+      'from huggingface_hub import snapshot_download',
+      'import faster_whisper',
+      `target=Path(${JSON.stringify(subtitleModelDir)})`,
+      `required=${JSON.stringify(SUBTITLE_MODEL_FILES)}`,
+      'snapshot_download(repo_id="Systran/faster-whisper-small", local_dir=str(target), allow_patterns=required)',
+      'assert all((target/name).is_file() and (target/name).stat().st_size > 0 for name in required), "incomplete model"'
+    ].join('; ');
+    const downloadModelAction = {
+      program: managedPython,
+      args: ['-c', downloadModelCode],
+      timeoutMs: 1200000
+    };
 
     return {
       darwin: {
@@ -31,12 +55,13 @@ function createEnvironmentModule(dependencies) {
           actions: [{ program: 'brew', args: ['install', 'python@3.12'] }]
         },
         whisper: {
-          label: 'Whisper', downloadEstimate: '约 1.5 GB', installLocation: '应用管理的 Python 环境', durationEstimate: '约 5–20 分钟',
-          steps: ['确保 Python 3.12 可用。', '创建应用专用的隔离 Python 环境。', '在隔离环境中安装语音识别依赖。'],
+          label: 'Whisper 字幕', downloadEstimate: '约 486 MB', installLocation: '应用管理的 Python 与模型目录', durationEstimate: '约 5–20 分钟',
+          steps: ['准备应用专用的 Python 3.12 环境。', '安装 faster-whisper 运行依赖。', '下载固定的 Small 本地模型，完成后可离线使用。'],
           actions: [
             { program: 'brew', args: ['install', 'python@3.12'] },
             { program: 'python3.12', args: ['-m', 'venv', managedDirectory] },
-            { program: managedPython, args: pipPackages }
+            { program: managedPython, args: pipPackages },
+            downloadModelAction
           ]
         }
       },
@@ -57,12 +82,13 @@ function createEnvironmentModule(dependencies) {
           actions: [{ program: 'winget', args: ['install', '--id', 'Python.Python.3.12', ...wingetAgreements] }]
         },
         whisper: {
-          label: 'Whisper', downloadEstimate: '约 1.5 GB', installLocation: '应用管理的 Python 环境', durationEstimate: '约 5–20 分钟',
-          steps: ['确保 Python 3.12 可用。', '创建应用专用的隔离 Python 环境。', '在隔离环境中安装语音识别依赖。'],
+          label: 'Whisper 字幕', downloadEstimate: '约 486 MB', installLocation: '应用管理的 Python 与模型目录', durationEstimate: '约 5–20 分钟',
+          steps: ['准备应用专用的 Python 3.12 环境。', '安装 faster-whisper 运行依赖。', '下载固定的 Small 本地模型，完成后可离线使用。'],
           actions: [
             { program: 'winget', args: ['install', '--id', 'Python.Python.3.12', ...wingetAgreements] },
             { program: 'py', args: ['-3.12', '-m', 'venv', managedDirectory] },
-            { program: managedPython, args: pipPackages }
+            { program: managedPython, args: pipPackages },
+            downloadModelAction
           ]
         }
       }
@@ -82,14 +108,6 @@ function createEnvironmentModule(dependencies) {
 
   function errorReason(error) {
     return error && error.code === 'ENOENT' ? 'absent' : 'probe_error';
-  }
-
-  function whisperErrorReason(error) {
-    if (errorReason(error) === 'absent') return 'absent';
-    const output = `${error && error.stdout || ''}\n${error && error.stderr || ''}`;
-    return error && error.code === 'ECOMMAND' && /Package\(s\) not found:\s*[^\r\n]*\bfaster-whisper\b/i.test(output)
-      ? 'absent'
-      : 'probe_error';
   }
 
   function blankTool(command, source, reason) {
@@ -168,19 +186,16 @@ function createEnvironmentModule(dependencies) {
       const [major, minor] = version.split('.').map(Number);
       return major === 3 && minor === 12;
     };
-    const managed = isWindows
-      ? `${dependencies.userDataDir}\\python\\Scripts\\python.exe`
-      : `${dependencies.userDataDir}/python/bin/python`;
     const bundled = isWindows ? bundledTool('python', compatible) : null;
     const candidates = isWindows
       ? [
-          { program: managed, args: [], source: 'managed' },
+          { program: managedPython, args: [], source: 'managed' },
           ...(bundled ? [{ tool: bundled }] : []),
           { program: 'py', args: ['-3'], source: 'system' },
           { program: 'python', args: [], source: 'system' }
         ]
       : [
-          { program: managed, args: [], source: 'managed' },
+          { program: managedPython, args: [], source: 'managed' },
           { program: '/opt/homebrew/opt/python@3.12/bin/python3.12', args: [], source: 'system' },
           { program: '/usr/local/opt/python@3.12/bin/python3.12', args: [], source: 'system' },
           { program: 'python3.12', args: [], source: 'system' },
@@ -218,31 +233,40 @@ function createEnvironmentModule(dependencies) {
     return strongestFailure;
   }
 
+  async function isSubtitleModelReady() {
+    if (!dependencies.fsApi || typeof dependencies.fsApi.stat !== 'function') return false;
+    try {
+      const stats = await Promise.all(SUBTITLE_MODEL_FILES.map((fileName) => (
+        dependencies.fsApi.stat(pathApi.join(subtitleModelDir, fileName))
+      )));
+      return stats.every((stat) => stat && stat.isFile() && stat.size > 0);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function probeWhisper(python) {
-    if (!python.installed) return blankTool(python.command, python.source, python.reason);
-    if (python.source === 'bundled' && !python.compatible) {
-      return blankTool(python.command, python.source, python.reason);
+    if (!python.installed || !python.compatible || python.source !== 'managed') {
+      return blankTool(managedPython, 'managed', 'absent');
     }
     try {
-      const args = (python.prefixArgs || []).concat(['-m', 'pip', 'show', 'faster-whisper']);
-      const output = await dependencies.run(python.command, args, runOptions);
+      const output = await dependencies.run(
+        managedPython, ['-c', FASTER_WHISPER_PROBE], runOptions
+      );
       const text = output && output.stdout !== undefined ? output.stdout : output;
-      const nameMatches = /(^|\n)Name:\s*faster-whisper\s*$/im.test(String(text));
-      const versionLine = String(text).match(/(^|\n)Version:\s*([^\r\n]+)/i);
-      const version = versionLine && versionFrom(versionLine[2]);
-      const installed = Boolean(nameMatches);
-      const compatible = Boolean(nameMatches && version);
+      const version = versionFrom(text);
+      if (!await isSubtitleModelReady()) {
+        return {
+          installed: true, compatible: false, version, command: managedPython,
+          source: 'managed', status: 'missing', reason: 'absent'
+        };
+      }
       return {
-        installed,
-        compatible,
-        version: version || null,
-        command: python.command,
-        source: python.source,
-        status: compatible ? 'ready' : 'limited',
-        reason: compatible ? 'ok' : 'incompatible'
+        installed: true, compatible: true, version, command: managedPython,
+        source: 'managed', status: 'ready', reason: 'ok'
       };
-    } catch (error) {
-      return blankTool(python.command, python.source, whisperErrorReason(error));
+    } catch (_) {
+      return blankTool(managedPython, 'managed', 'probe_error');
     }
   }
 
@@ -407,7 +431,9 @@ function createEnvironmentModule(dependencies) {
       toolId,
       canAutomate,
       summary: canAutomate
-        ? `${installation.label} 将通过 ${managerName} 安装。`
+        ? toolId === 'whisper'
+          ? '将在应用管理目录准备 faster-whisper 与固定 Small 模型。'
+          : `${installation.label} 将通过 ${managerName} 安装。`
         : `未检测到 ${managerName}，无法自动安装 ${installation.label}。`,
       downloadEstimate: installation.downloadEstimate,
       installLocation: installation.installLocation,
@@ -434,7 +460,10 @@ function createEnvironmentModule(dependencies) {
 
     try {
       for (const action of installation.actions) {
-        await dependencies.run(action.program, action.args.slice(), installRunOptions);
+        await dependencies.run(action.program, action.args.slice(), {
+          ...installRunOptions,
+          ...(action.timeoutMs ? { timeoutMs: action.timeoutMs } : {})
+        });
       }
       return { ok: true, toolId: request.toolId };
     } catch (_) {

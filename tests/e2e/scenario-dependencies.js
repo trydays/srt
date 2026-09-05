@@ -1,4 +1,9 @@
 const gibibyte = 1024 ** 3;
+const SUBTITLE_MODEL_FILES = [
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+];
+const FASTER_WHISPER_PROBE =
+  'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
 
 function commandError(message, code) {
   const error = new Error(message);
@@ -35,6 +40,10 @@ function createScenarioDependencies(name) {
     'mac-degraded': {
       platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
       memoryGB: 6, diskFreeGB: 5, diskTotalGB: 494, graphics: 'probe_error'
+    },
+    'mac-whisper-retry': {
+      platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
+      memoryGB: 24, diskFreeGB: 180, diskTotalGB: 494, graphics: 'ready'
     }
   };
   const scenario = scenarios[name];
@@ -44,7 +53,11 @@ function createScenarioDependencies(name) {
     calls: [],
     confirmationCount: 0,
     ffmpegInstallCount: 0,
-    nodeInstallCount: 0
+    nodeInstallCount: 0,
+    managedPythonReady: false,
+    whisperPackageReady: false,
+    whisperModelReady: false,
+    whisperDownloadAttempts: 0
   };
   const windowsNodeDir = 'C:\\Program Files\\nodejs';
   const windowsNodeExe = `${windowsNodeDir}\\node.exe`;
@@ -109,7 +122,16 @@ function createScenarioDependencies(name) {
     const managedMacPython = scenario.platform === 'darwin' && /\/python\/bin\/python$/.test(program);
     const managedWindowsPython = scenario.platform === 'win32' && /\\python\\Scripts\\python\.exe$/.test(program);
     if ((managedMacPython || managedWindowsPython) && sameArgs(callArgs, ['--version'])) {
+      if (name === 'mac-whisper-retry' && state.managedPythonReady) {
+        return Promise.resolve(successful('Python 3.12.9'));
+      }
       return Promise.reject(commandError('managed Python is absent', 'ENOENT'));
+    }
+    if (name === 'mac-whisper-retry' && managedMacPython &&
+        sameArgs(callArgs, ['-c', FASTER_WHISPER_PROBE])) {
+      return state.whisperPackageReady
+        ? Promise.resolve(successful('1.2.1'))
+        : Promise.reject(commandError('faster-whisper is absent', 'ECOMMAND'));
     }
     if (scenario.platform === 'darwin' && program === 'python3' && sameArgs(callArgs, ['--version'])) {
       return Promise.resolve(successful('Python 3.12.9'));
@@ -150,6 +172,7 @@ function createScenarioDependencies(name) {
       sameArgs(callArgs, ['install', '--id', 'Python.Python.3.12', '--exact', '--accept-package-agreements', '--accept-source-agreements'])
     )) return Promise.resolve(successful('package installed'));
     if (program === 'python3.12' && callArgs[0] === '-m' && callArgs[1] === 'venv' && callArgs.length === 3) {
+      if (name === 'mac-whisper-retry') state.managedPythonReady = true;
       return Promise.resolve(successful('environment created'));
     }
     if (program === 'py' && callArgs[0] === '-3.12' && callArgs[1] === '-m' && callArgs[2] === 'venv' && callArgs.length === 4) {
@@ -157,7 +180,23 @@ function createScenarioDependencies(name) {
     }
     if ((managedMacPython || managedWindowsPython) && sameArgs(callArgs, [
       '-m', 'pip', 'install', 'faster-whisper', 'soundfile', 'numpy'
-    ])) return Promise.resolve(successful('dependencies installed'));
+    ])) {
+      if (name === 'mac-whisper-retry') state.whisperPackageReady = true;
+      return Promise.resolve(successful('dependencies installed'));
+    }
+
+    if (name === 'mac-whisper-retry' && managedMacPython && callArgs[0] === '-c' &&
+        /snapshot_download/.test(callArgs[1] || '')) {
+      state.whisperDownloadAttempts += 1;
+      return new Promise((resolve, reject) => setTimeout(() => {
+        if (state.whisperDownloadAttempts === 1) {
+          reject(commandError('model download failed', 'ECOMMAND'));
+          return;
+        }
+        state.whisperModelReady = true;
+        resolve(successful('model ready'));
+      }, 300));
+    }
 
     return Promise.reject(commandError(`Unexpected E2E command: ${program} ${JSON.stringify(callArgs)}`));
   }
@@ -180,7 +219,14 @@ function createScenarioDependencies(name) {
         blocks: scenario.diskTotalGB * gibibyte / 4096,
         bavail: scenario.diskFreeGB * gibibyte / 4096,
         bfree: scenario.diskFreeGB * gibibyte / 4096
-      })
+      }),
+      stat: async (filePath) => {
+        const required = SUBTITLE_MODEL_FILES.some((fileName) => filePath.endsWith(fileName));
+        if (name !== 'mac-whisper-retry' || !state.whisperModelReady || !required) {
+          throw commandError('model file is absent', 'ENOENT');
+        }
+        return { size: 1, isFile: () => true };
+      }
     },
     run,
     getBundledTools: () => ({}),

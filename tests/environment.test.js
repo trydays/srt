@@ -3,6 +3,16 @@ const assert = require('node:assert/strict');
 
 const { createEnvironmentModule } = require('../src/environment');
 
+const SUBTITLE_MODEL_FILES = [
+  'model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'
+];
+const FASTER_WHISPER_PROBE =
+  'import faster_whisper, importlib.metadata as m; print(m.version("faster-whisper"))';
+
+function completeSubtitleModelFiles() {
+  return Object.fromEntries(SUBTITLE_MODEL_FILES.map((name) => [name, 1]));
+}
+
 function commandError(code) {
   const error = new Error(code);
   error.code = code;
@@ -14,11 +24,14 @@ function makeFixture(overrides) {
   const calls = [];
   const commandResults = options.commandResults || {};
   const platform = options.platform || 'darwin';
+  const userDataDir = options.userDataDir ||
+    (platform === 'win32' ? 'C:\\user-data' : '/user-data');
+  const modelFiles = options.modelFiles || {};
   const fixture = {
     platform,
     arch: options.arch || (platform === 'win32' ? 'x64' : 'arm64'),
     targetPath: options.targetPath || (platform === 'win32' ? 'C:\\app-data' : '/app-data'),
-    userDataDir: options.userDataDir || (platform === 'win32' ? 'C:\\user-data' : '/user-data'),
+    userDataDir,
     windowsNodeDir: options.windowsNodeDir,
     osApi: {
       version: () => options.version || 'macOS 15.6',
@@ -27,7 +40,14 @@ function makeFixture(overrides) {
       totalmem: () => options.totalmem === undefined ? 16 * 1024 ** 3 : options.totalmem
     },
     fsApi: {
-      statfs: () => options.statfs || { bsize: 1024 ** 3, blocks: 100, bfree: 40 }
+      statfs: () => options.statfs || { bsize: 1024 ** 3, blocks: 100, bfree: 40 },
+      stat: async (filePath) => {
+        const fileName = SUBTITLE_MODEL_FILES.find((name) => filePath.endsWith(name));
+        if (!fileName || !Object.prototype.hasOwnProperty.call(modelFiles, fileName)) {
+          throw commandError('ENOENT');
+        }
+        return { size: modelFiles[fileName], isFile: () => true };
+      }
     },
     run: async (program, args, runOptions) => {
       calls.push({ program, args, options: runOptions });
@@ -47,10 +67,8 @@ function macFixture(options) {
   const settings = options || {};
   const versions = settings.versions || {};
   const whisperOutput = settings.whisperVersion
-    ? `Name: faster-whisper\nVersion: ${settings.whisperVersion}`
-    : settings.whisper ? 'Name: faster-whisper' : Object.assign(commandError('ECOMMAND'), {
-        stderr: 'WARNING: Package(s) not found: faster-whisper'
-      });
+    ? settings.whisperVersion
+    : commandError('ECOMMAND');
   return makeFixture({
     ...settings,
     platform: 'darwin',
@@ -61,9 +79,7 @@ function macFixture(options) {
       '/user-data/python/bin/python --version': settings.managedPython ? `Python ${settings.managedPython}` : commandError('ENOENT'),
       'python3 --version': versions.python3 ? `Python ${versions.python3}` : commandError('ENOENT'),
       'python --version': versions.python ? `Python ${versions.python}` : commandError('ENOENT'),
-      '/user-data/python/bin/python -m pip show faster-whisper': whisperOutput,
-      'python3 -m pip show faster-whisper': whisperOutput,
-      'python -m pip show faster-whisper': whisperOutput,
+      [`/user-data/python/bin/python -c ${FASTER_WHISPER_PROBE}`]: whisperOutput,
       'system_profiler SPDisplaysDataType -json': settings.graphics === 'error'
         ? new Error('probe failed')
         : JSON.stringify({ SPDisplaysDataType: [{ _name: 'Apple M4', spdisplays_metal: 'Supported, feature set macOS GPUFamily2 v1' }] }),
@@ -79,10 +95,8 @@ function windowsFixture(options) {
   const nodeExe = `${nodeDir}\\node.exe`;
   const npmCli = `${nodeDir}\\node_modules\\npm\\bin\\npm-cli.js`;
   const whisperOutput = settings.whisperVersion
-    ? `Name: faster-whisper\nVersion: ${settings.whisperVersion}`
-    : settings.whisper ? 'Name: faster-whisper' : Object.assign(commandError('ECOMMAND'), {
-        stderr: 'WARNING: Package(s) not found: faster-whisper'
-      });
+    ? settings.whisperVersion
+    : commandError('ECOMMAND');
   return makeFixture({
     ...settings,
     platform: 'win32',
@@ -97,9 +111,7 @@ function windowsFixture(options) {
       'C:\\user-data\\python\\Scripts\\python.exe --version': settings.managedPython ? `Python ${settings.managedPython}` : commandError('ENOENT'),
       'py -3 --version': versions.py ? `Python ${versions.py}` : commandError('ENOENT'),
       'python --version': versions.python ? `Python ${versions.python}` : commandError('ENOENT'),
-      'C:\\user-data\\python\\Scripts\\python.exe -m pip show faster-whisper': whisperOutput,
-      'py -3 -m pip show faster-whisper': whisperOutput,
-      'python -m pip show faster-whisper': whisperOutput,
+      [`C:\\user-data\\python\\Scripts\\python.exe -c ${FASTER_WHISPER_PROBE}`]: whisperOutput,
       'powershell.exe -NoProfile -Command Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name': settings.graphics === 'error' ? new Error('probe failed') : 'NVIDIA RTX\r\n',
       ...(settings.commandResults || {})
     }
@@ -226,26 +238,24 @@ test('模式只由各自所需的兼容工具决定', async () => {
   assert.deepEqual(report.modes.subtitles, { status: 'missing', reason: 'absent', blockers: ['whisper'] });
 });
 
-test('Python 按平台顺序选择候选项，并用候选项探测 Whisper', async () => {
+test('Python 按平台顺序选择候选项，Whisper 仅由托管环境决定', async () => {
   const mac = macFixture({ versions: { python: '3.12.4' }, whisper: true });
   const macReport = await createEnvironmentModule(mac).detectEnvironment();
   const windows = windowsFixture({ versions: { py: '3.12.4' } });
   const windowsReport = await createEnvironmentModule(windows).detectEnvironment();
   assert.equal(macReport.tools.python.command, 'python');
-  assert.ok(mac.calls.some((call) => call.program === 'python' && call.args.join(' ') === '-m pip show faster-whisper'));
+  assert.equal(macReport.tools.whisper.status, 'missing');
+  assert.equal(mac.calls.some((call) => call.program === 'python' && call.args[0] === '-c'), false);
   assert.equal(windowsReport.tools.python.command, 'py');
   assert.deepEqual(windows.calls.find((call) => call.program === 'py').args, ['-3', '--version']);
+  assert.equal(windowsReport.tools.whisper.status, 'missing');
+  assert.equal(windows.calls.some((call) => call.program === 'py' && call.args.includes('-c')), false);
 });
 
-test('Windows 使用校验通过的捆绑 Python 并由它探测 Whisper', async () => {
+test('Windows 使用校验通过的捆绑 Python，Whisper 仍要求托管环境', async () => {
   const fixture = windowsFixture({
     bundled: {
       python: { available: true, version: '3.12.4', path: 'C:\\bundle\\python.exe' }
-    },
-    commandResults: {
-      'C:\\bundle\\python.exe -m pip show faster-whisper': Object.assign(commandError('ECOMMAND'), {
-        stderr: 'WARNING: Package(s) not found: faster-whisper'
-      })
     }
   });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
@@ -253,10 +263,8 @@ test('Windows 使用校验通过的捆绑 Python 并由它探测 Whisper', async
     [report.tools.python.status, report.tools.python.source, report.tools.python.command],
     ['ready', 'bundled', 'C:\\bundle\\python.exe']
   );
-  assert.equal(
-    fixture.calls.some((call) => call.program === 'C:\\bundle\\python.exe' && call.args.join(' ') === '-m pip show faster-whisper'),
-    true
-  );
+  assert.equal(report.tools.whisper.status, 'missing');
+  assert.equal(fixture.calls.some((call) => call.program === 'C:\\bundle\\python.exe'), false);
   assert.equal(fixture.calls.some((call) => call.program === 'py'), false);
 });
 
@@ -359,33 +367,23 @@ test('捆绑工具目录读取失败不会阻断环境报告', async () => {
   assert.equal(report.canContinue, true);
 });
 
-test('Whisper 解析版本，成功但不可解析的输出为不兼容', async () => {
-  const ready = await createEnvironmentModule(macFixture({ versions: { python3: '3.12.4' }, whisperVersion: '1.2.3' })).detectEnvironment();
-  const malformed = await createEnvironmentModule(macFixture({ versions: { python3: '3.12.4' }, whisper: true })).detectEnvironment();
-  assert.deepEqual([ready.tools.whisper.status, ready.tools.whisper.reason, ready.tools.whisper.version], ['ready', 'ok', '1.2.3']);
-  assert.deepEqual([malformed.tools.whisper.status, malformed.tools.whisper.reason], ['limited', 'incompatible']);
-});
+test('Whisper 只在托管 Python 可导入且四文件非空时可用', async () => {
+  const complete = completeSubtitleModelFiles();
+  const cases = [
+    { modelFiles: {}, expected: 'missing' },
+    { modelFiles: { ...complete, 'model.bin': 0 }, expected: 'missing' },
+    { modelFiles: complete, expected: 'ready' }
+  ];
 
-test('Whisper 区分 pip 的正常未安装结果与真实运行失败且不公开错误输出', async () => {
-  const notFound = commandError('ECOMMAND');
-  notFound.stderr = 'WARNING: Package(s) not found: faster-whisper';
-  const missing = await createEnvironmentModule(macFixture({
-    versions: { python3: '3.12.4' },
-    commandResults: { 'python3 -m pip show faster-whisper': notFound }
-  })).detectEnvironment();
-
-  const runtimeError = commandError('ECOMMAND');
-  runtimeError.stderr = 'private runtime diagnostics should stay internal';
-  const failed = await createEnvironmentModule(macFixture({
-    versions: { python3: '3.12.4' },
-    commandResults: { 'python3 -m pip show faster-whisper': runtimeError }
-  })).detectEnvironment();
-
-  assert.deepEqual([missing.tools.whisper.status, missing.tools.whisper.reason], ['missing', 'absent']);
-  assert.deepEqual([failed.tools.whisper.status, failed.tools.whisper.reason], ['missing', 'probe_error']);
-  assert.equal('stderr' in missing.tools.whisper, false);
-  assert.equal('stderr' in failed.tools.whisper, false);
-  assert.doesNotMatch(JSON.stringify(failed.tools.whisper), /private runtime diagnostics/);
+  for (const item of cases) {
+    const report = await createEnvironmentModule(macFixture({
+      managedPython: '3.12.4',
+      whisperVersion: '1.2.3',
+      modelFiles: item.modelFiles
+    })).detectEnvironment();
+    assert.equal(report.tools.whisper.status, item.expected);
+    assert.equal(report.modes.subtitles.status, item.expected);
+  }
 });
 
 test('Metal 仅接受明确的 Supported 状态', async () => {
@@ -436,11 +434,20 @@ test('Metal primary 状态优先于 Electron Metal family 令牌', async () => {
 });
 
 test('app-managed Python 优先于系统 Python，并用于 Whisper 探测', async () => {
-  const fixture = macFixture({ versions: { python3: '3.12.4' }, managedPython: '3.12.2', whisperVersion: '1.2.3' });
+  const fixture = macFixture({
+    versions: { python3: '3.12.4' },
+    managedPython: '3.12.2',
+    whisperVersion: '1.2.3',
+    modelFiles: completeSubtitleModelFiles()
+  });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
   assert.equal(report.tools.python.command, '/user-data/python/bin/python');
   assert.equal(fixture.calls.some((call) => call.program === 'python3' && call.args.join(' ') === '--version'), false);
-  assert.ok(fixture.calls.some((call) => call.program === '/user-data/python/bin/python' && call.args.join(' ') === '-m pip show faster-whisper'));
+  assert.ok(fixture.calls.some((call) => (
+    call.program === '/user-data/python/bin/python' &&
+    call.args[0] === '-c' &&
+    call.args[1] === FASTER_WHISPER_PROBE
+  )));
 });
 
 test('macOS 安装 node@20 后完整复检可发现 Apple Silicon 与 Intel Formula 路径', async () => {
@@ -509,12 +516,6 @@ test('macOS 安装 python@3.12 后完整复检可发现 Apple Silicon 与 Intel 
         if (installed) return 'Python 3.12.9';
         throw commandError('ENOENT');
       }
-      if (program === `${prefix}/opt/python@3.12/bin/python3.12` && args.join(' ') === '-m pip show faster-whisper') {
-        fixture.calls.push({ program, args, options });
-        const error = commandError('ECOMMAND');
-        error.stderr = 'WARNING: Package(s) not found: faster-whisper';
-        throw error;
-      }
       return baseRun(program, args, options);
     };
 
@@ -534,13 +535,6 @@ test('macOS 安装 python@3.12 后完整复检可发现 Apple Silicon 与 Intel 
       ['ready', `${prefix}/opt/python@3.12/bin/python3.12`]
     );
   }
-});
-
-test('Windows py 候选项以 -3 前缀探测 Whisper', async () => {
-  const fixture = windowsFixture({ versions: { py: '3.12.4' }, whisperVersion: '1.2.3' });
-  const report = await createEnvironmentModule(fixture).detectEnvironment();
-  assert.equal(report.tools.python.command, 'py');
-  assert.ok(fixture.calls.some((call) => call.program === 'py' && call.args.join(' ') === '-3 -m pip show faster-whisper'));
 });
 
 test('macOS x64 和 Windows x64 都是支持的架构，磁盘低于 10GB 为缺失', async () => {

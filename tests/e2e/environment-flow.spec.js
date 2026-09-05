@@ -129,3 +129,36 @@ test.describe('degraded macOS journey', () => {
     await expect(window.getByTestId('home-page')).toBeVisible();
   });
 });
+
+test.describe('Whisper Small preparation', () => {
+  test.use({ scenario: 'mac-whisper-retry' });
+
+  test('取消不执行，失败可重试，成功后变为可用', async ({ window, readScenarioState }) => {
+    const row = window.getByTestId('row-whisper');
+    const dialog = window.getByTestId('install-dialog');
+
+    await expect(row).toContainText('Whisper 字幕');
+    await expect(row).toContainText('约 486 MB');
+    await row.getByRole('button', { name: '准备字幕能力' }).click();
+    await expect(window.locator('#installTitle')).toHaveText('准备 Whisper 字幕');
+    await expect(window.getByTestId('install-confirm')).toHaveText('确认准备');
+    await window.getByTestId('install-cancel').click();
+    await expect(dialog).not.toBeVisible();
+    expect((await readScenarioState()).whisperDownloadAttempts).toBe(0);
+
+    await row.getByRole('button', { name: '准备字幕能力' }).click();
+    await window.getByTestId('install-confirm').click();
+    await expect(dialog).not.toBeVisible();
+    await expect(row).toHaveAttribute('data-install-state', 'preparing');
+    await expect(row.getByRole('button', { name: '准备中' })).toBeDisabled();
+    await expect(row).toHaveAttribute('data-install-state', 'failed');
+    await expect(row).toContainText('准备失败，可重试');
+
+    await row.getByRole('button', { name: '重新准备' }).click();
+    await window.getByTestId('install-confirm').click();
+    await expect(row).toHaveAttribute('data-install-state', 'preparing');
+    await expect(row).toHaveAttribute('data-status', 'ready');
+    await expect(window.getByTestId('mode-subtitles')).toHaveAttribute('data-status', 'ready');
+    expect((await readScenarioState()).whisperDownloadAttempts).toBe(2);
+  });
+});

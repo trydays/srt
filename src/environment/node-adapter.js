@@ -251,7 +251,10 @@ function createProductionEnvironment({ targetPath, userDataDir, bundledRoot } = 
     userDataDir,
     windowsNodeDir,
     osApi: os,
-    fsApi: { statfs: fs.promises.statfs.bind(fs.promises) },
+    fsApi: {
+      statfs: fs.promises.statfs.bind(fs.promises),
+      stat: fs.promises.stat.bind(fs.promises)
+    },
     run: createNodeRunner(childProcess.spawn, process.env, process.platform),
     tokenFactory: crypto.randomUUID,
     getBundledTools: () => bundledTools

@@ -236,34 +236,22 @@ test('Windows 的简单工具动作完全来自固定白名单', async () => {
   }
 });
 
-test('Whisper 在两个平台按固定顺序创建托管环境并安装依赖', async () => {
-  const mac = installFixture('darwin');
-  const macPlan = await mac.environment.describeInstall('whisper');
-  await mac.environment.installTool({ toolId: 'whisper', confirmationId: macPlan.confirmationId });
-  assert.deepEqual(mac.calls.slice(1), [
-    { program: 'brew', args: ['install', 'python@3.12'], timeoutMs: 300000 },
-    { program: 'python3.12', args: ['-m', 'venv', '/user-data/python'], timeoutMs: 300000 },
-    {
-      program: '/user-data/python/bin/python',
-      args: ['-m', 'pip', 'install', 'faster-whisper', 'soundfile', 'numpy'],
-      timeoutMs: 300000
-    }
-  ]);
+test('Whisper 只下载固定 Small 到固定应用目录', async () => {
+  const { environment, calls } = installFixture('darwin');
+  const plan = await environment.describeInstall('whisper');
+  const result = await environment.installTool({
+    toolId: 'whisper', confirmationId: plan.confirmationId
+  });
+  const download = calls.at(-1);
 
-  const windows = installFixture('win32');
-  const windowsPlan = await windows.environment.describeInstall('whisper');
-  await windows.environment.installTool({ toolId: 'whisper', confirmationId: windowsPlan.confirmationId });
-  assert.deepEqual(windows.calls.slice(1), [
-    {
-      program: 'winget',
-      args: ['install', '--id', 'Python.Python.3.12', '--exact', '--accept-package-agreements', '--accept-source-agreements'],
-      timeoutMs: 300000
-    },
-    { program: 'py', args: ['-3.12', '-m', 'venv', 'C:\\user-data\\python'], timeoutMs: 300000 },
-    {
-      program: 'C:\\user-data\\python\\Scripts\\python.exe',
-      args: ['-m', 'pip', 'install', 'faster-whisper', 'soundfile', 'numpy'],
-      timeoutMs: 300000
-    }
-  ]);
+  assert.deepEqual(result, { ok: true, toolId: 'whisper' });
+  assert.equal(calls.slice(1).length, 4);
+  assert.equal(download.program, '/user-data/python/bin/python');
+  assert.equal(download.args[0], '-c');
+  assert.ok(download.args[1].includes('repo_id="Systran/faster-whisper-small"'));
+  assert.ok(download.args[1].includes('target=Path("/user-data/models/faster-whisper-small")'));
+  assert.match(download.args[1], /import faster_whisper/);
+  assert.match(download.args[1], /model\.bin/);
+  assert.match(download.args[1], /st_size > 0/);
+  assert.equal(download.timeoutMs, 1200000);
 });

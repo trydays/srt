@@ -24,7 +24,7 @@ if (!environmentPage) {
     { id: 'node', label: 'Node.js', description: 'Remotion 渲染运行时' },
     { id: 'npm', label: 'npm', description: 'Node.js 包管理器' },
     { id: 'python', label: 'Python', description: '字幕工具运行环境' },
-    { id: 'whisper', label: 'Whisper', description: 'AI 语音识别转字幕' }
+    { id: 'whisper', label: 'Whisper 字幕', description: 'faster-whisper + Small 本地模型' }
   ];
   var MODE_DEFINITIONS = [
     { id: 'ffmpeg', label: '视频处理', description: '剪切、转码与导出' },
@@ -34,6 +34,8 @@ if (!environmentPage) {
   var INSTALL_TARGETS = { ffmpeg: 'ffmpeg', node: 'node', npm: 'node', python: 'python', whisper: 'whisper' };
   var detectionGeneration = 0;
   var pendingInstall = null;
+  var currentReport = null;
+  var whisperInstallState = '';
 
   var platformTitle = document.getElementById('platformTitle');
   var platformMeta = document.getElementById('platformMeta');
@@ -168,26 +170,46 @@ if (!environmentPage) {
       var definition = TOOL_DEFINITIONS[i];
       var tool = reportTools[definition.id] || {};
       var status = normalizedStatus(tool.status);
+      var installState = definition.id === 'whisper' ? whisperInstallState : '';
+      var isPreparing = installState === 'preparing';
+      var isFailed = installState === 'failed';
       var detailParts = [];
       if (tool.version) detailParts.push('版本 ' + tool.version);
       if (tool.source) detailParts.push(sourceLabel(tool.source));
       if (tool.reason && tool.reason !== 'ok') detailParts.push(reasonLabel(tool.reason));
       if (!detailParts.length) detailParts.push(reasonLabel(tool.reason));
 
+      if (definition.id === 'whisper') {
+        detailParts = ['约 486 MB，下载后可离线使用'];
+      }
+
+      var displayStatus = isPreparing ? '准备中' :
+        isFailed ? '准备失败，可重试' : STATUS_LABELS[status];
+      var displayClass = isPreparing ? 'warn' : isFailed ? 'bad' :
+        (status === 'ready' ? 'ok' : status === 'limited' ? 'warn' : 'bad');
+      var displayIcon = isPreparing ? '⏳' :
+        status === 'ready' ? '✅' : status === 'limited' ? '⚠️' : '❌';
       var action = '<span class="tool-row__action"></span>';
       var installTarget = INSTALL_TARGETS[definition.id];
       if (installTarget && status !== 'ready') {
-        action = '<span class="tool-row__action"><button class="btn-install" type="button" ' +
-          'data-tool-id="' + installTarget + '">查看安装方案</button></span>';
+        var actionLabel = definition.id === 'whisper'
+          ? isFailed ? '重新准备' : isPreparing ? '准备中' : '准备字幕能力'
+          : '查看安装方案';
+        action = '<span class="tool-row__action"><button class="btn-install' +
+          (isPreparing ? ' installing' : '') + '" type="button" data-tool-id="' +
+          installTarget + '"' + (isPreparing ? ' disabled' : '') + '>' +
+          actionLabel + '</button></span>';
       }
 
-      html += '<div class="tool-row" data-testid="row-' + definition.id + '" data-status="' + status + '">' +
-        '<span class="tool-row__icon">' + (status === 'ready' ? '✅' : status === 'limited' ? '⚠️' : '❌') + '</span>' +
+      html += '<div class="tool-row" data-testid="row-' + definition.id +
+        '" data-status="' + status + '"' +
+        (installState ? ' data-install-state="' + installState + '"' : '') + '>' +
+        '<span class="tool-row__icon">' + displayIcon + '</span>' +
         '<span class="tool-row__name">' + escapeText(definition.label) + '</span>' +
         '<span class="tool-row__desc"><span class="tool-row__desc-text">' + escapeText(definition.description) + '</span></span>' +
         '<span class="tool-row__detail">' + escapeText(detailParts.join(' · ')) + '</span>' +
-        '<span class="tool-row__status ' + (status === 'ready' ? 'ok' : status === 'limited' ? 'warn' : 'bad') + '">' +
-          STATUS_LABELS[status] + '</span>' + action + '</div>';
+        '<span class="tool-row__status ' + displayClass + '">' + displayStatus + '</span>' +
+        action + '</div>';
     }
     toolList.innerHTML = html;
   }
@@ -236,7 +258,8 @@ if (!environmentPage) {
   }
 
   function renderReport(report) {
-    var renderedReport = report || {};
+    currentReport = report || {};
+    var renderedReport = currentReport;
     var platform = renderedReport.platform || {};
     var chip = renderedReport.hardware && renderedReport.hardware.chip || {};
     var systemName = platformLabel(platform.os);
@@ -256,6 +279,11 @@ if (!environmentPage) {
     statusBar.innerHTML = '<strong>' + readyCount + '/' + statuses.length + '</strong> 项满足' +
       (attentionCount ? '，' + attentionCount + ' 项建议关注' : ' ✅ 当前环境已就绪');
     environmentPage.dataset.state = 'loaded';
+  }
+
+  function setWhisperInstallState(state) {
+    whisperInstallState = state;
+    if (currentReport) renderTools(currentReport);
   }
 
   function renderDesktopOnly() {
@@ -356,11 +384,11 @@ if (!environmentPage) {
     if (!INSTALL_TARGETS[toolId] || !window.srtAPI || typeof window.srtAPI.describeInstall !== 'function') return;
     var request = { toolId: toolId, plan: null };
     pendingInstall = request;
-    installTitle.textContent = '安装 ' + installToolLabel(toolId);
+    installTitle.textContent = (toolId === 'whisper' ? '准备 ' : '安装 ') + installToolLabel(toolId);
     installPlan.textContent = '正在准备安装方案…';
     installError.textContent = '';
     installConfirm.disabled = true;
-    installConfirm.textContent = '确认安装';
+    installConfirm.textContent = toolId === 'whisper' ? '确认准备' : '确认安装';
     installCancel.disabled = false;
     showInstallDialog();
 
@@ -401,6 +429,23 @@ if (!environmentPage) {
   installConfirm.addEventListener('click', function() {
     var request = pendingInstall;
     if (!request || !request.plan || !request.plan.confirmationId || installConfirm.disabled) return;
+    if (request.toolId === 'whisper') {
+      pendingInstall = null;
+      installError.textContent = '';
+      closeInstallDialog();
+      setWhisperInstallState('preparing');
+      window.srtAPI.installTool(request.toolId, request.plan.confirmationId).then(function(result) {
+        if (!result || !result.ok) {
+          setWhisperInstallState('failed');
+          return;
+        }
+        whisperInstallState = '';
+        detectEnvironment();
+      }).catch(function() {
+        setWhisperInstallState('failed');
+      });
+      return;
+    }
     installConfirm.disabled = true;
     installConfirm.textContent = '安装中…';
     installCancel.disabled = true;
