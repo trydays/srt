@@ -74,6 +74,7 @@ var ro = new ResizeObserver(function(){
   _roPending = true;
   requestAnimationFrame(function(){
     _roPending = false;
+    _trackW = 0;
     renderMarkers();
   });
 });
