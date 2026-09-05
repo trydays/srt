@@ -17,7 +17,25 @@ window.STORAGE_KEYS = {
   WORK_DRIVE:  'srt_work_drive',
   ACTIVE_PROJECT_ID: 'srt_active_project_id',
   PROJECT_CONVERSATIONS: 'srt_project_conversations',
+  EDITOR_SIDEBAR_SIDE: 'srt_editor_sidebar_side',
+  EDITOR_SIDEBAR_WIDTH: 'srt_editor_sidebar_width',
 };
+
+function getEditorSidebarSide() {
+  return localStorage.getItem(STORAGE_KEYS.EDITOR_SIDEBAR_SIDE) === 'right' ? 'right' : 'left';
+}
+function saveEditorSidebarSide(side) {
+  localStorage.setItem(STORAGE_KEYS.EDITOR_SIDEBAR_SIDE, side === 'right' ? 'right' : 'left');
+}
+function getEditorSidebarWidth() {
+  var width = Number(localStorage.getItem(STORAGE_KEYS.EDITOR_SIDEBAR_WIDTH));
+  if (!Number.isFinite(width) || width <= 0) width = 320;
+  return Math.max(180, Math.min(500, width));
+}
+function saveEditorSidebarWidth(width) {
+  var safeWidth = Math.max(180, Math.min(500, Number(width) || 320));
+  localStorage.setItem(STORAGE_KEYS.EDITOR_SIDEBAR_WIDTH, String(safeWidth));
+}
 
 /* ── 项目管理 ── */
 var TABS_KEY = STORAGE_KEYS.PROJECTS;

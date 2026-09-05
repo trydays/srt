@@ -70,17 +70,29 @@ function applySidebarWidth(width) {
   splitRoot.style.setProperty('--editor-sidebar-w', safeWidth + 'px');
   return safeWidth;
 }
+function applySidebarLayout() {
+  splitRoot.dataset.sidebarSide = getEditorSidebarSide();
+  applySidebarWidth(getEditorSidebarWidth());
+}
+applySidebarLayout();
+window.addEventListener('resize', function() {
+  applySidebarWidth(getEditorSidebarWidth());
+});
+var currentW = 320;
 handle.addEventListener('mousedown', function(event) {
   resizing = true;
   splitRoot.classList.add('is-resizing');
   startX = event.clientX;
   startW = editorSidebar.getBoundingClientRect().width;
+  currentW = startW;
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
   event.preventDefault();
 });
 document.addEventListener('mousemove', function(event) {
-  if (resizing) applySidebarWidth(startW + event.clientX - startX);
+  if (!resizing) return;
+  var direction = splitRoot.dataset.sidebarSide === 'right' ? -1 : 1;
+  currentW = applySidebarWidth(startW + direction * (event.clientX - startX));
 });
 document.addEventListener('mouseup', function() {
   if (!resizing) return;
@@ -88,6 +100,7 @@ document.addEventListener('mouseup', function() {
   splitRoot.classList.remove('is-resizing');
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
+  saveEditorSidebarWidth(currentW);
 });
 
 /* ── Video ── */

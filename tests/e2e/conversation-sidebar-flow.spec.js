@@ -43,6 +43,29 @@ test('docks conversation left and keeps one component drag path', async ({ windo
   await expect(window.locator('#tlTrack .tl-marker')).toHaveCount(1);
 });
 
+test('home owns side preference and editor docks right without overlap', async ({ window }) => {
+  await openHome(window);
+  await expect(window.getByTestId('local-avatar')).toBeVisible();
+  await window.getByTestId('local-avatar').click();
+  const popover = window.getByTestId('preferences-popover');
+  await expect(popover.getByTestId('sidebar-side-left')).toHaveAttribute('aria-pressed', 'true');
+  await expect(popover).not.toContainText('侧栏宽度');
+  await expect(popover).not.toContainText('登录');
+  await expect(popover).not.toContainText('云同步');
+
+  await popover.getByTestId('sidebar-side-right').click();
+  await uploadAndOpenEditor(window, 'right-sidebar.mp4');
+  await expect(window.locator('#splitRoot')).toHaveAttribute('data-sidebar-side', 'right');
+  await expect(window.getByTestId('local-avatar')).toHaveCount(0);
+
+  const sidebarBox = await window.getByTestId('editor-sidebar').boundingBox();
+  const workspaceBox = await window.getByTestId('editor-page').boundingBox();
+  expect(workspaceBox.x + workspaceBox.width).toBeLessThanOrEqual(sidebarBox.x);
+
+  await window.reload();
+  await expect(window.locator('#splitRoot')).toHaveAttribute('data-sidebar-side', 'right');
+});
+
 test.describe('project-scoped final conversation history', () => {
   test.use({ localCliMode: 'two' });
   test('separates completed history across two projects and reload', async ({ window }) => {

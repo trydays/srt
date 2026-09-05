@@ -11,6 +11,7 @@
 
     /* ── Split layout (OD .split) ── */
     .split{display:grid;grid-template-columns:var(--editor-sidebar-w) 8px minmax(0,1fr);grid-template-areas:"sidebar handle workspace";min-height:0;min-width:0;max-width:100%;overflow:hidden;background:var(--bg);flex:1}
+    .split[data-sidebar-side="right"]{grid-template-columns:minmax(0,1fr) 8px var(--editor-sidebar-w);grid-template-areas:"workspace handle sidebar"}
     .pane{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--bg-panel);overflow:hidden}
     .split-handle{position:relative;z-index:45;width:8px;min-width:8px;height:100%;cursor:col-resize;background:transparent;touch-action:none}
     .split-handle::before{content:"";position:absolute;top:0;bottom:0;left:-10px;right:-10px;cursor:col-resize}
@@ -19,6 +20,7 @@
     .split-handle:focus-visible{outline:none}
 
     .editor-sidebar{grid-area:sidebar;background:var(--bg);display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--border)}
+    .split[data-sidebar-side="right"] .editor-sidebar{border-right:0;border-left:1px solid var(--border)}
     .split-handle{grid-area:handle}.workspace{grid-area:workspace}
     .sidebar-tabs{height:44px;display:grid;grid-template-columns:1fr 1fr;flex:0 0 auto;border-bottom:1px solid var(--border);background:var(--bg-panel)}
     .sidebar-tab{appearance:none;position:relative;border:0;background:transparent;color:var(--text-muted);font:inherit;font-size:12.5px;cursor:pointer}
