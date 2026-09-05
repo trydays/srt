@@ -41,7 +41,16 @@ function createMarkerDOM(ef, idx) {
 
 /* 增量追加（拖入时用） */
 function addMarker(ef) {
-  track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
+  return track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
+}
+
+function applyLocalCliEffect(instruction) {
+  if (!instruction || instruction.type !== 'add_effect' || instruction.effect !== 'fade_in') return false;
+  var ef = { name: '淡入', time: videoDuration ? videoEl.currentTime : 0, color: 'var(--accent)' };
+  timelineEffects.push(ef);
+  var marker = addMarker(ef);
+  marker.dataset.testid = 'timeline-effect-fade-in';
+  return true;
 }
 
 /* 删除后重排后续 marker 的 idx */
@@ -90,7 +99,7 @@ var generateBtn=document.getElementById('generateBtn');
 generateBtn.textContent = renderMode === 'cli' ? 'FFmpeg 导出 →' : '生成效果 →';
 
 /* ── Chat ── */
-var chatArea=document.getElementById('chatArea'),chatEmpty=document.getElementById('chatEmpty'),editorEl=document.querySelector('.input-editor');
+var chatArea=document.getElementById('chatArea'),chatEmpty=document.getElementById('chatEmpty'),editorEl=document.querySelector('.input-editor'),effectStatus=document.getElementById('effectStatus');
 function setSubmitState(){generateBtn.disabled=editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
@@ -208,6 +217,22 @@ function getAIConfig() {
   return cfg && cfg.key ? cfg : null;
 }
 
+function translateLocalCliEffect(text) {
+  if (!window.srtAPI || typeof window.srtAPI.translateLocalCliEffect !== 'function') {
+    effectStatus.textContent = '未能生成编辑指令，请先选择可用的本地 CLI 或重试。';
+    return;
+  }
+  window.srtAPI.translateLocalCliEffect(text).then(function(instruction) {
+    if (applyLocalCliEffect(instruction)) {
+      effectStatus.textContent = '已生成编辑指令';
+    } else {
+      effectStatus.textContent = '未能生成编辑指令，请先选择可用的本地 CLI 或重试。';
+    }
+  }).catch(function() {
+    effectStatus.textContent = '未能生成编辑指令，请先选择可用的本地 CLI 或重试。';
+  });
+}
+
 /* ── generateBtn click handler ── */
 generateBtn.addEventListener('click',function(){
   var t=editorEl.textContent.trim();if(!t)return;
@@ -216,16 +241,7 @@ generateBtn.addEventListener('click',function(){
   if(isCommand(t)){
     executeCommand(t);
   } else {
-    var tr = translateEffect(t);
-    if(tr.matched){
-      executeEffect(tr);
-    } else if(electronAIAvail()){
-      executeElectronAI(t);
-    } else {
-      var cfg = getAIConfig();
-      if(cfg) { executeFetchAI(t, cfg); }
-      else    { showAIHints(t); }
-    }
+    translateLocalCliEffect(t);
   }
 });
 editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();generateBtn.click()}});

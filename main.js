@@ -238,6 +238,7 @@ function startApplication({ environmentModule, localCliService } = {}) {
   ipcMain.handle('local-cli:get-state', () => activeLocalCliService.getState());
   ipcMain.handle('local-cli:rescan', () => activeLocalCliService.rescan());
   ipcMain.handle('local-cli:select', (_event, id) => activeLocalCliService.select(id));
+  ipcMain.handle('local-cli:translate-effect', (_event, text) => activeLocalCliService.translateEffect(text));
 
   app.whenReady().then(async () => {
     createWindow();

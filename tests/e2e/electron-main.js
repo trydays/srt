@@ -62,6 +62,14 @@ const localCliService = {
     }
     selectedCliId = id;
     return { available: localCliStates, selectedCliId };
+  },
+  async translateEffect() {
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
+      const error = new Error('Invalid local CLI effect output');
+      error.code = 'LOCAL_CLI_INVALID_EFFECT_OUTPUT';
+      throw error;
+    }
+    return { type: 'add_effect', effect: 'fade_in' };
   }
 };
 app.__srtE2EState = state;
