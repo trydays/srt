@@ -63,6 +63,15 @@ test('returns only successful fixed CLIs in catalog order', async () => {
   assert.equal((await service.getState()).selectedCliId, null);
 });
 
+test('omits a fixed CLI when its --version probe rejects', async () => {
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/codex', '/bin/claude']),
+    run: async (file) => { if (file === '/bin/claude') throw new Error('version probe failed'); return { exitCode: 0 }; }
+  });
+  assert.deepEqual((await service.getState()).available, [{ id: 'codex', label: 'Codex CLI' }]);
+});
+
 test('persists only an explicit available selection and clears a missing one', async () => {
   const fsApi = fakeFs(['/bin/codex', '/bin/claude']);
   const service = createLocalCliService({ platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs', fsApi, run: async () => ({ exitCode: 0 }) });
@@ -118,7 +127,7 @@ function createLocalCliService({ platform = process.platform, env = process.env,
     const available = [];
     for (const definition of CLI_DEFINITIONS) {
       const candidates = dirs.flatMap((dir) => extensions.map((ext) => pathApi.join(dir, definition.command + ext)));
-      if (platform === 'darwin' && definition.id === 'codex') candidates.push('/Applications/Codex.app/Contents/Resources/codex', homeDir && pathApi.join(homeDir, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex'));
+      if (platform === 'darwin' && definition.id === 'codex') candidates.push('/Applications/ChatGPT.app/Contents/Resources/codex', homeDir && pathApi.join(homeDir, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'));
       for (const file of candidates.filter(Boolean)) {
         try { if ((await fsApi.stat(file)).isFile()) { await run(file, ['--version']); available.push({ id: definition.id, label: definition.label }); break; } } catch (_) {}
       }
@@ -179,6 +188,10 @@ git commit -m "feat: add fixed local CLI detection"
 - [ ] **Step 1: Write failing bridge/page assertions**
 
 ```js
+const fs = require('node:fs');
+const mainSource = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
+const preloadSource = fs.readFileSync(path.join(projectRoot, 'preload.js'), 'utf8');
+
 assert.match(mainSource, /ipcMain\.handle\('local-cli:get-state'/);
 assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
 assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
@@ -339,7 +352,7 @@ Change the existing script to:
 
 Run: `npx playwright test tests/e2e/local-cli-flow.spec.js && npm run test:e2e && npm run test:unit`
 
-Expected: PASS. Run `SRT_REAL_MAC_SMOKE=1 npm run test:e2e:real-mac` for the existing environment smoke, then manually verify on this Mac: scan the three fixed definitions, observe only successful cards, choose one, rescan, make the selected executable unavailable if safely possible, rescan and observe the cleared selection, and enter the home page in both empty and unselected states.
+Expected: PASS. Run `SRT_REAL_MAC_SMOKE=1 npm run test:e2e:real-mac` for the existing environment smoke, then manually verify on this Mac only through safe observations: scan the three fixed definitions, observe only successful cards, choose one, rescan, and enter the home page in both empty and unselected states. Verify selected-CLI disappearance clearing through Task 1's focused unit test; do not rename, remove, or otherwise alter an installed executable.
 
 - [ ] **Step 5: Stop/commit gate**
 

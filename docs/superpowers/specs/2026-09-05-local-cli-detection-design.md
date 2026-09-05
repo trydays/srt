@@ -18,7 +18,7 @@ SRTP 是 Electron + Remotion 的自然语言视频剪辑应用。后续阶段会
 | `claude` | Claude Code | `claude` | `--version` |
 | `gemini` | Gemini CLI | `gemini` | `--version` |
 
-扫描器按固定顺序检查三个定义。它只搜索普通 `PATH`，以及少数现有、常见安装目录：macOS 的 `/opt/homebrew/bin`、`/usr/local/bin`、`/usr/bin`、`$HOME/.local/bin` 和现有的 Codex.app 常见位置；Windows 保留 `Path`/`PATHEXT` 与常见 Node/npm 安装目录的最小兼容分支。不得递归扫描磁盘、家目录或用户指定位置。
+扫描器按固定顺序检查三个定义。它只搜索普通 `PATH`，以及少数现有、常见安装目录：macOS 的 `/opt/homebrew/bin`、`/usr/local/bin`、`/usr/bin`、`$HOME/.local/bin` 和现有的 Codex desktop app 常见位置；Windows 保留 `Path`/`PATHEXT` 与常见 Node/npm 安装目录的最小兼容分支。不得递归扫描磁盘、家目录或用户指定位置。
 
 候选项以固定 `--version` 进行短超时探测；零退出码表示“可用”。单项失败不得影响其余项。版本内容无需解析、保存或显示。结果只返回成功项，按上表顺序稳定排列，不返回路径、环境、输出、认证或诊断数据。
 
