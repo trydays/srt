@@ -36,6 +36,17 @@
 
 支撑时间细分：`fsApi.stat` 注入最多 2 分钟，单测 fixture 最多 4 分钟，E2E 场景最多 6 分钟。任一项超额时不补建通用设施，只报告阻塞。
 
+## Approved TDD Execution Order
+
+用户已确认测试优先，Task 1 与 Task 2 作为一个不可拆分的实现单元执行：
+
+1. 先执行 Task 2 Step 1，并写入 Task 2 Step 2 的唯一 E2E。
+2. 再执行 Task 1 Step 1，并同时运行单元测试与 E2E，确认都因目标能力尚未实现而失败。
+3. 然后执行 Task 1 Step 3–5，完成界面与后端最小实现。
+4. 最后执行 Task 1 Step 4、Task 2 Step 3，并由 Task 2 Step 4 创建唯一实现提交。
+
+Task 1 不创建中间提交，避免出现“界面宣称可准备、后端尚未下载模型”的可执行版本。本顺序只移动既有测试，不增加场景、功能或预算。
+
 ## File Map
 
 - Modify: `src/environment/index.js` — 固定模型目录、四文件判真、固定下载动作、下载完成后的文件检查与动作级超时。
@@ -461,7 +472,7 @@
     : `未检测到 ${managerName}，无法自动安装 ${installation.label}。`,
   ```
 
-- [ ] **Step 6: 运行 GREEN、打开页面并提交完整主路径**
+- [ ] **Step 6: 运行 GREEN并打开页面检查完整主路径**
 
   Run:
 
@@ -472,12 +483,7 @@
 
   Expected: 单元测试全部 PASS；检测页显示“Whisper 字幕”“约 486 MB”“准备字幕能力”。本步只打开弹窗后取消，不点击“确认准备”，避免提前进入真实下载。
 
-  Commit:
-
-  ```bash
-  git add src/environment/index.js src/environment/node-adapter.js app/env-check.js tests/environment.test.js tests/environment-install.test.js
-  git commit -m "feat: prepare Whisper Small from environment check"
-  ```
+  本步不提交；继续完成 Task 2 的同一条 E2E 验收，避免产生测试尚未闭环的中间提交。
 
 ---
 
@@ -596,7 +602,7 @@
   },
   ```
 
-- [ ] **Step 2: 写一条完整用户流程并运行**
+- [ ] **Step 2: 写一条完整用户流程并确认 RED**
 
   在 `tests/e2e/environment-flow.spec.js` 末尾增加：
 
@@ -641,7 +647,7 @@
   npx playwright test tests/e2e/environment-flow.spec.js --grep "Whisper Small preparation"
   ```
 
-  Expected: PASS；若 Task 1 的主路径有遗漏，立即停止并报告具体失败，不在本任务增加新状态或新场景。
+  Expected: FAIL，失败点是旧界面没有 Whisper 专属文案、关窗与行内状态，或旧后端没有固定模型下载；不得通过删减断言让测试变绿。
 
 - [ ] **Step 3: 运行全部定向验收**
 
@@ -658,8 +664,8 @@
 - [ ] **Step 4: 提交唯一 E2E 验收**
 
   ```bash
-  git add tests/e2e/scenario-dependencies.js tests/e2e/environment-flow.spec.js app/env-check.js src/environment/index.js
-  git commit -m "test: cover Whisper preparation retry flow"
+  git add src/environment/index.js src/environment/node-adapter.js app/env-check.js tests/environment.test.js tests/environment-install.test.js tests/e2e/scenario-dependencies.js tests/e2e/environment-flow.spec.js
+  git commit -m "feat: prepare Whisper Small from environment check"
   ```
 
 ---
