@@ -41,7 +41,18 @@ function createMarkerDOM(ef, idx) {
 
 /* 增量追加（拖入时用） */
 function addMarker(ef) {
-  track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
+  return track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
+}
+
+function applyLocalCliEffect(instruction) {
+  if (!instruction || instruction.type !== 'add_effect' || instruction.effect !== 'fade_in') return false;
+  var effect = { name: '淡入', time: videoDuration ? videoEl.currentTime : 0,
+    color: 'var(--accent)' };
+  var marker = createMarkerDOM(effect, timelineEffects.length);
+  marker.dataset.testid = 'timeline-effect-fade-in';
+  track.appendChild(marker);
+  timelineEffects.push(effect);
+  return true;
 }
 
 /* 删除后重排后续 marker 的 idx */
@@ -65,6 +76,7 @@ var ro = new ResizeObserver(function(){
   _roPending = true;
   requestAnimationFrame(function(){
     _roPending = false;
+    _trackW = 0;
     renderMarkers();
   });
 });
@@ -90,7 +102,11 @@ var generateBtn=document.getElementById('generateBtn');
 generateBtn.textContent = renderMode === 'cli' ? 'FFmpeg 导出 →' : '生成效果 →';
 
 /* ── Chat ── */
-var chatArea=document.getElementById('chatArea'),chatEmpty=document.getElementById('chatEmpty'),editorEl=document.querySelector('.input-editor');
+var chatArea = document.getElementById('chatArea');
+var chatEmpty = document.getElementById('chatEmpty');
+var editorEl = document.querySelector('.input-editor');
+var activeProjectId = getActiveProjectId();
+var conversationRecords = getProjectConversation(activeProjectId);
 function setSubmitState(){generateBtn.disabled=editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
@@ -99,6 +115,82 @@ function addMsg(role,text){
   var s=text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
   d.innerHTML='<div class="role'+(role==='user'?' user':'')+'">'+(role==='user'?'你':'三天')+'</div><div class="msg-text">'+s+'</div><div class="msg-time">'+t+'</div>';
   chatArea.appendChild(d);chatArea.scrollTo({top:chatArea.scrollHeight,behavior:'smooth'});
+}
+
+var requestStatusMeta = {
+  converting: { label: '转换中', icon: '·' },
+  applying: { label: '应用中', icon: '·' },
+  waiting: { label: '等待', icon: '·' },
+  success: { label: '成功', icon: '✓' },
+  failed: { label: '失败', icon: '×' },
+  not_run: { label: '未执行', icon: '—' }
+};
+function formatRequestTime(timestamp) {
+  var date = new Date(timestamp);
+  return ('0' + date.getHours()).slice(-2) + ':' + ('0' + date.getMinutes()).slice(-2);
+}
+function escapeConversationText(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function requestCardTitle(record) {
+  if (record.instructionStatus === 'converting' || record.timelineStatus === 'applying') {
+    return '正在处理这次编辑';
+  }
+  return record.instructionStatus === 'failed' || record.timelineStatus === 'failed'
+    ? '这次编辑未完成' : '这次编辑已完成';
+}
+function statusRowHTML(testId, label, status) {
+  var meta = requestStatusMeta[status];
+  return '<div class="request-status-row" data-testid="' + testId
+    + '" data-state="' + status + '"><span class="request-status-icon">'
+    + meta.icon + '</span><span>' + label + '</span>'
+    + '<span class="request-status-value">' + meta.label + '</span></div>';
+}
+function renderRequestStatusCard(card, record) {
+  var error = record.error
+    ? '<div class="request-error">' + escapeConversationText(record.error) + '</div>' : '';
+  card.innerHTML = '<div class="request-status-head"><span>' + requestCardTitle(record)
+    + '</span><span class="request-status-time">' + formatRequestTime(record.submittedAt)
+    + '</span></div>' + statusRowHTML('instruction-status', '转换编辑指令', record.instructionStatus)
+    + statusRowHTML('timeline-status', '应用到时间轴', record.timelineStatus) + error;
+}
+function appendRequestStatusCard(record) {
+  if (chatEmpty) chatEmpty.style.display = 'none';
+  var message = document.createElement('div');
+  message.className = 'request-user-message';
+  message.dataset.testid = 'request-user-message';
+  message.textContent = record.text;
+  chatArea.appendChild(message);
+  var card = document.createElement('div');
+  card.className = 'request-status-card';
+  card.dataset.testid = 'request-status-card';
+  card.dataset.requestId = record.id;
+  card.setAttribute('aria-live', 'polite');
+  renderRequestStatusCard(card, record);
+  chatArea.appendChild(card);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return card;
+}
+function createConversationRequest(text) {
+  return { id: createLocalId(), text: text, submittedAt: Date.now(),
+    instructionStatus: 'converting', timelineStatus: 'waiting' };
+}
+function isFinalRequest(record) {
+  if (record.instructionStatus === 'failed') return true;
+  return record.instructionStatus === 'success'
+    && (record.timelineStatus === 'success'
+      || record.timelineStatus === 'failed'
+      || record.timelineStatus === 'not_run');
+}
+function updateRequestStatus(record, card, patch) {
+  Object.assign(record, patch);
+  renderRequestStatusCard(card, record);
+  if (activeProjectId && isFinalRequest(record)
+      && conversationRecords.indexOf(record) === -1) {
+    conversationRecords.push(record);
+    saveProjectConversation(activeProjectId, conversationRecords);
+  }
 }
 
 /* 判断输入是否为可执行命令 */
@@ -208,24 +300,50 @@ function getAIConfig() {
   return cfg && cfg.key ? cfg : null;
 }
 
-/* ── generateBtn click handler ── */
-generateBtn.addEventListener('click',function(){
-  var t=editorEl.textContent.trim();if(!t)return;
-  addMsg('user',t);editorEl.textContent='';setSubmitState();
-
-  if(isCommand(t)){
-    executeCommand(t);
-  } else {
-    var tr = translateEffect(t);
-    if(tr.matched){
-      executeEffect(tr);
-    } else if(electronAIAvail()){
-      executeElectronAI(t);
-    } else {
-      var cfg = getAIConfig();
-      if(cfg) { executeFetchAI(t, cfg); }
-      else    { showAIHints(t); }
-    }
+function translateLocalCliEffect(text, record, card) {
+  if (!window.srtAPI || typeof window.srtAPI.translateLocalCliEffect !== 'function') {
+    updateRequestStatus(record, card, { instructionStatus: 'failed',
+      timelineStatus: 'not_run',
+      error: '未能生成编辑指令，请先选择可用的本地 CLI 或重试。' });
+    return;
   }
+  window.srtAPI.translateLocalCliEffect(text).then(function(instruction) {
+    updateRequestStatus(record, card,
+      { instructionStatus: 'success', timelineStatus: 'applying', error: '' });
+    var applied = false;
+    try { applied = applyLocalCliEffect(instruction); } catch (_) {}
+    updateRequestStatus(record, card, applied
+      ? { timelineStatus: 'success', error: '' }
+      : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });
+  }, function() {
+    updateRequestStatus(record, card, { instructionStatus: 'failed',
+      timelineStatus: 'not_run',
+      error: '未能生成编辑指令，请先选择可用的本地 CLI 或重试。' });
+  });
+}
+
+/* ── generateBtn click handler ── */
+function hydrateConversationHistory() {
+  for (var i = 0; i < conversationRecords.length; i++) {
+    appendRequestStatusCard(conversationRecords[i]);
+  }
+}
+hydrateConversationHistory();
+
+generateBtn.addEventListener('click', function() {
+  var text = editorEl.textContent.trim();
+  if (!text) return;
+  editorEl.textContent = '';
+  setSubmitState();
+
+  if (isCommand(text)) {
+    addMsg('user', text);
+    executeCommand(text);
+    return;
+  }
+
+  var record = createConversationRequest(text);
+  var card = appendRequestStatusCard(record);
+  translateLocalCliEffect(text, record, card);
 });
 editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();generateBtn.click()}});

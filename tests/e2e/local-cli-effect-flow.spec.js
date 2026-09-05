@@ -1,0 +1,43 @@
+const { test, expect } = require('./electron.fixture');
+
+async function openEditorWithCodex(window) {
+  await window.getByTestId('local-cli-codex').click();
+  await window.getByTestId('continue').click();
+  await window.getByTestId('video-input').setInputFiles({
+    name: 'local-cli-effect.mp4',
+    mimeType: 'video/mp4',
+    buffer: Buffer.from('local CLI effect test video')
+  });
+  await window.getByTestId('start-editing').click();
+  await expect(window.getByTestId('editor-page')).toBeVisible();
+}
+
+test.describe('local CLI effect instructions', () => {
+  test.use({ localCliMode: 'two' });
+
+  test('keeps one message and one card, then adds one fade-in marker', async ({ window }) => {
+    await openEditorWithCodex(window);
+    await window.locator('.input-editor').fill('给片头添加一个淡入效果');
+    await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('request-user-message')).toHaveCount(1);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+    await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(1);
+    await expect(window.getByTestId('effect-status')).toHaveCount(0);
+  });
+
+  test.describe('invalid local CLI output', () => {
+    test.use({ localCliEffectResult: 'invalid' });
+
+    test('shows failed and not run in the same card without a marker', async ({ window }) => {
+      await openEditorWithCodex(window);
+      await window.locator('.input-editor').fill('添加淡入');
+      await window.locator('#generateBtn').click();
+      await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+      await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'failed');
+      await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'not_run');
+      await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(0);
+    });
+  });
+});

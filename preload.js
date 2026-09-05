@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('srtAPI', {
   getLocalCliState: () => ipcRenderer.invoke('local-cli:get-state'),
   rescanLocalCli: () => ipcRenderer.invoke('local-cli:rescan'),
   selectLocalCli: (id) => ipcRenderer.invoke('local-cli:select', id),
+  translateLocalCliEffect: (text) => ipcRenderer.invoke('local-cli:translate-effect', text),
   describeInstall: (toolId) => ipcRenderer.invoke('installation:describe', toolId),
   installTool: (toolId, confirmationId) => ipcRenderer.invoke(
     'installation:execute',

@@ -9,6 +9,13 @@ const CLI_DEFINITIONS = [
   { id: 'gemini', label: 'Gemini CLI', command: 'gemini' }
 ];
 
+const EFFECT_PROMPT = '只输出一个 JSON 对象：{"type":"add_effect","effect":"fade_in"}。只允许淡入；不要解释、Markdown、命令或其他字段。用户请求：';
+const EFFECT_ARGS = {
+  codex: (prompt) => ['exec', prompt],
+  claude: (prompt) => ['-p', prompt],
+  gemini: (prompt) => ['-p', prompt]
+};
+
 function createDefaultRun(execFile, platform, env) {
   return function run(file, args) {
     let program = file;
@@ -36,10 +43,64 @@ function createDefaultRun(execFile, platform, env) {
   };
 }
 
+function createDefaultTranslate(execFile) {
+  return function translate(file, args) {
+    return new Promise((resolve, reject) => {
+      execFile(file, args, { timeout: 15000, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+        if (error) reject(error);
+        else resolve(stdout);
+      });
+    });
+  };
+}
+
 function unavailableError() {
   const error = new Error('Local CLI unavailable');
   error.code = 'LOCAL_CLI_NOT_AVAILABLE';
   return error;
+}
+
+function notSelectedError() {
+  const error = new Error('Local CLI not selected');
+  error.code = 'LOCAL_CLI_NOT_SELECTED';
+  return error;
+}
+
+function invalidEffectOutputError() {
+  const error = new Error('Invalid local CLI effect output');
+  error.code = 'LOCAL_CLI_INVALID_EFFECT_OUTPUT';
+  return error;
+}
+
+function translationFailedError() {
+  const error = new Error('Local CLI translation failed');
+  error.code = 'LOCAL_CLI_TRANSLATION_FAILED';
+  return error;
+}
+
+function parseEffectInstruction(output) {
+  let value;
+
+  try {
+    value = JSON.parse(String(output).trim());
+  } catch (_) {
+    throw invalidEffectOutputError();
+  }
+
+  if (!value || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw invalidEffectOutputError();
+  }
+
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 2 || keys[0] !== 'effect' || keys[1] !== 'type') {
+    throw invalidEffectOutputError();
+  }
+
+  if (value.type !== 'add_effect' || value.effect !== 'fade_in') {
+    throw invalidEffectOutputError();
+  }
+
+  return { type: 'add_effect', effect: 'fade_in' };
 }
 
 function createLocalCliService({
@@ -49,11 +110,13 @@ function createLocalCliService({
   userDataDir,
   fsApi = fs.promises,
   run,
-  execFile = childProcess.execFile
+  execFile = childProcess.execFile,
+  translate
 }) {
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const preferencePath = pathApi.join(userDataDir, 'local-cli.json');
   const probe = run || createDefaultRun(execFile, platform, env);
+  const translateEffectOutput = translate || createDefaultTranslate(execFile);
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
   const extensions = platform === 'win32'
     ? String(env.PATHEXT || '.EXE;.CMD').split(';').filter((item) => /^\.(EXE|CMD)$/i.test(item))
@@ -91,7 +154,7 @@ function createLocalCliService({
           if (!(await fsApi.stat(file)).isFile()) continue;
           const result = await probe(file, ['--version']);
           if (!result || result.exitCode !== 0) continue;
-          available.push({ id: definition.id, label: definition.label });
+          available.push({ id: definition.id, label: definition.label, file });
           break;
         } catch (_) {
           // A missing, non-file, or failing fixed probe is simply unavailable.
@@ -100,6 +163,10 @@ function createLocalCliService({
     }
 
     return available;
+  }
+
+  function publicAvailable(available) {
+    return available.map(({ id, label }) => ({ id, label }));
   }
 
   async function readSelection() {
@@ -131,13 +198,42 @@ function createLocalCliService({
       await writeSelection(selectedCliId);
     }
 
-    return { available, selectedCliId };
+    return { available: publicAvailable(available), selectedCliId };
+  }
+
+  async function translateEffect(text) {
+    const available = await scan();
+    const selectedCliId = await readSelection();
+
+    if (!selectedCliId) {
+      throw notSelectedError();
+    }
+
+    const selectedCli = available.find((item) => item.id === selectedCliId);
+    if (!selectedCli) {
+      throw unavailableError();
+    }
+
+    const argsFactory = EFFECT_ARGS[selectedCliId];
+    if (typeof argsFactory !== 'function') {
+      throw translationFailedError();
+    }
+
+    let output;
+    try {
+      output = await translateEffectOutput(selectedCli.file, argsFactory(EFFECT_PROMPT + text));
+    } catch (_) {
+      throw translationFailedError();
+    }
+
+    return parseEffectInstruction(output);
   }
 
   return {
     getState: () => state(),
     rescan: () => state(),
-    select: (id) => state(id)
+    select: (id) => state(id),
+    translateEffect
   };
 }
 

@@ -14,9 +14,11 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.match(mainSource, /ipcMain\.handle\('local-cli:get-state'/);
   assert.match(mainSource, /ipcMain\.handle\('local-cli:rescan'/);
   assert.match(mainSource, /ipcMain\.handle\('local-cli:select'/);
+  assert.match(mainSource, /ipcMain\.handle\('local-cli:translate-effect'/);
   assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
   assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
   assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
+  assert.match(preloadSource, /translateLocalCliEffect: \(text\) => ipcRenderer\.invoke\('local-cli:translate-effect', text\)/);
   assert.equal(preloadSource.includes('local-cli:exec'), false);
 });
 

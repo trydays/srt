@@ -15,17 +15,104 @@ window.STORAGE_KEYS = {
   AI_CONFIG:   'srt_ai_config',
   ENV_DONE:    'srt_env_done',
   WORK_DRIVE:  'srt_work_drive',
+  ACTIVE_PROJECT_ID: 'srt_active_project_id',
+  PROJECT_CONVERSATIONS: 'srt_project_conversations',
+  EDITOR_SIDEBAR_SIDE: 'srt_editor_sidebar_side',
+  EDITOR_SIDEBAR_WIDTH: 'srt_editor_sidebar_width',
 };
+
+function getEditorSidebarSide() {
+  return localStorage.getItem(STORAGE_KEYS.EDITOR_SIDEBAR_SIDE) === 'right' ? 'right' : 'left';
+}
+function saveEditorSidebarSide(side) {
+  localStorage.setItem(STORAGE_KEYS.EDITOR_SIDEBAR_SIDE, side === 'right' ? 'right' : 'left');
+}
+function getEditorSidebarWidth() {
+  var width = Number(localStorage.getItem(STORAGE_KEYS.EDITOR_SIDEBAR_WIDTH));
+  if (!Number.isFinite(width) || width <= 0) width = 320;
+  return Math.max(180, Math.min(500, width));
+}
+function saveEditorSidebarWidth(width) {
+  var safeWidth = Math.max(180, Math.min(500, Number(width) || 320));
+  localStorage.setItem(STORAGE_KEYS.EDITOR_SIDEBAR_WIDTH, String(safeWidth));
+}
 
 /* ── 项目管理 ── */
 var TABS_KEY = STORAGE_KEYS.PROJECTS;
-function getProjects() {
-  try { return JSON.parse(localStorage.getItem(TABS_KEY) || '[]'); }
-  catch (e) { console.error('[getProjects] 读取失败:', e.message); return []; }
+function createLocalId() { return window.crypto.randomUUID(); }
+function readStoredJSON(key, fallback) {
+  try {
+    var value = JSON.parse(localStorage.getItem(key));
+    return value === null ? fallback : value;
+  } catch (error) {
+    console.error('[storage] 读取失败:', key, error.message);
+    return fallback;
+  }
 }
-function saveProjects(arr) {
-  try { localStorage.setItem(TABS_KEY, JSON.stringify(arr)); }
-  catch (e) { console.error('[saveProjects] 写入失败:', e.message); }
+function getProjects() {
+  var value = readStoredJSON(TABS_KEY, []);
+  var projects = Array.isArray(value) ? value : [];
+  var changed = false;
+  for (var i = 0; i < projects.length; i++) {
+    if (!projects[i].id) {
+      projects[i] = Object.assign({}, projects[i], { id: createLocalId() });
+      changed = true;
+    }
+  }
+  if (changed) saveProjects(projects);
+  return projects;
+}
+function saveProjects(projects) {
+  try { localStorage.setItem(TABS_KEY, JSON.stringify(projects)); }
+  catch (error) { console.error('[saveProjects] 写入失败:', error.message); }
+}
+function createProject(videoInfo) {
+  var project = { id: createLocalId(), name: '未命名项目', path: '剪辑.html',
+    time: Date.now(), video: videoInfo || null };
+  var projects = getProjects();
+  projects.unshift(project);
+  saveProjects(projects);
+  setActiveProjectId(project.id);
+  return project;
+}
+function setActiveProjectId(projectId) {
+  if (projectId) localStorage.setItem(STORAGE_KEYS.ACTIVE_PROJECT_ID, projectId);
+  else localStorage.removeItem(STORAGE_KEYS.ACTIVE_PROJECT_ID);
+}
+function getActiveProjectId() {
+  var projects = getProjects();
+  var activeId = localStorage.getItem(STORAGE_KEYS.ACTIVE_PROJECT_ID);
+  for (var i = 0; i < projects.length; i++) {
+    if (projects[i].id === activeId) return activeId;
+  }
+  if (!projects.length) return null;
+  setActiveProjectId(projects[0].id);
+  return projects[0].id;
+}
+function openProject(projectId) {
+  var projects = getProjects();
+  for (var i = 0; i < projects.length; i++) {
+    if (projects[i].id === projectId) {
+      setActiveProjectId(projectId);
+      location.href = projects[i].path;
+      return;
+    }
+  }
+}
+function getConversationStore() {
+  var value = readStoredJSON(STORAGE_KEYS.PROJECT_CONVERSATIONS, {});
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+function getProjectConversation(projectId) {
+  if (!projectId) return [];
+  var records = getConversationStore()[projectId];
+  return Array.isArray(records) ? records : [];
+}
+function saveProjectConversation(projectId, records) {
+  if (!projectId) return;
+  var store = getConversationStore();
+  store[projectId] = records;
+  localStorage.setItem(STORAGE_KEYS.PROJECT_CONVERSATIONS, JSON.stringify(store));
 }
 
 /* ── Tab bar 渲染 ── */
@@ -36,32 +123,37 @@ function renderTabs() {
   var bar = document.getElementById('tabsBar');
   if (!bar) return;
   var projects = getProjects();
+  var activeId = getActiveProjectId();
   var onHome = isHomePage();
-  var html = '';
-  html += '<div class="wtab is-pinned' + (onHome ? ' is-active' : '') + '" onclick="location.href=\'主页.html\'">'
-    + '<button class="wtab__main" type="button"><span class="wtab__label">三 三天remotion</span></button></div>';
+  var html = '<div class="wtab is-pinned' + (onHome ? ' is-active' : '')
+    + '" onclick="location.href=\'主页.html\'"><button class="wtab__main" type="button">'
+    + '<span class="wtab__label">三 三天remotion</span></button></div>';
   for (var i = 0; i < projects.length; i++) {
-    var p = projects[i];
-    var isActive = (!onHome && i === 0);
-    html += '<div class="wtab' + (isActive ? ' is-active' : '') + '">'
-      + '<button class="wtab__main" type="button" onclick="switchTo(' + i + ')"><span class="wtab__label">' + p.name.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span></button>'
-      + '<button class="wtab__close" type="button" onclick="closeTab(event,' + i + ')">&#10005;</button></div>';
+    var project = projects[i];
+    var active = !onHome && project.id === activeId;
+    html += '<div class="wtab' + (active ? ' is-active' : '')
+      + '" data-project-id="' + project.id + '"><button class="wtab__main"'
+      + ' type="button" onclick="openProject(\'' + project.id + '\')">'
+      + '<span class="wtab__label">'
+      + project.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      + '</span></button><button class="wtab__close" type="button"'
+      + ' onclick="closeTab(event,\'' + project.id + '\')">&#10005;</button></div>';
   }
   bar.innerHTML = html;
 }
-function switchTo(idx) {
-  var p = getProjects();
-  if (idx >= 0 && idx < p.length) location.href = p[idx].path;
-}
-function closeTab(e, idx) {
-  e.stopPropagation();
-  var p = getProjects();
-  p.splice(idx, 1);
-  saveProjects(p);
-  if (p.length === 0) {
-    try { localStorage.removeItem(STORAGE_KEYS.VIDEO); } catch (_) {}
+function closeTab(event, projectId) {
+  event.stopPropagation();
+  var projects = getProjects();
+  var activeId = getActiveProjectId();
+  var next = projects.filter(function(project) { return project.id !== projectId; });
+  saveProjects(next);
+  if (activeId === projectId) setActiveProjectId(next.length ? next[0].id : null);
+  if (!next.length) {
+    localStorage.removeItem(STORAGE_KEYS.VIDEO);
     if (!isHomePage()) location.href = '主页.html';
     else renderTabs();
+  } else if (activeId === projectId && !isHomePage()) {
+    location.reload();
   } else {
     renderTabs();
   }

@@ -20,6 +20,18 @@ function fakeFs(files) {
   };
 }
 
+function fakeTranslator(result) {
+  const calls = [];
+  return {
+    calls,
+    run: async (file, args, options) => {
+      calls.push({ file, args, options });
+      if (result instanceof Error) throw result;
+      return result;
+    }
+  };
+}
+
 test('returns only successful fixed CLIs in catalog order', async () => {
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
@@ -116,3 +128,37 @@ test('omits a candidate when a probe resolves with a nonzero exit code', async (
 
   assert.deepEqual((await service.getState()).available, [{ id: 'claude', label: 'Claude Code' }]);
 });
+
+test('translates a selected local CLI effect into the only allowed instruction', async () => {
+  const fsApi = fakeFs(['/bin/codex']);
+  const { calls, run } = fakeTranslator('{"type":"add_effect","effect":"fade_in"}');
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi, run: async () => ({ exitCode: 0 }), translate: run
+  });
+
+  await service.select('codex');
+  assert.deepEqual(await service.translateEffect('添加淡入'), { type: 'add_effect', effect: 'fade_in' });
+  assert.equal(calls.length > 0, true);
+});
+
+for (const [name, output] of [
+  ['rejects non-json effect output', 'not json'],
+  ['rejects effect output with extra fields', '{"type":"add_effect","effect":"fade_in","extra":true}'],
+  ['rejects array effect output', '[{"type":"add_effect","effect":"fade_in"}]']
+]) {
+  test(name, async () => {
+    const fsApi = fakeFs(['/bin/codex']);
+    const { run } = fakeTranslator(output);
+    const service = createLocalCliService({
+      platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+      fsApi, run: async () => ({ exitCode: 0 }), translate: run
+    });
+
+    await service.select('codex');
+    await assert.rejects(
+      () => service.translateEffect('添加淡入'),
+      { code: 'LOCAL_CLI_INVALID_EFFECT_OUTPUT' }
+    );
+  });
+}
