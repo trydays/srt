@@ -129,7 +129,7 @@ SRT 负责：
 
 1. 应用管理的 Python 3.12 可用。
 2. `faster-whisper` 可导入。
-3. 应用固定模型目录中存在 `model.bin`、`config.json`、`tokenizer.json` 和 `vocabulary.txt`，且文件大小均大于零。
+3. 应用固定模型目录中存在 `model.bin`、`config.json`、`tokenizer.json` 和 `vocabulary.json`，且文件大小均大于零。
 
 当前仅执行 `pip show faster-whisper` 就报告就绪的行为必须修正，避免无模型时的假阳性。
 
