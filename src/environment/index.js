@@ -25,9 +25,11 @@ function createEnvironmentModule(dependencies) {
     const downloadModelCode = [
       'from pathlib import Path',
       'from huggingface_hub import snapshot_download',
+      'from huggingface_hub.utils import disable_progress_bars',
       'import faster_whisper',
       `target=Path(${JSON.stringify(subtitleModelDir)})`,
       `required=${JSON.stringify(SUBTITLE_MODEL_FILES)}`,
+      'disable_progress_bars()',
       'snapshot_download(repo_id="Systran/faster-whisper-small", local_dir=str(target), allow_patterns=required)',
       'if not all((target/name).is_file() and (target/name).stat().st_size > 0 for name in required): raise RuntimeError("incomplete model")'
     ].join('\n');
