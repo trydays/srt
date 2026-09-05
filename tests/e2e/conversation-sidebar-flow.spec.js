@@ -42,3 +42,27 @@ test('docks conversation left and keeps one component drag path', async ({ windo
   await expect(window.getByTestId('conversation-panel')).toBeVisible();
   await expect(window.locator('#tlTrack .tl-marker')).toHaveCount(1);
 });
+
+test.describe('project-scoped final conversation history', () => {
+  test.use({ localCliMode: 'two' });
+  test('separates completed history across two projects and reload', async ({ window }) => {
+    await window.getByTestId('local-cli-codex').click();
+    await openHome(window);
+    await uploadAndOpenEditor(window, 'project-a.mp4');
+    await window.locator('.input-editor').fill('项目 A 的淡入');
+    await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
+    const projectAId = await window.evaluate(() => getActiveProjectId());
+
+    await window.locator('.wtab.is-pinned .wtab__main').click();
+    await uploadAndOpenEditor(window, 'project-b.mp4');
+    const projectBId = await window.evaluate(() => getActiveProjectId());
+    expect(projectBId).not.toBe(projectAId);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(0);
+
+    await window.locator('[data-project-id="' + projectAId + '"] .wtab__main').click();
+    await expect(window.getByTestId('request-user-message')).toHaveText('项目 A 的淡入');
+    await window.reload();
+    await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+  });
+});

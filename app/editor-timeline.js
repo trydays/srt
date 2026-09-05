@@ -105,6 +105,8 @@ generateBtn.textContent = renderMode === 'cli' ? 'FFmpeg 导出 →' : '生成�
 var chatArea = document.getElementById('chatArea');
 var chatEmpty = document.getElementById('chatEmpty');
 var editorEl = document.querySelector('.input-editor');
+var activeProjectId = getActiveProjectId();
+var conversationRecords = getProjectConversation(activeProjectId);
 function setSubmitState(){generateBtn.disabled=editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
@@ -163,6 +165,7 @@ function appendRequestStatusCard(record) {
   var card = document.createElement('div');
   card.className = 'request-status-card';
   card.dataset.testid = 'request-status-card';
+  card.dataset.requestId = record.id;
   card.setAttribute('aria-live', 'polite');
   renderRequestStatusCard(card, record);
   chatArea.appendChild(card);
@@ -170,12 +173,24 @@ function appendRequestStatusCard(record) {
   return card;
 }
 function createConversationRequest(text) {
-  return { text: text, submittedAt: Date.now(),
+  return { id: createLocalId(), text: text, submittedAt: Date.now(),
     instructionStatus: 'converting', timelineStatus: 'waiting' };
+}
+function isFinalRequest(record) {
+  if (record.instructionStatus === 'failed') return true;
+  return record.instructionStatus === 'success'
+    && (record.timelineStatus === 'success'
+      || record.timelineStatus === 'failed'
+      || record.timelineStatus === 'not_run');
 }
 function updateRequestStatus(record, card, patch) {
   Object.assign(record, patch);
   renderRequestStatusCard(card, record);
+  if (activeProjectId && isFinalRequest(record)
+      && conversationRecords.indexOf(record) === -1) {
+    conversationRecords.push(record);
+    saveProjectConversation(activeProjectId, conversationRecords);
+  }
 }
 
 /* 判断输入是否为可执行命令 */
@@ -308,6 +323,13 @@ function translateLocalCliEffect(text, record, card) {
 }
 
 /* ── generateBtn click handler ── */
+function hydrateConversationHistory() {
+  for (var i = 0; i < conversationRecords.length; i++) {
+    appendRequestStatusCard(conversationRecords[i]);
+  }
+}
+hydrateConversationHistory();
+
 generateBtn.addEventListener('click', function() {
   var text = editorEl.textContent.trim();
   if (!text) return;

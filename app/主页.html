@@ -185,7 +185,14 @@
         var videoName = (p.video && p.video.name) ? p.video.name : '';
         var ago = p.time ? Math.floor((Date.now() - p.time) / 86400000) : null;
         var timeStr = ago === null ? '' : (ago === 0 ? '今天' : (ago === 1 ? '昨天' : ago + ' 天前'));
-        html += '<button class="pcard" onclick="location.href=\'' + p.path + '\'"><div class="pcard__preview"><div class="pcard__dots"><span class="pcard__dot"></span><span class="pcard__dot"></span><span class="pcard__dot"></span></div></div><div class="pcard__body"><div class="pcard__title">' + p.name + '</div><div class="pcard__desc">' + (videoName || '点击继续编辑') + (timeStr ? ' · ' + timeStr : '') + '</div></div></button>';
+        html += '<button class="pcard" data-project-id="' + p.id
+          + '" onclick="openProject(\'' + p.id + '\')">'
+          + '<div class="pcard__preview"><div class="pcard__dots">'
+          + '<span class="pcard__dot"></span><span class="pcard__dot"></span>'
+          + '<span class="pcard__dot"></span></div></div>'
+          + '<div class="pcard__body"><div class="pcard__title">' + p.name + '</div>'
+          + '<div class="pcard__desc">' + (videoName || '点击继续编辑')
+          + (timeStr ? ' · ' + timeStr : '') + '</div></div></button>';
       }
       recentGrid.innerHTML = html;
     }
@@ -233,13 +240,10 @@
         setTimeout(function(){ card.innerHTML = old; document.getElementById('startBtn').addEventListener('click', startEditing); }, 2000);
         return;
       }
-      var p = getProjects(), exists = false;
-      for (var i = 0; i < p.length; i++) { if (p[i].path === '剪辑.html') { exists = true; break; } }
-      if (!exists) {
-        var vid = null; try { vid = JSON.parse(localStorage.getItem(STORAGE_KEYS.VIDEO)); } catch(e){ console.error('[startEditing] 重复读取视频失败:', e.message); }
-        p.unshift({ name: '未命名项目', path: '剪辑.html', time: Date.now(), video: vid || null });
-        saveProjects(p);
-      }
+      var videoInfo = null;
+      try { videoInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.VIDEO)); }
+      catch (error) { console.error('[startEditing] 读取视频信息失败:', error.message); }
+      createProject(videoInfo);
       location.href = '剪辑.html';
     }
 
