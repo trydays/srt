@@ -250,8 +250,11 @@ test('Whisper 只下载固定 Small 到固定应用目录', async () => {
   assert.equal(download.args[0], '-c');
   assert.ok(download.args[1].includes('repo_id="Systran/faster-whisper-small"'));
   assert.ok(download.args[1].includes('from huggingface_hub.utils import disable_progress_bars'));
-  assert.ok(download.args[1].indexOf('disable_progress_bars()') <
-    download.args[1].indexOf('snapshot_download('));
+  const progressDisableIndex = download.args[1].indexOf('disable_progress_bars()');
+  const snapshotDownloadIndex = download.args[1].indexOf('snapshot_download(');
+  assert.ok(progressDisableIndex >= 0);
+  assert.ok(snapshotDownloadIndex >= 0);
+  assert.ok(progressDisableIndex < snapshotDownloadIndex);
   assert.ok(download.args[1].includes('target=Path("/user-data/models/faster-whisper-small")'));
   assert.match(download.args[1], /import faster_whisper/);
   assert.match(download.args[1], /model\.bin/);
