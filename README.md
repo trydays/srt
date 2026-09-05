@@ -47,6 +47,8 @@ npm run test:e2e
 
 当前预构建发布仍仅面向 Windows；macOS 支持指源码开发运行与环境检测，不代表已经提供签名安装包。
 
+相关文档：[研发记录](docs/DEVELOPMENT_LOG.md) / [当前项目状态](docs/PROJECT_STATUS.md)
+
 ## 项目结构
 
 ```
