@@ -36,6 +36,7 @@
 - 当前 Mac 真实环境只读烟雾测试：**1/1 通过**。
 - macOS arm64 目录构建：**通过**。
 - 最终整枝审查：**Ready to merge: Yes**。
+- GitHub 集成：[Pull Request #1](https://github.com/trydays/srt/pull/1) 已创建，状态为 **Open**。
 
 > 上述数量是 2026-09-05 的验收快照，会随测试集演进；README 不依赖这些易过时数字。
 
