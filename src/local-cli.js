@@ -10,6 +10,13 @@ const CLI_DEFINITIONS = [
 ];
 
 const EFFECT_PROMPT = '只输出一个 JSON 对象：{"type":"add_effect","effect":"fade_in"}。只允许淡入；不要解释、Markdown、命令或其他字段。用户请求：';
+const SUBTITLE_OR_FADE_IN_PROMPT = [
+  '判断用户的视频编辑请求，只输出下列两个 JSON 对象之一：',
+  '整段视频生成或添加字幕：{"type":"generate_subtitles"}',
+  '片头添加淡入：{"type":"add_effect","effect":"fade_in"}',
+  '不支持的请求输出空对象 {}。',
+  '不要解释、Markdown、命令或额外字段。用户请求：'
+].join('\n');
 const EFFECT_ARGS = {
   codex: (prompt) => ['exec', prompt],
   claude: (prompt) => ['-p', prompt],
@@ -72,6 +79,12 @@ function invalidEffectOutputError() {
   return error;
 }
 
+function invalidInstructionOutputError() {
+  const error = new Error('Invalid local CLI instruction output');
+  error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
+  return error;
+}
+
 function translationFailedError() {
   const error = new Error('Local CLI translation failed');
   error.code = 'LOCAL_CLI_TRANSLATION_FAILED';
@@ -101,6 +114,35 @@ function parseEffectInstruction(output) {
   }
 
   return { type: 'add_effect', effect: 'fade_in' };
+}
+
+function instructionTranslationError(cause) {
+  const code = cause && (cause.killed || cause.code === 'ETIMEDOUT')
+    ? 'LOCAL_CLI_TRANSLATION_TIMEOUT' : 'LOCAL_CLI_TRANSLATION_FAILED';
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function parseSubtitleOrFadeInInstruction(output) {
+  let value;
+  try {
+    value = JSON.parse(String(output).trim());
+  } catch (_) {
+    throw invalidInstructionOutputError();
+  }
+  if (!value || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw invalidInstructionOutputError();
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.length === 1 && keys[0] === 'type' && value.type === 'generate_subtitles') {
+    return { type: 'generate_subtitles' };
+  }
+  if (keys.length === 2 && keys[0] === 'effect' && keys[1] === 'type'
+      && value.type === 'add_effect' && value.effect === 'fade_in') {
+    return { type: 'add_effect', effect: 'fade_in' };
+  }
+  throw invalidInstructionOutputError();
 }
 
 function createLocalCliService({
@@ -229,11 +271,32 @@ function createLocalCliService({
     return parseEffectInstruction(output);
   }
 
+  async function translateSubtitleOrFadeIn(text) {
+    const available = await scan();
+    const selectedCliId = await readSelection();
+    if (!selectedCliId) throw notSelectedError();
+    const selectedCli = available.find((item) => item.id === selectedCliId);
+    if (!selectedCli) throw unavailableError();
+    const argsFactory = EFFECT_ARGS[selectedCliId];
+    if (typeof argsFactory !== 'function') throw translationFailedError();
+    let output;
+    try {
+      output = await translateEffectOutput(
+        selectedCli.file,
+        argsFactory(SUBTITLE_OR_FADE_IN_PROMPT + String(text || ''))
+      );
+    } catch (error) {
+      throw instructionTranslationError(error);
+    }
+    return parseSubtitleOrFadeInInstruction(output);
+  }
+
   return {
     getState: () => state(),
     rescan: () => state(),
     select: (id) => state(id),
-    translateEffect
+    translateEffect,
+    translateSubtitleOrFadeIn
   };
 }
 
