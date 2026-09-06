@@ -17,6 +17,7 @@ window.STORAGE_KEYS = {
   WORK_DRIVE:  'srt_work_drive',
   ACTIVE_PROJECT_ID: 'srt_active_project_id',
   PROJECT_CONVERSATIONS: 'srt_project_conversations',
+  PROJECT_SUBTITLES: 'srt_project_subtitles',
   EDITOR_SIDEBAR_SIDE: 'srt_editor_sidebar_side',
   EDITOR_SIDEBAR_WIDTH: 'srt_editor_sidebar_width',
 };
@@ -88,6 +89,13 @@ function getActiveProjectId() {
   if (!projects.length) return null;
   setActiveProjectId(projects[0].id);
   return projects[0].id;
+}
+function getProjectById(projectId) {
+  var projects = getProjects();
+  for (var i = 0; i < projects.length; i++) {
+    if (projects[i].id === projectId) return projects[i];
+  }
+  return null;
 }
 function openProject(projectId) {
   var projects = getProjects();
