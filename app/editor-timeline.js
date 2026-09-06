@@ -155,27 +155,42 @@ function statusRowHTML(testId, label, status) {
     + meta.icon + '</span><span>' + label + '</span>'
     + '<span class="request-status-value">' + meta.label + '</span></div>';
 }
+function isSuccessfulRequest(record) {
+  return record.instructionStatus === 'success' && record.timelineStatus === 'success';
+}
+function requestCardSummary(record) {
+  var time = formatRequestTime(record.submittedAt);
+  if (record.subtitleRequest === true) {
+    return '✓ 字幕已生成 · ' + Number(record.resultCount || 0) + ' 条 · ' + time;
+  }
+  return '✓ 这次编辑已完成 · ' + time;
+}
 function renderRequestStatusCard(card, record) {
   var isSubtitle = record.subtitleRequest === true;
+  var isCollapsed = isSuccessfulRequest(record) && card.dataset.detailsExpanded !== 'true';
   var secondLabel = isSubtitle ? '生成字幕'
     : (record.subtitleRequest === null ? '执行编辑' : '应用到时间轴');
   var secondTestId = isSubtitle ? 'subtitle-status' : 'timeline-status';
   var error = record.error
     ? '<div class="request-error">' + escapeConversationText(record.error) + '</div>' : '';
-  var summary = isSubtitle && record.timelineStatus === 'success'
-    ? '<div class="request-result">已生成 '
-      + Number(record.resultCount || 0) + ' 条字幕</div>' : '';
   var canUndo = isSubtitle && window.subtitleController
     && subtitleController.canUndo(record.id);
   var undo = canUndo
     ? '<button type="button" class="request-undo" data-undo-request="'
       + escapeConversationText(record.id)
       + '" data-testid="subtitle-undo">撤销本次字幕</button>' : '';
-  card.innerHTML = '<div class="request-status-head"><span>' + requestCardTitle(record)
+  var summary = isSuccessfulRequest(record)
+    ? '<button type="button" class="request-status-summary" data-request-details-toggle'
+      + ' data-testid="request-status-summary">' + requestCardSummary(record) + '</button>' : '';
+  card.classList.toggle('is-collapsed', isCollapsed);
+  card.innerHTML = summary + '<div class="request-status-details" data-testid="request-status-details"'
+    + (isCollapsed ? ' hidden' : '') + '><div class="request-status-head"><span>' + requestCardTitle(record)
     + '</span><span class="request-status-time">' + formatRequestTime(record.submittedAt)
     + '</span></div>' + statusRowHTML('instruction-status', '转换编辑指令', record.instructionStatus)
     + statusRowHTML(secondTestId, secondLabel, record.timelineStatus)
-    + summary + error + undo;
+    + (isSubtitle && record.timelineStatus === 'success'
+      ? '<div class="request-result">已生成 ' + Number(record.resultCount || 0) + ' 条字幕</div>' : '')
+    + error + undo + '</div>';
 }
 function appendRequestStatusCard(record) {
   if (chatEmpty) chatEmpty.style.display = 'none';
@@ -376,6 +391,7 @@ async function runSubtitleInstruction(record, card) {
       timelineStatus: 'success', resultCount: result.segments.length, error: ''
     });
     subtitleController.replace(record.id, result.segments);
+    subtitleController.openAfter(card);
     for (var i = 0; i < conversationRecords.length; i++) {
       var historicalCard = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
       if (historicalCard) renderRequestStatusCard(historicalCard, conversationRecords[i]);
@@ -414,15 +430,23 @@ async function translateAndApply(text, record, card) {
 
 /* ── generateBtn click handler ── */
 function hydrateConversationHistory() {
+  var latestSubtitleCard = null;
   for (var i = 0; i < conversationRecords.length; i++) {
-    appendRequestStatusCard(conversationRecords[i]);
+    var card = appendRequestStatusCard(conversationRecords[i]);
+    if (conversationRecords[i].subtitleRequest === true
+        && conversationRecords[i].timelineStatus === 'success') latestSubtitleCard = card;
   }
+  if (latestSubtitleCard && window.subtitleController) subtitleController.restoreAfter(latestSubtitleCard);
 }
 hydrateConversationHistory();
 
 generateBtn.addEventListener('click', async function() {
   var text = editorEl.textContent.trim();
   if (!text || generateBtn.disabled) return;
+  if (window.subtitleController && !await subtitleController.prepareForNextRequest()) {
+    setSubmitState();
+    return;
+  }
   editorEl.textContent = '';
   setSubmitState();
 
@@ -450,10 +474,21 @@ generateBtn.addEventListener('click', async function() {
   }
 });
 chatArea.addEventListener('click', function(event) {
+  var summary = event.target.closest('[data-request-details-toggle]');
+  if (summary) {
+    var summaryCard = summary.closest('[data-request-id]');
+    var summaryRecord = conversationRecords.find(function(record) { return record.id === summaryCard.dataset.requestId; });
+    if (summaryRecord) {
+      summaryCard.dataset.detailsExpanded = summaryCard.dataset.detailsExpanded === 'true' ? '' : 'true';
+      renderRequestStatusCard(summaryCard, summaryRecord);
+    }
+    return;
+  }
   var button = event.target.closest('[data-undo-request]');
   if (!button) return;
   var requestId = button.dataset.undoRequest;
   try {
+    if (!subtitleController.confirmUndo()) return;
     subtitleController.undo(requestId);
     for (var i = 0; i < conversationRecords.length; i++) {
       var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');

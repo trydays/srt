@@ -78,7 +78,6 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
     const firstRequestCard = window.getByTestId('request-status-card').last();
-    await window.evaluate((card) => subtitleController.openAfter(card), await firstRequestCard.elementHandle());
     const documentEditor = window.getByTestId('subtitle-document');
     await expect(documentEditor).toHaveCount(1);
     await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑全部字幕 · 2 段');
@@ -86,14 +85,15 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-document-segment')).toHaveCount(2);
     await expect(window.getByTestId('subtitle-document-time')).toHaveText(['00:00', '00:01']);
     await expect(window.locator('#subtitleEditor, #subtitleTextInput, #subtitleTextSave')).toHaveCount(0);
+    await firstRequestCard.getByTestId('request-status-summary').click();
     await window.getByTestId('subtitle-undo').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(0);
+    await expect(documentEditor).toBeHidden();
     await window.locator('.input-editor').fill('重新生成字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     const secondRequestCard = window.getByTestId('request-status-card').last();
-    await window.evaluate((card) => subtitleController.openAfter(card), await secondRequestCard.elementHandle());
     const segments = window.getByTestId('subtitle-document-segment');
     await segments.nth(0).fill('大家好，已经修改');
     await segments.nth(1).fill('欢迎测试统一文稿');
@@ -167,7 +167,6 @@ test.describe('auto subtitle conversation', () => {
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await window.reload();
     const restoredCard = window.getByTestId('request-status-card').last();
-    await window.evaluate((card) => subtitleController.restoreAfter(card), await restoredCard.elementHandle());
     await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑字幕 · 2 段');
     await expect(window.getByTestId('subtitle-document-surface')).toBeHidden();
     await expect(window.getByTestId('subtitle-document-status')).toBeHidden();
@@ -214,7 +213,6 @@ test.describe('auto subtitle conversation', () => {
     const latestRequestCard = window.getByTestId('request-status-card').last();
     await expect(latestRequestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
-    await window.evaluate((card) => subtitleController.openAfter(card), await latestRequestCard.elementHandle());
     await segments.nth(0).fill('这版有草稿');
     await window.getByTestId('subtitle-document-save').click();
     await window.evaluate(() => { window.confirm = () => false; });
@@ -226,6 +224,58 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-block').first()).toContainText('大家一行 二行好，已经修改');
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await expect(segments.nth(0)).toContainText('大家一行 二行好，已经修改（已存草稿）');
+  });
+
+  test('saves a subtitle draft before the next instruction and leaves everything in place when saving fails', async ({ window }, testInfo) => {
+    const videoFixturePath = await createVideoFixture(testInfo);
+    await openEditor(window, videoFixturePath);
+    await window.locator('.input-editor').fill('给这个视频加上字幕');
+    await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+
+    const documentEditor = window.getByTestId('subtitle-document');
+    const segments = window.getByTestId('subtitle-document-segment');
+    const firstSegmentId = await segments.nth(0).getAttribute('data-segment-id');
+    await segments.nth(0).fill('发送前已保存的草稿');
+    await window.locator('.input-editor').fill('给片头添加一个淡入效果');
+    await window.locator('#generateBtn').click();
+
+    await expect(window.getByTestId('request-user-message')).toHaveCount(2);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(2);
+    await expect(window.getByTestId('request-status-card').last().getByTestId('timeline-status'))
+      .toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑字幕 · 2 段');
+    await expect(window.getByTestId('subtitle-document-draft-marker')).toHaveText('草稿未应用');
+    await expect(window.getByTestId('subtitle-document-surface')).toBeHidden();
+    await expect.poll(() => window.evaluate(() => {
+      return SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused')
+        .get(getActiveProjectId()).draft;
+    })).toMatchObject({ [firstSegmentId]: '发送前已保存的草稿' });
+
+    await window.getByTestId('subtitle-document-toggle').click();
+    await segments.nth(0).fill('保存失败时仍保留的候选文字');
+    await window.evaluate(() => {
+      window.__subtitleStorageSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key === 'srt_project_subtitles') throw new Error('forced subtitle storage failure');
+        return window.__subtitleStorageSetItem.call(this, key, value);
+      };
+    });
+    await window.locator('.input-editor').fill('再添加一个淡入效果');
+    await expect(window.locator('#generateBtn')).toBeEnabled();
+    await window.locator('#generateBtn').click();
+
+    await expect(window.locator('.input-editor')).toHaveText('再添加一个淡入效果');
+    await expect(window.getByTestId('request-user-message')).toHaveCount(2);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(2);
+    await expect(window.getByTestId('subtitle-document-surface')).toBeVisible();
+    await expect(segments.nth(0)).toHaveText('保存失败时仍保留的候选文字');
+    await expect(documentEditor).toContainText('字幕草稿保存失败，请重试');
+    await expect.poll(() => window.evaluate(() => {
+      return SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused')
+        .get(getActiveProjectId()).draft;
+    })).toMatchObject({ [firstSegmentId]: '发送前已保存的草稿' });
+    await window.evaluate(() => { Storage.prototype.setItem = window.__subtitleStorageSetItem; });
   });
 
   test('rejects subtitles after an editor re-upload clears the managed video path', async ({ window }, testInfo) => {

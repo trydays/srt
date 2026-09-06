@@ -3,6 +3,7 @@ var subtitleTrack = document.getElementById('subtitleTrack');
 var subtitlePreview = document.getElementById('previewSubtitle');
 var subtitleDocument = document.querySelector('[data-subtitle-document]');
 var subtitleDocumentToggle = subtitleDocument.querySelector('[data-testid="subtitle-document-toggle"]');
+var subtitleDocumentDraftMarker = subtitleDocument.querySelector('[data-testid="subtitle-document-draft-marker"]');
 var subtitleDocumentStatus = subtitleDocument.querySelector('[data-testid="subtitle-document-status"]');
 var subtitleDocumentSurface = subtitleDocument.querySelector('[data-testid="subtitle-document-surface"]');
 var subtitleDocumentSave = subtitleDocument.querySelector('[data-testid="subtitle-document-save"]');
@@ -69,6 +70,8 @@ function candidateStatusText(info) {
 function updateDocumentStatus(message) {
   var info = documentState();
   subtitleDocumentToggle.textContent = (subtitleDocumentExpanded ? '编辑全部字幕 · ' : '编辑字幕 · ') + info.state.segments.length + ' 段';
+  subtitleDocumentDraftMarker.hidden = subtitleDocumentExpanded || (!info.dirty && !info.hasDraft);
+  subtitleDocumentDraftMarker.textContent = info.dirty ? '有未保存更改' : '草稿未应用';
   subtitleDocumentStatus.textContent = candidateStatusText(info) + (message ? ' · ' + message : '');
   subtitleDocumentSave.disabled = !info.dirty;
   subtitleDocumentApply.disabled = !info.dirty && !info.hasDraft;
@@ -193,6 +196,7 @@ window.subtitleController = {
   },
   undo: function(requestId) {
     var state = subtitleStore.undo(getActiveProjectId(), requestId);
+    subtitleDocument.hidden = state.segments.length === 0;
     rebuildDocumentFromState(); renderAllSubtitles(); return state;
   },
   canUndo: function(requestId) { return subtitleStore.canUndo(getActiveProjectId(), requestId); },

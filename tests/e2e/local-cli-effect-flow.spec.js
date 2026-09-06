@@ -25,6 +25,13 @@ test.describe('local CLI effect instructions', () => {
     await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(1);
     await expect(window.getByTestId('effect-status')).toHaveCount(0);
+    const card = window.getByTestId('request-status-card');
+    await expect(card.getByTestId('request-status-summary')).toHaveText(/^✓ 这次编辑已完成 · \d{2}:\d{2}$/);
+    await expect(card.getByTestId('request-status-details')).toBeHidden();
+    await card.getByTestId('request-status-summary').click();
+    await expect(card.getByTestId('request-status-details')).toBeVisible();
+    await expect(card.getByTestId('instruction-status')).toHaveAttribute('data-state', 'success');
+    await expect(card.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
   });
 
   test.describe('invalid local CLI output', () => {
