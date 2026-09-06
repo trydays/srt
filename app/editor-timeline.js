@@ -430,13 +430,20 @@ async function translateAndApply(text, record, card) {
 
 /* ── generateBtn click handler ── */
 function hydrateConversationHistory() {
-  var latestSubtitleCard = null;
   for (var i = 0; i < conversationRecords.length; i++) {
-    var card = appendRequestStatusCard(conversationRecords[i]);
-    if (conversationRecords[i].subtitleRequest === true
-        && conversationRecords[i].timelineStatus === 'success') latestSubtitleCard = card;
+    appendRequestStatusCard(conversationRecords[i]);
   }
+  var latestSubtitleCard = latestValidSubtitleCard();
   if (latestSubtitleCard && window.subtitleController) subtitleController.restoreAfter(latestSubtitleCard);
+}
+function latestValidSubtitleCard() {
+  for (var i = conversationRecords.length - 1; i >= 0; i--) {
+    var record = conversationRecords[i];
+    if (record.subtitleRequest === true && record.timelineStatus === 'success' && !record.subtitleUndone) {
+      return chatArea.querySelector('[data-request-id="' + record.id + '"]');
+    }
+  }
+  return null;
 }
 hydrateConversationHistory();
 
@@ -487,12 +494,19 @@ chatArea.addEventListener('click', function(event) {
   var button = event.target.closest('[data-undo-request]');
   if (!button) return;
   var requestId = button.dataset.undoRequest;
+  var requestCard = button.closest('[data-request-id]');
   try {
     if (!subtitleController.confirmUndo()) return;
     subtitleController.undo(requestId);
+    var undoneRecord = conversationRecords.find(function(record) { return record.id === requestId; });
+    updateRequestStatus(undoneRecord, requestCard, { subtitleUndone: true });
     for (var i = 0; i < conversationRecords.length; i++) {
       var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
       if (card) renderRequestStatusCard(card, conversationRecords[i]);
+    }
+    if (subtitleController.count()) {
+      var latestSubtitleCard = latestValidSubtitleCard();
+      if (latestSubtitleCard) subtitleController.openAfter(latestSubtitleCard);
     }
   } catch (_) {}
 });

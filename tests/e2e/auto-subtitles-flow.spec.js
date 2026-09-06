@@ -78,6 +78,7 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
     const firstRequestCard = window.getByTestId('request-status-card').last();
+    const firstRequestId = await firstRequestCard.getAttribute('data-request-id');
     const documentEditor = window.getByTestId('subtitle-document');
     await expect(documentEditor).toHaveCount(1);
     await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑全部字幕 · 2 段');
@@ -89,11 +90,15 @@ test.describe('auto subtitle conversation', () => {
     await window.getByTestId('subtitle-undo').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(0);
     await expect(documentEditor).toBeHidden();
+    await expect.poll(() => window.evaluate((requestId) => {
+      return getProjectConversation(getActiveProjectId()).find((record) => record.id === requestId).subtitleUndone;
+    }, firstRequestId)).toBe(true);
     await window.locator('.input-editor').fill('重新生成字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     const secondRequestCard = window.getByTestId('request-status-card').last();
+    const secondRequestId = await secondRequestCard.getAttribute('data-request-id');
     const segments = window.getByTestId('subtitle-document-segment');
     await segments.nth(0).fill('大家好，已经修改');
     await segments.nth(1).fill('欢迎测试统一文稿');
@@ -211,19 +216,45 @@ test.describe('auto subtitle conversation', () => {
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('request-status-card')).toHaveCount(3);
     const latestRequestCard = window.getByTestId('request-status-card').last();
+    const latestRequestId = await latestRequestCard.getAttribute('data-request-id');
     await expect(latestRequestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     await segments.nth(0).fill('这版有草稿');
     await window.getByTestId('subtitle-document-save').click();
-    await window.evaluate(() => { window.confirm = () => false; });
-    await expect.poll(() => window.evaluate(() => subtitleController.confirmUndo())).toBe(false);
-    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    const beforeCancelledUndo = await window.evaluate((requestId) => ({
+      track: Array.from(document.querySelectorAll('[data-testid="subtitle-block"]')).map((node) => node.textContent),
+      candidate: Array.from(document.querySelectorAll('[data-testid="subtitle-document-segment"]')).map((node) => node.textContent),
+      draft: SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused').get(getActiveProjectId()).draft,
+      canUndo: subtitleController.canUndo(requestId)
+    }), latestRequestId);
+    await latestRequestCard.getByTestId('request-status-summary').click();
+    await window.evaluate(() => {
+      window.__subtitleConfirmCalls = 0;
+      window.confirm = () => { window.__subtitleConfirmCalls += 1; return false; };
+    });
+    await latestRequestCard.getByTestId('subtitle-undo').click();
+    await expect.poll(() => window.evaluate(() => window.__subtitleConfirmCalls)).toBe(1);
+    await expect.poll(() => window.evaluate((requestId) => ({
+      track: Array.from(document.querySelectorAll('[data-testid="subtitle-block"]')).map((node) => node.textContent),
+      candidate: Array.from(document.querySelectorAll('[data-testid="subtitle-document-segment"]')).map((node) => node.textContent),
+      draft: SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused').get(getActiveProjectId()).draft,
+      canUndo: subtitleController.canUndo(requestId)
+    }), latestRequestId)).toEqual(beforeCancelledUndo);
     await window.evaluate(() => { window.confirm = () => true; });
-    await expect.poll(() => window.evaluate(() => subtitleController.confirmUndo())).toBe(true);
-    await window.evaluate((requestId) => subtitleController.undo(requestId), await latestRequestCard.getAttribute('data-request-id'));
+    await latestRequestCard.getByTestId('subtitle-undo').click();
+    await expect.poll(() => window.evaluate((requestId) => subtitleController.canUndo(requestId), latestRequestId)).toBe(false);
     await expect(window.getByTestId('subtitle-block').first()).toContainText('大家一行 二行好，已经修改');
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await expect(segments.nth(0)).toContainText('大家一行 二行好，已经修改（已存草稿）');
+    await expect(window.locator('[data-request-id="' + secondRequestId + '"]'
+      + ' + [data-subtitle-document]')).toHaveCount(1);
+    await expect(window.locator('[data-request-id="' + latestRequestId + '"]'
+      + ' + [data-subtitle-document]')).toHaveCount(0);
+    await window.reload();
+    await expect(window.locator('[data-request-id="' + secondRequestId + '"]'
+      + ' + [data-subtitle-document]')).toHaveCount(1);
+    await expect(window.locator('[data-request-id="' + latestRequestId + '"]'
+      + ' + [data-subtitle-document]')).toHaveCount(0);
   });
 
   test('saves a subtitle draft before the next instruction and leaves everything in place when saving fails', async ({ window }, testInfo) => {
