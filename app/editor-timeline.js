@@ -99,7 +99,7 @@ track.addEventListener('drop',function(e){
 /* ── Render mode ── */
 var renderMode = localStorage.getItem(STORAGE_KEYS.RENDER_MODE) || 'browser';
 var generateBtn=document.getElementById('generateBtn');
-generateBtn.textContent = renderMode === 'cli' ? 'FFmpeg 导出 →' : '生成效果 →';
+generateBtn.textContent = '发送';
 
 /* ── Chat ── */
 var chatArea = document.getElementById('chatArea');
@@ -107,7 +107,8 @@ var chatEmpty = document.getElementById('chatEmpty');
 var editorEl = document.querySelector('.input-editor');
 var activeProjectId = getActiveProjectId();
 var conversationRecords = getProjectConversation(activeProjectId);
-function setSubmitState(){generateBtn.disabled=editorEl.textContent.trim().length===0}
+var requestInFlight = false;
+function setSubmitState(){generateBtn.disabled=requestInFlight||editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
   if(chatEmpty)chatEmpty.style.display='none';var n=new Date();var t=('0'+n.getHours()).slice(-2)+':'+('0'+n.getMinutes()).slice(-2);
@@ -120,6 +121,7 @@ function addMsg(role,text){
 var requestStatusMeta = {
   converting: { label: '转换中', icon: '·' },
   applying: { label: '应用中', icon: '·' },
+  generating: { label: '生成中', icon: '·' },
   waiting: { label: '等待', icon: '·' },
   success: { label: '成功', icon: '✓' },
   failed: { label: '失败', icon: '×' },
@@ -134,11 +136,17 @@ function escapeConversationText(text) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function requestCardTitle(record) {
-  if (record.instructionStatus === 'converting' || record.timelineStatus === 'applying') {
+  if (record.instructionStatus === 'converting'
+      || record.timelineStatus === 'applying' || record.timelineStatus === 'generating') {
     return '正在处理这次编辑';
   }
-  return record.instructionStatus === 'failed' || record.timelineStatus === 'failed'
-    ? '这次编辑未完成' : '这次编辑已完成';
+  if (record.instructionStatus === 'failed' || record.timelineStatus === 'failed') {
+    return '这次编辑未完成';
+  }
+  if (record.subtitleRequest === true && record.timelineStatus === 'success') {
+    return '字幕已生成';
+  }
+  return '这次编辑已完成';
 }
 function statusRowHTML(testId, label, status) {
   var meta = requestStatusMeta[status];
@@ -148,12 +156,26 @@ function statusRowHTML(testId, label, status) {
     + '<span class="request-status-value">' + meta.label + '</span></div>';
 }
 function renderRequestStatusCard(card, record) {
+  var isSubtitle = record.subtitleRequest === true;
+  var secondLabel = isSubtitle ? '生成字幕'
+    : (record.subtitleRequest === null ? '执行编辑' : '应用到时间轴');
+  var secondTestId = isSubtitle ? 'subtitle-status' : 'timeline-status';
   var error = record.error
     ? '<div class="request-error">' + escapeConversationText(record.error) + '</div>' : '';
+  var summary = isSubtitle && record.timelineStatus === 'success'
+    ? '<div class="request-result">已生成 '
+      + Number(record.resultCount || 0) + ' 条字幕</div>' : '';
+  var canUndo = isSubtitle && window.subtitleController
+    && subtitleController.canUndo(record.id);
+  var undo = canUndo
+    ? '<button type="button" class="request-undo" data-undo-request="'
+      + escapeConversationText(record.id)
+      + '" data-testid="subtitle-undo">撤销本次字幕</button>' : '';
   card.innerHTML = '<div class="request-status-head"><span>' + requestCardTitle(record)
     + '</span><span class="request-status-time">' + formatRequestTime(record.submittedAt)
     + '</span></div>' + statusRowHTML('instruction-status', '转换编辑指令', record.instructionStatus)
-    + statusRowHTML('timeline-status', '应用到时间轴', record.timelineStatus) + error;
+    + statusRowHTML(secondTestId, secondLabel, record.timelineStatus)
+    + summary + error + undo;
 }
 function appendRequestStatusCard(record) {
   if (chatEmpty) chatEmpty.style.display = 'none';
@@ -174,7 +196,7 @@ function appendRequestStatusCard(record) {
 }
 function createConversationRequest(text) {
   return { id: createLocalId(), text: text, submittedAt: Date.now(),
-    instructionStatus: 'converting', timelineStatus: 'waiting' };
+    instructionStatus: 'converting', timelineStatus: 'waiting', subtitleRequest: null };
 }
 function isFinalRequest(record) {
   if (record.instructionStatus === 'failed') return true;
@@ -185,12 +207,12 @@ function isFinalRequest(record) {
 }
 function updateRequestStatus(record, card, patch) {
   Object.assign(record, patch);
-  renderRequestStatusCard(card, record);
   if (activeProjectId && isFinalRequest(record)
       && conversationRecords.indexOf(record) === -1) {
     conversationRecords.push(record);
     saveProjectConversation(activeProjectId, conversationRecords);
   }
+  renderRequestStatusCard(card, record);
 }
 
 /* 判断输入是否为可执行命令 */
@@ -300,26 +322,81 @@ function getAIConfig() {
   return cfg && cfg.key ? cfg : null;
 }
 
-function translateLocalCliEffect(text, record, card) {
-  if (!window.srtAPI || typeof window.srtAPI.translateLocalCliEffect !== 'function') {
-    updateRequestStatus(record, card, { instructionStatus: 'failed',
-      timelineStatus: 'not_run',
-      error: '未能生成编辑指令，请先选择可用的本地 CLI 或重试。' });
+function subtitleErrorMessage(code) {
+  if (code === 'VIDEO_PATH_UNAVAILABLE') return '当前视频路径不可用，请返回首页重新导入视频。';
+  if (code === 'SUBTITLE_RUNTIME_NOT_READY') return '请先到检测页准备 Whisper 字幕。';
+  if (code === 'SUBTITLE_NO_SPEECH') return '未检测到可生成字幕的清晰人声。';
+  return '字幕生成失败，请重试。';
+}
+
+function instructionErrorMessage(code) {
+  if (code === 'LOCAL_CLI_NOT_SELECTED' || code === 'LOCAL_CLI_NOT_AVAILABLE') {
+    return '请先到检测页选择可用的本地 CLI。';
+  }
+  if (code === 'LOCAL_CLI_TRANSLATION_TIMEOUT') {
+    return '编辑指令转换超时，请重试。';
+  }
+  if (code === 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT') {
+    return '未能识别为当前可用的编辑指令。';
+  }
+  return '编辑指令转换失败，请重试。';
+}
+
+async function runSubtitleInstruction(record, card) {
+  record.subtitleRequest = true;
+  updateRequestStatus(record, card, {
+    instructionStatus: 'success', timelineStatus: 'generating', error: ''
+  });
+  if (!window.currentProjectVideoPath) {
+    updateRequestStatus(record, card, {
+      timelineStatus: 'failed', error: subtitleErrorMessage('VIDEO_PATH_UNAVAILABLE')
+    });
     return;
   }
-  window.srtAPI.translateLocalCliEffect(text).then(function(instruction) {
-    updateRequestStatus(record, card,
-      { instructionStatus: 'success', timelineStatus: 'applying', error: '' });
-    var applied = false;
-    try { applied = applyLocalCliEffect(instruction); } catch (_) {}
-    updateRequestStatus(record, card, applied
-      ? { timelineStatus: 'success', error: '' }
-      : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });
-  }, function() {
-    updateRequestStatus(record, card, { instructionStatus: 'failed',
-      timelineStatus: 'not_run',
-      error: '未能生成编辑指令，请先选择可用的本地 CLI 或重试。' });
+  var result = await window.srtAPI.generateSubtitles({
+    videoPath: window.currentProjectVideoPath
   });
+  if (!result.ok) {
+    updateRequestStatus(record, card, {
+      timelineStatus: 'failed', error: subtitleErrorMessage(result.errorCode)
+    });
+    return;
+  }
+  try {
+    subtitleController.replace(record.id, result.segments);
+  } catch (_) {
+    updateRequestStatus(record, card, {
+      timelineStatus: 'failed', error: '字幕暂时无法保存，请重试。'
+    });
+    return;
+  }
+  updateRequestStatus(record, card, {
+    timelineStatus: 'success', resultCount: result.segments.length, error: ''
+  });
+}
+
+async function translateAndApply(text, record, card) {
+  var translated = await window.srtAPI.translateSubtitleOrFadeIn(text);
+  if (!translated.ok) {
+    updateRequestStatus(record, card, {
+      instructionStatus: 'failed', timelineStatus: 'not_run',
+      error: instructionErrorMessage(translated.errorCode)
+    });
+    return;
+  }
+  record.instructionStatus = 'success';
+  if (translated.instruction.type === 'generate_subtitles') {
+    await runSubtitleInstruction(record, card);
+    return;
+  }
+  record.subtitleRequest = false;
+  updateRequestStatus(record, card, {
+    instructionStatus: 'success', timelineStatus: 'applying', error: ''
+  });
+  var applied = applyLocalCliEffect(translated.instruction);
+  updateRequestStatus(record, card, applied
+    ? { timelineStatus: 'success', error: '' }
+    : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });
 }
 
 /* ── generateBtn click handler ── */
@@ -330,9 +407,9 @@ function hydrateConversationHistory() {
 }
 hydrateConversationHistory();
 
-generateBtn.addEventListener('click', function() {
+generateBtn.addEventListener('click', async function() {
   var text = editorEl.textContent.trim();
-  if (!text) return;
+  if (!text || generateBtn.disabled) return;
   editorEl.textContent = '';
   setSubmitState();
 
@@ -344,6 +421,31 @@ generateBtn.addEventListener('click', function() {
 
   var record = createConversationRequest(text);
   var card = appendRequestStatusCard(record);
-  translateLocalCliEffect(text, record, card);
+  requestInFlight = true;
+  setSubmitState();
+  try {
+    await translateAndApply(text, record, card);
+  } catch (_) {
+    updateRequestStatus(record, card, {
+      instructionStatus: record.instructionStatus === 'success' ? 'success' : 'failed',
+      timelineStatus: record.instructionStatus === 'success' ? 'failed' : 'not_run',
+      error: '这次编辑未完成，请重试。'
+    });
+  } finally {
+    requestInFlight = false;
+    setSubmitState();
+  }
+});
+chatArea.addEventListener('click', function(event) {
+  var button = event.target.closest('[data-undo-request]');
+  if (!button) return;
+  var requestId = button.dataset.undoRequest;
+  try {
+    subtitleController.undo(requestId);
+    for (var i = 0; i < conversationRecords.length; i++) {
+      var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
+      if (card) renderRequestStatusCard(card, conversationRecords[i]);
+    }
+  } catch (_) {}
 });
 editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();generateBtn.click()}});
