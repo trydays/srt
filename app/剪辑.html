@@ -77,6 +77,11 @@
     .preview__placeholder{color:var(--text-soft);font-size:13px;position:relative;z-index:3}
     .preview__upload{appearance:none;display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);font:inherit;font-size:12.5px;font-weight:650;cursor:pointer;box-shadow:var(--shadow-xs);transition:all var(--dur-quick) var(--ease-out);position:relative;z-index:3}
     .preview__upload:hover{border-color:var(--border-strong);color:var(--accent);background:var(--bg-subtle);transform:translateY(-0.5px);box-shadow:var(--shadow-sm)}
+    .preview-subtitle{position:absolute;left:50%;bottom:7%;z-index:3;max-width:84%;
+      transform:translateX(-50%);padding:6px 10px;border-radius:var(--radius-sm);
+      background:rgba(0,0,0,.72);color:#fff;font-size:16px;line-height:1.45;
+      text-align:center;pointer-events:none}
+    .preview-subtitle[hidden]{display:none}
 
     /* ── Timeline ── */
     .timeline{width:100%;max-width:800px;display:flex;flex-direction:column;gap:6px;flex-shrink:0}
@@ -99,6 +104,27 @@
     .tl-marker{position:absolute;top:60%;transform:translate(-50%,-50%);z-index:3;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:var(--shadow-xs);transition:transform 120ms var(--ease-out)}
     .tl-marker:hover{transform:translate(-50%,-50%) scale(1.1);z-index:4}
     .tl-track.drag-over-tl{background:color-mix(in srgb,var(--accent-tint) 20%,var(--bg-panel));border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
+    .subtitle-section{display:grid;grid-template-columns:42px minmax(0,1fr);gap:6px 8px;
+      align-items:center}
+    .subtitle-track-label{font-size:11px;color:var(--text-muted)}
+    .subtitle-track{position:relative;height:34px;overflow:hidden;border:1px solid var(--border);
+      border-radius:var(--radius-sm);background:var(--bg-panel)}
+    .subtitle-block{position:absolute;top:4px;height:24px;overflow:hidden;padding:0 6px;
+      border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));
+      border-radius:var(--radius-sm);background:var(--accent-tint);color:var(--text-strong);
+      font:inherit;font-size:10px;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+    .subtitle-editor{grid-column:2;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+      gap:8px;align-items:center;font-size:11px;color:var(--text-muted)}
+    .subtitle-editor[hidden]{display:none}
+    .subtitle-editor input{min-width:0;height:30px;padding:0 9px;border:1px solid var(--border);
+      border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text);font:inherit}
+    .subtitle-editor button,.request-undo{height:30px;padding:0 10px;border:1px solid var(--border);
+      border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);
+      font:inherit;font-size:11px;cursor:pointer}
+    .request-result{margin-top:5px;font-size:10.5px;color:var(--text-muted)}
+    .request-undo{margin-top:7px}
+    .request-status-row[data-state="generating"] .request-status-icon{border:2px solid var(--border);
+      border-top-color:var(--accent);background:transparent}
 
     /* ── Chat (OD chat-log + msg) ── */
     .chat{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:12px;padding:14px 12px;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text-muted) 18%,transparent) transparent}
@@ -201,6 +227,7 @@
       <div class="ws-scroll">
         <div class="preview" id="previewArea" data-od-id="video-preview">
           <video id="previewVideo" playsinline></video>
+          <div class="preview-subtitle" id="previewSubtitle" data-testid="preview-subtitle" hidden></div>
           <div class="preview__overlay" id="previewOverlay" style="display:none">
             <div class="preview__icon" id="playBtn">▶</div>
           </div>
@@ -220,6 +247,16 @@
           <div class="tl-time"><span id="tlCurrent">00:00</span><span id="tlTotal">03:20</span></div>
         </div>
 
+        <section class="subtitle-section" data-testid="subtitle-section">
+          <div class="subtitle-track-label">字幕</div>
+          <div class="subtitle-track" id="subtitleTrack" data-testid="subtitle-track"></div>
+          <label class="subtitle-editor" id="subtitleEditor" hidden>
+            <span>字幕文字</span>
+            <input id="subtitleTextInput" data-testid="subtitle-text-input" type="text" />
+            <button id="subtitleTextSave" data-testid="subtitle-text-save" type="button">保存</button>
+          </label>
+        </section>
+
       </div>
     </main>
   </div>
@@ -230,6 +267,8 @@
   <script src="components-data.js"></script>
   <script src="effects.js"></script>
   <script src="editor-core.js"></script>
+  <script src="subtitle-state.js"></script>
+  <script src="editor-subtitles.js"></script>
   <script src="editor-timeline.js"></script>
   <script>
     window.__PAGE = { id: 'editor' };
