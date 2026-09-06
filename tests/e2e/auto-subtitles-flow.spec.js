@@ -139,30 +139,32 @@ test.describe('auto subtitle conversation', () => {
     await expect(documentEditor).toContainText('有未保存更改 · 请补全空白字幕');
     await expect(segments.nth(1)).toHaveText('');
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
-    await segments.nth(1).fill('欢迎测试统一文稿');
+    await segments.nth(1).fill(' 欢迎测试统一文稿 ');
     await window.getByTestId('subtitle-document-save').click();
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
+    await expect(segments.nth(1)).toHaveText('欢迎测试统一文稿');
+    await expect(window.getByTestId('subtitle-document-save')).toBeDisabled();
     await window.evaluate(() => {
       const video = document.getElementById('previewVideo');
       video.currentTime = 0.5;
       video.dispatchEvent(new Event('timeupdate'));
     });
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    const originalFirstSegmentId = await segments.nth(0).getAttribute('data-segment-id');
     await window.evaluate(() => {
-      const store = window.SRTSubtitleState.createSubtitleStore(localStorage, () => 'stale-probe-segment');
-      const state = store.get(getActiveProjectId());
-      store.replace(getActiveProjectId(), 'stale-probe', state.segments);
+      document.querySelector('[data-testid="subtitle-document-segment"]').dataset.segmentId = 'stale-probe-segment';
     });
     await window.getByTestId('subtitle-document-apply').click();
     await expect(documentEditor).toContainText('有未保存更改 · 当前字幕已更新，请重新载入');
     await expect(segments.nth(0)).toHaveText('大家一行 二行好，已经修改');
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
-    await window.evaluate(() => {
-      const store = window.SRTSubtitleState.createSubtitleStore(localStorage, () => 'stale-probe-segment');
-      store.undo(getActiveProjectId(), 'stale-probe');
-      subtitleController.render();
-    });
+    await window.evaluate((segmentId) => {
+      const segment = document.querySelector('[data-testid="subtitle-document-segment"]');
+      segment.dataset.segmentId = segmentId;
+      segment.dispatchEvent(new Event('input', { bubbles: true }));
+    }, originalFirstSegmentId);
+    await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await window.reload();
     const restoredCard = window.getByTestId('request-status-card').last();
     await window.evaluate((card) => subtitleController.restoreAfter(card), await restoredCard.elementHandle());

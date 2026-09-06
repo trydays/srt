@@ -47,8 +47,8 @@ function renderCurrentSubtitle() {
   subtitlePreview.hidden = !active;
   subtitlePreview.textContent = active ? active.text : '';
 }
-function resetCandidateFromState() {
-  var state = currentSubtitleState();
+function resetCandidateFromState(state) {
+  state = state || currentSubtitleState();
   candidateTexts = textMapForSegments(state.segments);
   if (state.draft) state.segments.forEach(function(segment) {
     candidateTexts[segment.id] = state.draft[segment.id];
@@ -129,8 +129,10 @@ function showDocumentError(error) {
 function saveCandidate() {
   clearSegmentErrors();
   try {
-    subtitleStore.saveDraft(getActiveProjectId(), candidateTextById());
-    updateDocumentStatus(); return true;
+    var state = subtitleStore.saveDraft(getActiveProjectId(), candidateTextById());
+    resetCandidateFromState(state);
+    renderSubtitleDocument();
+    return true;
   } catch (error) { showDocumentError(error); return false; }
 }
 function applyCandidate() {
