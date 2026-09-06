@@ -77,27 +77,101 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
+    const firstRequestCard = window.getByTestId('request-status-card').last();
+    await window.evaluate((card) => subtitleController.openAfter(card), await firstRequestCard.elementHandle());
+    const documentEditor = window.getByTestId('subtitle-document');
+    await expect(documentEditor).toHaveCount(1);
+    await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑全部字幕 · 2 段');
+    await expect(firstRequestCard.locator('xpath=following-sibling::*[1][@data-subtitle-document]')).toHaveCount(1);
+    await expect(window.getByTestId('subtitle-document-segment')).toHaveCount(2);
+    await expect(window.getByTestId('subtitle-document-time')).toHaveText(['00:00', '00:01']);
+    await expect(window.locator('#subtitleTextEditor, #subtitleTextSave')).toHaveCount(0);
     await window.getByTestId('subtitle-undo').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(0);
     await window.locator('.input-editor').fill('重新生成字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
-    await window.getByTestId('subtitle-block').first().click();
+    const secondRequestCard = window.getByTestId('request-status-card').last();
+    await window.evaluate((card) => subtitleController.openAfter(card), await secondRequestCard.elementHandle());
+    const segments = window.getByTestId('subtitle-document-segment');
+    await segments.nth(0).fill('大家好，已经修改');
+    await segments.nth(1).fill('欢迎测试统一文稿');
+    await expect(documentEditor).toContainText('有未保存更改');
+    await segments.nth(0).press('Tab');
+    await expect(segments.nth(1)).toBeFocused();
+    await segments.nth(1).press('Shift+Tab');
+    await expect(segments.nth(0)).toBeFocused();
+    const enterEvents = await window.evaluate(() => {
+      const segment = document.querySelector('[data-testid="subtitle-document-segment"]');
+      const composing = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true });
+      const ordinary = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      return {
+        composingAllowed: segment.dispatchEvent(composing),
+        ordinaryPrevented: !segment.dispatchEvent(ordinary)
+      };
+    });
+    expect(enterEvents).toEqual({ composingAllowed: true, ordinaryPrevented: true });
+    await window.evaluate(() => {
+      const segment = document.querySelector('[data-testid="subtitle-document-segment"]');
+      const paste = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', { value: { getData: () => '一行\n二行' } });
+      segment.dispatchEvent(paste);
+      const video = document.getElementById('previewVideo');
+      video.dispatchEvent(new Event('loadedmetadata'));
+    });
+    await expect(segments.nth(0)).toContainText('一行 二行');
+    await expect(segments.nth(1)).toHaveText('欢迎测试统一文稿');
+    await window.getByTestId('subtitle-document-save').click();
+    await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      video.currentTime = 0.5;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
-    await window.getByTestId('subtitle-text-input').fill('大家好，已经修改');
-    await window.getByTestId('subtitle-text-save').click();
-    await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好，已经修改');
     await window.reload();
-    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好，已经修改');
+    const restoredCard = window.getByTestId('request-status-card').last();
+    await window.evaluate((card) => subtitleController.restoreAfter(card), await restoredCard.elementHandle());
+    await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑字幕 · 2 段');
+    await expect(window.getByTestId('subtitle-document-surface')).toBeHidden();
+    await expect(window.getByTestId('subtitle-document-status')).toBeHidden();
+    await expect(window.getByTestId('subtitle-document-save')).toBeHidden();
+    await expect(window.getByTestId('subtitle-document-apply')).toBeHidden();
+    await window.getByTestId('subtitle-document-toggle').click();
+    await expect(segments.nth(0)).toContainText('一行 二行');
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    await window.getByTestId('subtitle-document-apply').click();
+    await expect(documentEditor).toContainText('所有修改已应用');
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      video.currentTime = 0.5;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+    await expect(window.getByTestId('preview-subtitle')).toContainText('一行 二行');
+    await segments.nth(0).fill('一行 二行（已存草稿）');
+    await window.getByTestId('subtitle-document-save').click();
+    await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
     await window.locator('.input-editor').fill('再生成一次字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('request-status-card')).toHaveCount(3);
     const latestRequestCard = window.getByTestId('request-status-card').last();
     await expect(latestRequestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
-    await latestRequestCard.getByTestId('subtitle-undo').click();
-    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好，已经修改');
+    await window.evaluate((card) => subtitleController.openAfter(card), await latestRequestCard.elementHandle());
+    await segments.nth(0).fill('这版有草稿');
+    await window.getByTestId('subtitle-document-save').click();
+    await window.evaluate(() => { window.confirm = () => false; });
+    await expect.poll(() => window.evaluate(() => subtitleController.confirmUndo())).toBe(false);
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    await window.evaluate(() => { window.confirm = () => true; });
+    await expect.poll(() => window.evaluate(() => subtitleController.confirmUndo())).toBe(true);
+    await window.evaluate((requestId) => subtitleController.undo(requestId), await latestRequestCard.getAttribute('data-request-id'));
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
+    await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
+    await expect(segments.nth(0)).toContainText('一行 二行（已存草稿）');
   });
 
   test('rejects subtitles after an editor re-upload clears the managed video path', async ({ window }, testInfo) => {

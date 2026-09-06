@@ -113,14 +113,26 @@
       border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));
       border-radius:var(--radius-sm);background:var(--accent-tint);color:var(--text-strong);
       font:inherit;font-size:10px;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
-    .subtitle-editor{grid-column:2;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
-      gap:8px;align-items:center;font-size:11px;color:var(--text-muted)}
-    .subtitle-editor[hidden]{display:none}
-    .subtitle-editor input{min-width:0;height:30px;padding:0 9px;border:1px solid var(--border);
-      border-radius:var(--radius-sm);background:var(--bg-panel);color:var(--text);font:inherit}
-    .subtitle-editor button,.request-undo{height:30px;padding:0 10px;border:1px solid var(--border);
+    .request-undo{height:30px;padding:0 10px;border:1px solid var(--border);
       border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);
       font:inherit;font-size:11px;cursor:pointer}
+    .subtitle-document{margin:10px 0 2px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-panel);overflow:hidden}
+    .subtitle-document[hidden]{display:none}
+    .subtitle-document__head{display:flex;align-items:flex-start;gap:8px;padding:10px 11px}
+    .subtitle-document__title{flex:1;min-width:0;padding:3px 0;color:var(--text-strong);font-size:12px;font-weight:650;text-align:left;background:none;border:0;cursor:pointer}
+    .subtitle-document__actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .subtitle-document__actions button{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);font:inherit;font-size:11px;cursor:pointer}
+    .subtitle-document__actions button:disabled{opacity:.5;cursor:default}
+    .subtitle-document__status{padding:0 11px 10px;color:var(--text-muted);font-size:11px}
+    .subtitle-document__surface{max-height:300px;overflow:auto;border-top:1px solid var(--border);padding:7px 11px 10px}
+    .subtitle-document.is-collapsed .subtitle-document__actions,.subtitle-document.is-collapsed .subtitle-document__status{display:none}
+    .subtitle-document__segment{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5}
+    .subtitle-document__segment:last-child{border-bottom:0}
+    .subtitle-document__time{color:var(--text-muted);font-size:10px;padding-top:2px}
+    .subtitle-document__text{min-width:0;outline:none;white-space:pre-wrap;color:var(--text)}
+    .subtitle-document__text:focus{color:var(--text-strong)}
+    .subtitle-document__error{grid-column:2;color:var(--red);font-size:10.5px}
+    @media(max-width:260px){.subtitle-document__head{flex-wrap:wrap}.subtitle-document__title{flex-basis:100%}.subtitle-document__actions{width:100%}.subtitle-document__segment{grid-template-columns:1fr}.subtitle-document__time{padding:0}.subtitle-document__error{grid-column:1}}
     .request-result{margin-top:5px;font-size:10.5px;color:var(--text-muted)}
     .request-undo{margin-top:7px}
     .request-status-row[data-state="generating"] .request-status-icon{border:2px solid var(--border);
@@ -188,6 +200,17 @@
         data-testid="conversation-panel" role="tabpanel">
         <div class="chat" id="chatArea" data-od-id="chat-history">
           <div class="chat-empty" id="chatEmpty">输入效果描述，开始对话</div>
+          <section class="subtitle-document" data-subtitle-document data-testid="subtitle-document" hidden>
+            <div class="subtitle-document__head">
+              <button class="subtitle-document__title" type="button" data-testid="subtitle-document-toggle"></button>
+              <div class="subtitle-document__actions">
+                <button type="button" data-testid="subtitle-document-save">保存</button>
+                <button type="button" data-testid="subtitle-document-apply">应用</button>
+              </div>
+            </div>
+            <div class="subtitle-document__status" data-testid="subtitle-document-status"></div>
+            <div class="subtitle-document__surface" data-testid="subtitle-document-surface"></div>
+          </section>
         </div>
 
         <div class="input-card">
@@ -250,11 +273,6 @@
         <section class="subtitle-section" data-testid="subtitle-section">
           <div class="subtitle-track-label">字幕</div>
           <div class="subtitle-track" id="subtitleTrack" data-testid="subtitle-track"></div>
-          <label class="subtitle-editor" id="subtitleEditor" hidden>
-            <span>字幕文字</span>
-            <input id="subtitleTextInput" data-testid="subtitle-text-input" type="text" />
-            <button id="subtitleTextSave" data-testid="subtitle-text-save" type="button">保存</button>
-          </label>
         </section>
 
       </div>
