@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation complete. The real one-second Chinese hard-subtitle sample gate remains pending the controller's authorized `ffmpeg-full` installation/capability check; this task did not install or modify host tools.
+Complete. Code review passed, the authorized keg-only `ffmpeg-full` installation completed without replacing the linked FFmpeg, and the real one-second Chinese hard-subtitle plus AAC sample gate passed.
 
 ## Scope and changed files
 
@@ -95,12 +95,12 @@ Added behavior coverage for:
 
 - `feat: detect hard-subtitle export capability` (this task commit)
 
-## Self-review and remaining concern
+## Pre-gate self-review (later resolved)
 
 - The source and tests stay within Task 1 boundaries.
 - Capability parsing matches FFmpeg's table rows rather than accepting arbitrary prose containing a capability name.
 - A ready fallback candidate wins over an earlier installed-but-limited candidate; otherwise the first installed candidate supplies the truthful limited state.
-- The real sample gate is intentionally not claimed: the current host FFmpeg lacks `ass`, and the controller must install/authorize `ffmpeg-full`, rerun the probes, generate the one-second Chinese audible sample, and inspect text and sound before Task 2 begins.
+- At this pre-install checkpoint, the sample gate was intentionally not claimed because the then-current host FFmpeg lacked `ass`. The later controller-run gate below resolves this condition.
 
 ## Independent-review fixes
 
@@ -122,7 +122,7 @@ Two Important findings were addressed in a separate follow-up commit without ent
 - Environment/install tests: 42/42 passed.
 - Focused environment-page Electron E2E: 7/7 passed using the previously verified complete local Electron runtime; no Electron installation infrastructure was changed.
 - Full `npm test` with loopback permission: 134/134 passed.
-- No `ffmpeg-full` installation or host-tool modification was performed.
+- At this code-review checkpoint, no `ffmpeg-full` installation or host-tool modification had yet been performed; the later authorized gate is recorded below.
 
 ## Controller-run real capability gate
 
