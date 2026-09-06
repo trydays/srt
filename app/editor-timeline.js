@@ -365,8 +365,8 @@ async function runSubtitleInstruction(record, card) {
   try {
     subtitleController.replace(record.id, result.segments);
     for (var i = 0; i < conversationRecords.length; i++) {
-      var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
-      if (card) renderRequestStatusCard(card, conversationRecords[i]);
+      var historicalCard = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
+      if (historicalCard) renderRequestStatusCard(historicalCard, conversationRecords[i]);
     }
   } catch (_) {
     updateRequestStatus(record, card, {

@@ -68,6 +68,8 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好，已经修改');
     await window.locator('.input-editor').fill('再生成一次字幕');
     await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('subtitle-status').last()).toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     await window.getByTestId('subtitle-undo').last().click();
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好，已经修改');
   });
