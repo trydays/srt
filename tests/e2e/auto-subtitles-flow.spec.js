@@ -58,6 +58,7 @@ test.describe('auto subtitle conversation', () => {
     await window.locator('.input-editor').fill('重新生成字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
+    await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     await window.getByTestId('subtitle-block').first().click();
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
     await window.getByTestId('subtitle-text-input').fill('大家好，已经修改');
