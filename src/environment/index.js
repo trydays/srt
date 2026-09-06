@@ -205,15 +205,13 @@ function createEnvironmentModule(dependencies) {
   }
 
   function ffprobeCandidates(ffmpegPath) {
-    const candidates = [];
     if (pathApi.isAbsolute(ffmpegPath)) {
-      candidates.push(pathApi.join(
+      return [pathApi.join(
         pathApi.dirname(ffmpegPath),
         dependencies.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
-      ));
+      )];
     }
-    if (!candidates.includes('ffprobe')) candidates.push('ffprobe');
-    return candidates;
+    return ['ffprobe'];
   }
 
   async function probeFfprobe(ffmpegPath) {

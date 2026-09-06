@@ -37,6 +37,10 @@ function createScenarioDependencies(name) {
       platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
       memoryGB: 24, diskFreeGB: 180, diskTotalGB: 494, graphics: 'ready'
     },
+    'mac-ffmpeg-limited': {
+      platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
+      memoryGB: 24, diskFreeGB: 180, diskTotalGB: 494, graphics: 'ready'
+    },
     'mac-degraded': {
       platform: 'darwin', arch: 'arm64', version: '15.6.1', chip: 'Apple M4', cores: 10,
       memoryGB: 6, diskFreeGB: 5, diskTotalGB: 494, graphics: 'probe_error'
@@ -89,7 +93,7 @@ function createScenarioDependencies(name) {
     const macFullFfmpeg = '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg';
     const macFullFfprobe = '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe';
     const macFullReady = scenario.platform === 'darwin' &&
-      (name !== 'mac-missing' || state.ffmpegInstallCount === 1);
+      (!['mac-missing', 'mac-ffmpeg-limited'].includes(name) || state.ffmpegInstallCount === 1);
     if (program === macFullFfmpeg && sameArgs(callArgs, ['-version']) && macFullReady) {
       return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
     }
@@ -115,7 +119,9 @@ function createScenarioDependencies(name) {
       return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
     }
     if (program === 'ffmpeg' && sameArgs(callArgs, ['-hide_banner', '-filters'])) {
-      return Promise.resolve(successful('Filters:\n ... ass V->V'));
+      return Promise.resolve(successful(name === 'mac-ffmpeg-limited'
+        ? 'Filters:\n ... scale V->V'
+        : 'Filters:\n ... ass V->V'));
     }
     if (program === 'ffmpeg' && sameArgs(callArgs, ['-hide_banner', '-encoders'])) {
       return Promise.resolve(successful(' V..... libx264\n A..... aac'));

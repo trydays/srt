@@ -77,7 +77,7 @@ Added behavior coverage for:
 
 - Both `detectEnvironment()` and `getExportTools()` call the same `probeExportTools()` selection/probe path.
 - macOS checks `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`, then `/usr/local/opt/ffmpeg-full/bin/ffmpeg`, then existing bundled/system candidates.
-- An absolute FFmpeg candidate first checks its sibling ffprobe, then the existing system ffprobe combination.
+- An absolute FFmpeg candidate only checks its sibling ffprobe; only the system `ffmpeg` command may pair with the PATH `ffprobe` command.
 - Readiness requires the exact `ass` filter, both `libx264` and `aac` encoders, the `mp4` muxer, and a runnable ffprobe.
 - `getExportTools()` probes again on every call and returns only the selected `{ ffmpegPath, ffprobePath }`; no renderer-supplied executable path was introduced.
 - FFmpeg installation and subtitle-export readiness remain distinct, and detection never blocks continuing to the home page.
@@ -101,3 +101,25 @@ Added behavior coverage for:
 - Capability parsing matches FFmpeg's table rows rather than accepting arbitrary prose containing a capability name.
 - A ready fallback candidate wins over an earlier installed-but-limited candidate; otherwise the first installed candidate supplies the truthful limited state.
 - The real sample gate is intentionally not claimed: the current host FFmpeg lacks `ass`, and the controller must install/authorize `ffmpeg-full`, rerun the probes, generate the one-second Chinese audible sample, and inspect text and sound before Task 2 begins.
+
+## Independent-review fixes
+
+Two Important findings were addressed in a separate follow-up commit without entering Task 2.
+
+### TDD RED
+
+- `node --test tests/environment.test.js`: 29 passed, 1 failed. The new test showed an absolute `ffmpeg-full` path with a missing sibling ffprobe was incorrectly accepted by mixing it with PATH ffprobe.
+- Focused Playwright scenario `installed FFmpeg with limited subtitle export`: failed by timing out while waiting for the existing “查看安装方案” button on a truthful `data-status="ready"` FFmpeg row.
+
+### Minimal fixes
+
+- The FFmpeg tool row retains its detected ready status but also exposes the existing installation-plan action whenever `modes.subtitleExport` is not ready.
+- Absolute FFmpeg paths now probe only their same-directory sibling ffprobe. The existing `ffmpeg`/`ffprobe` PATH combination remains valid only when the selected FFmpeg candidate is the system command.
+- Added the `mac-ffmpeg-limited` E2E scenario to verify the missing-`ass` reason, the unchanged ready tool status, opening the existing `ffmpeg-full` plan, cancellation, and zero installation calls.
+
+### Follow-up verification
+
+- Environment/install tests: 42/42 passed.
+- Focused environment-page Electron E2E: 7/7 passed using the previously verified complete local Electron runtime; no Electron installation infrastructure was changed.
+- Full `npm test` with loopback permission: 134/134 passed.
+- No `ffmpeg-full` installation or host-tool modification was performed.

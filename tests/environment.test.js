@@ -185,6 +185,30 @@ test('subtitle export returns the exact ready FFmpeg and sibling ffprobe paths',
   assert.equal(fixture.calls.some((call) => call.program === 'ffmpeg'), false);
 });
 
+test('absolute FFmpeg does not mix with PATH ffprobe when its sibling is missing', async () => {
+  const ffmpegPath = '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg';
+  const siblingFfprobe = '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe';
+  const fixture = macFixture({
+    commandResults: {
+      [`${ffmpegPath} -version`]: 'ffmpeg version 9.0.1',
+      [`${ffmpegPath} -hide_banner -filters`]: 'Filters:\n ... ass V->V',
+      [`${ffmpegPath} -hide_banner -encoders`]: ' V..... libx264\n A..... aac',
+      [`${ffmpegPath} -hide_banner -muxers`]: ' E mp4 MP4',
+      [`${siblingFfprobe} -version`]: commandError('ENOENT'),
+      'ffprobe -version': 'ffprobe version 9.0.1'
+    }
+  });
+  const environment = createEnvironmentModule(fixture);
+  const report = await environment.detectEnvironment();
+
+  assert.equal(report.tools.ffmpeg.command, ffmpegPath);
+  assert.deepEqual(report.modes.subtitleExport, {
+    status: 'limited', reason: 'ffprobe_missing', blockers: ['ffmpeg']
+  });
+  await assert.rejects(environment.getExportTools(), { code: 'EXPORT_RUNTIME_NOT_READY' });
+  assert.equal(fixture.calls.some((call) => call.program === 'ffprobe'), false);
+});
+
 test('subtitle export requires ass even when the subtitles filter is present', async () => {
   const fixture = macFixture({
     versions: { ffmpeg: '9.0.1' },

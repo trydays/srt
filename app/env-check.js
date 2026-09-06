@@ -169,6 +169,7 @@ if (!environmentPage) {
 
   function renderTools(report) {
     var reportTools = report.tools || {};
+    var subtitleExport = report.modes && report.modes.subtitleExport;
     var html = '';
     for (var i = 0; i < TOOL_DEFINITIONS.length; i++) {
       var definition = TOOL_DEFINITIONS[i];
@@ -195,7 +196,9 @@ if (!environmentPage) {
         status === 'ready' ? '✅' : status === 'limited' ? '⚠️' : '❌';
       var action = '<span class="tool-row__action"></span>';
       var installTarget = INSTALL_TARGETS[definition.id];
-      if (installTarget && status !== 'ready') {
+      var needsSubtitleExportInstall = definition.id === 'ffmpeg' && subtitleExport &&
+        normalizedStatus(subtitleExport.status) !== 'ready';
+      if (installTarget && (status !== 'ready' || needsSubtitleExportInstall)) {
         var actionLabel = definition.id === 'whisper'
           ? isFailed ? '重新准备' : isPreparing ? '准备中' : '准备字幕能力'
           : '查看安装方案';

@@ -31,6 +31,30 @@ test.describe('macOS ready journey', () => {
   });
 });
 
+test.describe('installed FFmpeg with limited subtitle export', () => {
+  test.use({ scenario: 'mac-ffmpeg-limited' });
+
+  test('keeps FFmpeg ready while offering the existing ffmpeg-full plan', async ({ window, readScenarioState }) => {
+    const ffmpegRow = window.getByTestId('row-ffmpeg');
+    const subtitleExport = window.getByTestId('mode-subtitleExport');
+    const dialog = window.getByTestId('install-dialog');
+
+    await expect(ffmpegRow).toHaveAttribute('data-status', 'ready');
+    await expect(subtitleExport).toHaveAttribute('data-status', 'limited');
+    await expect(subtitleExport).toContainText('当前 FFmpeg 缺少 ass 字幕滤镜');
+    await ffmpegRow.getByRole('button', { name: '查看安装方案' }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('ffmpeg-full');
+    await window.getByTestId('install-cancel').click();
+    await expect(dialog).not.toBeVisible();
+
+    const state = await readScenarioState();
+    expect(state.installMethodCount).toBe(0);
+    expect(state.calls.filter(({ program, args }) =>
+      program === 'brew' && JSON.stringify(args) === JSON.stringify(['install', 'ffmpeg-full']))).toHaveLength(0);
+  });
+});
+
 test.describe('Windows ready journey', () => {
   test.use({ scenario: 'windows-ready' });
 
