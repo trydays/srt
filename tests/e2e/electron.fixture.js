@@ -132,7 +132,8 @@ const test = base.extend({
   realEnvironment: [false, { option: true }],
   localCliMode: ['empty', { option: true }],
   localCliEffectResult: ['valid', { option: true }],
-  electronContext: async ({ scenario, realEnvironment, localCliMode, localCliEffectResult }, use, testInfo) => {
+  subtitleResult: ['success', { option: true }],
+  electronContext: async ({ scenario, realEnvironment, localCliMode, localCliEffectResult, subtitleResult }, use, testInfo) => {
     const userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-e2e-'));
     const diagnostics = [];
     let electronApp;
@@ -148,6 +149,7 @@ const test = base.extend({
           SRT_E2E_USER_DATA: userDataDir,
           SRT_E2E_LOCAL_CLI: localCliMode,
           SRT_E2E_EFFECT_RESULT: localCliEffectResult,
+          SRT_E2E_SUBTITLE_RESULT: subtitleResult,
           SRT_E2E_REAL_MAC: realEnvironment ? '1' : '0',
           SRT_E2E_SCENARIO: realEnvironment ? '' : scenario,
           ...(!realEnvironment && scenario === 'mac-ready' ? {

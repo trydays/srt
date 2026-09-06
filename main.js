@@ -9,6 +9,7 @@ const { exec } = require('child_process');
 const { loadConfig } = require('./config-loader');
 const { createProductionEnvironment } = require('./src/environment/node-adapter');
 const { createLocalCliService } = require('./src/local-cli');
+const { createSubtitleService } = require('./src/subtitles');
 
 let mainWindow = null;
 
@@ -220,7 +221,11 @@ ipcMain.handle('update:install', async () => {
   }
 });
 
-function startApplication({ environmentModule, localCliService } = {}) {
+function publicFailure(error, fallback) {
+  return { ok: false, errorCode: error && error.code ? error.code : fallback };
+}
+
+function startApplication({ environmentModule, localCliService, subtitleService } = {}) {
   const userDataDir = app.getPath('userData');
   const bundledRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'tools')
@@ -231,6 +236,10 @@ function startApplication({ environmentModule, localCliService } = {}) {
     bundledRoot
   });
   const activeLocalCliService = localCliService || createLocalCliService({ userDataDir });
+  const activeSubtitleService = subtitleService || createSubtitleService({
+    userDataDir,
+    transcriberPath: path.join(bundledRoot, 'transcribe-subtitles.py')
+  });
 
   ipcMain.handle('environment:detect', () => activeEnvironment.detectEnvironment());
   ipcMain.handle('installation:describe', (_event, toolId) => activeEnvironment.describeInstall(toolId));
@@ -239,6 +248,24 @@ function startApplication({ environmentModule, localCliService } = {}) {
   ipcMain.handle('local-cli:rescan', () => activeLocalCliService.rescan());
   ipcMain.handle('local-cli:select', (_event, id) => activeLocalCliService.select(id));
   ipcMain.handle('local-cli:translate-effect', (_event, text) => activeLocalCliService.translateEffect(text));
+  ipcMain.handle('local-cli:translate-subtitle-or-fade-in', async (_event, text) => {
+    try {
+      return {
+        ok: true,
+        instruction: await activeLocalCliService.translateSubtitleOrFadeIn(text)
+      };
+    } catch (error) {
+      return publicFailure(error, 'LOCAL_CLI_TRANSLATION_FAILED');
+    }
+  });
+  ipcMain.handle('subtitles:generate', async (_event, request) => {
+    try {
+      const result = await activeSubtitleService.generate(request);
+      return { ok: true, segments: result.segments };
+    } catch (error) {
+      return publicFailure(error, 'SUBTITLE_TRANSCRIPTION_FAILED');
+    }
+  });
 
   app.whenReady().then(async () => {
     createWindow();

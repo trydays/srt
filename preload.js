@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('srtAPI', {
   rescanLocalCli: () => ipcRenderer.invoke('local-cli:rescan'),
   selectLocalCli: (id) => ipcRenderer.invoke('local-cli:select', id),
   translateLocalCliEffect: (text) => ipcRenderer.invoke('local-cli:translate-effect', text),
+  translateSubtitleOrFadeIn: (text) => ipcRenderer.invoke('local-cli:translate-subtitle-or-fade-in', text),
+  generateSubtitles: (request) => ipcRenderer.invoke('subtitles:generate', request),
   describeInstall: (toolId) => ipcRenderer.invoke('installation:describe', toolId),
   installTool: (toolId, confirmationId) => ipcRenderer.invoke(
     'installation:execute',

@@ -70,7 +70,30 @@ const localCliService = {
       throw error;
     }
     return { type: 'add_effect', effect: 'fade_in' };
+  },
+  async translateSubtitleOrFadeIn(text) {
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
+      const error = new Error('Invalid local CLI instruction output');
+      error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
+      throw error;
+    }
+    if (/字幕/.test(text)) return { type: 'generate_subtitles' };
+    return { type: 'add_effect', effect: 'fade_in' };
+  }
+};
+const subtitleService = {
+  async generate(request) {
+    state.subtitleCalls = (state.subtitleCalls || []).concat([request]);
+    if (process.env.SRT_E2E_SUBTITLE_RESULT === 'no-speech') {
+      const error = new Error('no speech');
+      error.code = 'SUBTITLE_NO_SPEECH';
+      throw error;
+    }
+    return { segments: [
+      { start: 0.2, end: 1.4, text: '大家好' },
+      { start: 1.6, end: 3.0, text: '欢迎测试自动字幕' }
+    ] };
   }
 };
 app.__srtE2EState = state;
-startApplication({ environmentModule, localCliService });
+startApplication({ environmentModule, localCliService, subtitleService });

@@ -15,12 +15,17 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.match(mainSource, /ipcMain\.handle\('local-cli:rescan'/);
   assert.match(mainSource, /ipcMain\.handle\('local-cli:select'/);
   assert.match(mainSource, /ipcMain\.handle\('local-cli:translate-effect'/);
+  assert.match(mainSource, /ipcMain\.handle\('local-cli:translate-subtitle-or-fade-in'/);
+  assert.match(mainSource, /ipcMain\.handle\('subtitles:generate'/);
   assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
   assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
   assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
   assert.match(preloadSource, /translateLocalCliEffect: \(text\) => ipcRenderer\.invoke\('local-cli:translate-effect', text\)/);
+  assert.match(preloadSource, /translateSubtitleOrFadeIn: \(text\) => ipcRenderer\.invoke\('local-cli:translate-subtitle-or-fade-in', text\)/);
+  assert.match(preloadSource, /generateSubtitles: \(request\) => ipcRenderer\.invoke\('subtitles:generate', request\)/);
   assert.match(preloadSource, /getPathForFile: \(file\) => webUtils\.getPathForFile\(file\)/);
   assert.equal(preloadSource.includes('local-cli:exec'), false);
+  assert.equal(preloadSource.includes('subtitle:exec'), false);
   assert.equal(preloadSource.includes('readFile'), false);
   assert.equal(preloadSource.includes('writeFile'), false);
 });
