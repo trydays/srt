@@ -73,7 +73,11 @@
     }
     function saveDraft(projectId, textById) {
       var state = get(projectId);
-      var draft = validateTexts(state, textById);
+      var values = validateTexts(state, textById);
+      var unchanged = state.segments.every(function(segment) {
+        return values[segment.id] === String(segment.text).trim();
+      });
+      var draft = unchanged ? null : values;
       return write(projectId, { segments: state.segments, draft: draft, undo: state.undo });
     }
     function applyTexts(projectId, textById) {

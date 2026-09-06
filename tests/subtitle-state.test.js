@@ -1,9 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createSubtitleStore } = require('../app/subtitle-state');
+const { STORAGE_KEY, createSubtitleStore } = require('../app/subtitle-state');
 
-function memoryStorage() {
-  const values = new Map();
+function memoryStorage(initial) {
+  const values = new Map(Object.entries(initial || {}));
   return {
     getItem: (key) => values.has(key) ? values.get(key) : null,
     setItem: (key, value) => values.set(key, String(value))
@@ -43,6 +43,13 @@ test('saves a complete draft without changing applied subtitles', () => {
     [state.segments[1].id]: 'B draft'
   });
   assert.deepEqual(store.get('project-a').segments, state.segments);
+
+  const unchanged = store.saveDraft('project-a', {
+    [state.segments[0].id]: ' A ',
+    [state.segments[1].id]: ' B '
+  });
+  assert.equal(unchanged.draft, null);
+  assert.equal(store.get('project-a').draft, null);
 });
 
 test('applies all draft texts and clears the draft', () => {
@@ -66,11 +73,16 @@ test('rejects invalid draft text without partial writes', () => {
     { start: 0, end: 1, text: 'A' },
     { start: 1, end: 2, text: 'B' }
   ]);
+  store.saveDraft('project-a', {
+    [state.segments[0].id]: 'A draft',
+    [state.segments[1].id]: 'B draft'
+  });
+  const before = store.get('project-a');
   assert.throws(() => store.saveDraft('project-a', {
     [state.segments[0].id]: 'A draft',
     [state.segments[1].id]: '   '
   }), { code: 'SUBTITLE_TEXT_REQUIRED' });
-  assert.equal(store.get('project-a').draft, null);
+  assert.deepEqual(store.get('project-a'), before);
 });
 
 test('rejects missing or unknown draft ids without partial writes', () => {
@@ -79,12 +91,35 @@ test('rejects missing or unknown draft ids without partial writes', () => {
     { start: 0, end: 1, text: 'A' },
     { start: 1, end: 2, text: 'B' }
   ]);
+  store.saveDraft('project-a', {
+    [state.segments[0].id]: 'A draft',
+    [state.segments[1].id]: 'B draft'
+  });
+  const before = store.get('project-a');
   assert.throws(() => store.applyTexts('project-a', {
     [state.segments[0].id]: 'A applied',
     unknown: 'B applied'
   }), { code: 'SUBTITLE_DOCUMENT_STALE' });
-  assert.deepEqual(store.get('project-a').segments.map((segment) => segment.text), ['A', 'B']);
-  assert.equal(store.get('project-a').draft, null);
+  assert.deepEqual(store.get('project-a'), before);
+});
+
+test('normalizes legacy states without draft fields', () => {
+  const storage = memoryStorage({
+    [STORAGE_KEY]: JSON.stringify({
+      'project-a': {
+        segments: [{ id: 'segment-1', start: 0, end: 1, text: 'A' }],
+        undo: { requestId: 'request-a', segments: [] }
+      }
+    })
+  });
+  const store = createSubtitleStore(storage, () => 'unused');
+
+  assert.deepEqual(store.get('project-a'), {
+    segments: [{ id: 'segment-1', start: 0, end: 1, text: 'A' }],
+    draft: null,
+    undo: { requestId: 'request-a', segments: [], draft: null }
+  });
+  assert.equal(store.undo('project-a', 'request-a').draft, null);
 });
 
 test('first generation can be undone exactly once to an empty track', () => {
