@@ -123,3 +123,30 @@ Two Important findings were addressed in a separate follow-up commit without ent
 - Focused environment-page Electron E2E: 7/7 passed using the previously verified complete local Electron runtime; no Electron installation infrastructure was changed.
 - Full `npm test` with loopback permission: 134/134 passed.
 - No `ffmpeg-full` installation or host-tool modification was performed.
+
+## Controller-run real capability gate
+
+After explicit user approval, Homebrew installed `ffmpeg-full` 9.0.1_1 as a keg-only formula. The existing linked `ffmpeg` formula was not removed, replaced, or force-linked.
+
+The production environment module then selected one consistent pair:
+
+- FFmpeg: `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`
+- ffprobe: `/opt/homebrew/opt/ffmpeg-full/bin/ffprobe`
+- `modes.subtitleExport`: `{ status: 'ready', reason: 'ok', blockers: [] }`
+- `canContinue`: `true`
+
+Direct probes confirmed the exact `ass` filter, `libx264` and `aac` encoders, the `mp4` muxer, and runnable sibling ffprobe.
+
+The first sample attempt exposed a real font constraint: libass could not open macOS's private PingFang file and did not draw Chinese glyphs. A single bounded retry used the publicly readable macOS `Heiti SC` font; it produced a one-second MP4 with visible text `第一周期：中文字幕验收` and an audible 660 Hz AAC track. The extracted frame was visually inspected, ffprobe reported H.264 640×360 video plus 48 kHz mono AAC audio and exactly 1.000 seconds, and `volumedetect` reported mean -21.0 dB / max -12.7 dB.
+
+Evidence (not committed):
+
+- video: `/private/tmp/srtp-cycle0.t4thPX/chinese-subtitle-audio-heiti.mp4`
+- frame: `/private/tmp/srtp-cycle0.t4thPX/frame-heiti.png`
+- SHA-256: `6974886e7387dfcdeb5465968d1fca8cf05ea20bb57cb75aed46e161440aa4b1`
+
+The plan's fixed Mac font was corrected from PingFang SC to the verified Heiti SC. No font downloader, font manager, or cross-platform generalization was added.
+
+Result: Task 1's real subtitle capability gate is passed. Tasks 2–6 remain outside the currently authorized cycle and were not started.
+
+Fresh final verification after the gate: environment/install tests 42/42, focused environment-page Electron E2E 7/7, full `npm test` 134/134, and `git diff --check` passed.

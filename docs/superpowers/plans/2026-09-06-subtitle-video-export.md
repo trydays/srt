@@ -97,7 +97,7 @@ const exampleRecipe = {
 const SUBTITLE_STYLE = {
   referenceHeight: 450,
   fontSize: 16,
-  fontFamily: 'PingFang SC',
+  fontFamily: 'Heiti SC',
   bottomRatio: 0.07,
   maxWidthRatio: 0.84,
   color: '#ffffff',
@@ -479,4 +479,4 @@ await expect(window.getByTestId('video-export-status')).toContainText('已取消
 
 接口自审：全篇统一使用 version/steps/capability/params/segments，时间统一为秒；源参数统一 videoPath，目标 outputPath 只由主进程原生对话框确定；进度以 jobId 关联；不存在另一套 recipe 存储或已实现的“动态 AI 配方”宣称。
 
-剩余执行风险：兼容 FFmpeg 尚未安装并实测；固定字体与长句布局需要样片核对。预算是明确停止线，不能据此提前宣布能在 5.5 小时内交付所有未知条件。
+周期 0 实测说明：macOS 私有目录中的 PingFang 无法被当前 libass 可靠读取；系统公开字体 Heiti SC 已通过中文字幕烧录样片，因此当前 Mac 固定字体改为 Heiti SC。不引入字体下载器或字体管理系统。长句布局仍需周期 1 样片核对。预算是明确停止线，不能据此提前宣布能在 5.5 小时内交付所有未知条件。
