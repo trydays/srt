@@ -105,6 +105,9 @@ document.addEventListener('mouseup', function() {
 
 /* ── Video ── */
 var videoEl=document.getElementById('previewVideo'),videoUrl=null,videoDuration=0;
+var activeProject = getProjectById(getActiveProjectId());
+window.currentProjectVideoPath = activeProject && activeProject.video
+  ? activeProject.video.path || null : null;
 var playBtn=document.getElementById('playBtn'),previewOverlay=document.getElementById('previewOverlay');
 var tlPlayBtn=document.getElementById('tlPlayBtn');
 function formatDur(s){var m=Math.floor(s/60),se=Math.floor(s%60);return(m<10?'0':'')+m+':'+(se<10?'0':'')+se}

@@ -319,7 +319,17 @@
 
     function handleFile(f){
       if(!f||!f.type.startsWith('video/'))return;
-      try { localStorage.setItem(STORAGE_KEYS.VIDEO, JSON.stringify({ name: f.name, size: f.size, type: f.type, lastMod: f.lastModified })); } catch(e) { console.error('[handleFile] localStorage 写入失败:', e.message); }
+      var localPath = null;
+      try { localPath = window.srtAPI.getPathForFile(f) || null; } catch (_) {}
+      var videoInfo = {
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        lastMod: f.lastModified,
+        path: localPath
+      };
+      try { localStorage.setItem(STORAGE_KEYS.VIDEO, JSON.stringify(videoInfo)); }
+      catch(e) { console.error('[handleFile] localStorage 写入失败:', e.message); }
       /* Store video blob in IndexedDB; wait for transaction before allowing navigation */
       try {
         var req = indexedDB.open('srt_store', 1);

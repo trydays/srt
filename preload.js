@@ -1,6 +1,7 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('srtAPI', {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   openVideo: () => ipcRenderer.invoke('dialog:openVideo'),
   execCommand: (cmd, timeout) => ipcRenderer.invoke('cli:exec', cmd, timeout),
   detectEnvironment: () => ipcRenderer.invoke('environment:detect'),

@@ -19,7 +19,10 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
   assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
   assert.match(preloadSource, /translateLocalCliEffect: \(text\) => ipcRenderer\.invoke\('local-cli:translate-effect', text\)/);
+  assert.match(preloadSource, /getPathForFile: \(file\) => webUtils\.getPathForFile\(file\)/);
   assert.equal(preloadSource.includes('local-cli:exec'), false);
+  assert.equal(preloadSource.includes('readFile'), false);
+  assert.equal(preloadSource.includes('writeFile'), false);
 });
 
 function observeAutomaticStart(scenario) {
