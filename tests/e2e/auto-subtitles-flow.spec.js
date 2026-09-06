@@ -85,7 +85,7 @@ test.describe('auto subtitle conversation', () => {
     await expect(firstRequestCard.locator('xpath=following-sibling::*[1][@data-subtitle-document]')).toHaveCount(1);
     await expect(window.getByTestId('subtitle-document-segment')).toHaveCount(2);
     await expect(window.getByTestId('subtitle-document-time')).toHaveText(['00:00', '00:01']);
-    await expect(window.locator('#subtitleTextEditor, #subtitleTextSave')).toHaveCount(0);
+    await expect(window.locator('#subtitleEditor, #subtitleTextInput, #subtitleTextSave')).toHaveCount(0);
     await window.getByTestId('subtitle-undo').click();
     await expect(window.getByTestId('subtitle-block')).toHaveCount(0);
     await window.locator('.input-editor').fill('重新生成字幕');
@@ -98,6 +98,12 @@ test.describe('auto subtitle conversation', () => {
     await segments.nth(0).fill('大家好，已经修改');
     await segments.nth(1).fill('欢迎测试统一文稿');
     await expect(documentEditor).toContainText('有未保存更改');
+    await segments.nth(0).fill('大家好');
+    await segments.nth(1).fill('欢迎测试自动字幕');
+    await expect(documentEditor).toContainText('所有修改已应用');
+    await expect(window.getByTestId('subtitle-document-save')).toBeDisabled();
+    await segments.nth(0).fill('大家好，已经修改');
+    await segments.nth(1).fill('欢迎测试统一文稿');
     await segments.nth(0).press('Tab');
     await expect(segments.nth(1)).toBeFocused();
     await segments.nth(1).press('Shift+Tab');
@@ -114,14 +120,26 @@ test.describe('auto subtitle conversation', () => {
     expect(enterEvents).toEqual({ composingAllowed: true, ordinaryPrevented: true });
     await window.evaluate(() => {
       const segment = document.querySelector('[data-testid="subtitle-document-segment"]');
+      const range = document.createRange();
+      const selection = window.getSelection();
+      range.setStart(segment.firstChild, 2);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
       const paste = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
       Object.defineProperty(paste, 'clipboardData', { value: { getData: () => '一行\n二行' } });
       segment.dispatchEvent(paste);
       const video = document.getElementById('previewVideo');
       video.dispatchEvent(new Event('loadedmetadata'));
     });
-    await expect(segments.nth(0)).toContainText('一行 二行');
+    await expect(segments.nth(0)).toHaveText('大家一行 二行好，已经修改');
     await expect(segments.nth(1)).toHaveText('欢迎测试统一文稿');
+    await segments.nth(1).fill('');
+    await window.getByTestId('subtitle-document-save').click();
+    await expect(documentEditor).toContainText('有未保存更改 · 请补全空白字幕');
+    await expect(segments.nth(1)).toHaveText('');
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    await segments.nth(1).fill('欢迎测试统一文稿');
     await window.getByTestId('subtitle-document-save').click();
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await window.evaluate(() => {
@@ -130,6 +148,21 @@ test.describe('auto subtitle conversation', () => {
       video.dispatchEvent(new Event('timeupdate'));
     });
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    await window.evaluate(() => {
+      const store = window.SRTSubtitleState.createSubtitleStore(localStorage, () => 'stale-probe-segment');
+      const state = store.get(getActiveProjectId());
+      store.replace(getActiveProjectId(), 'stale-probe', state.segments);
+    });
+    await window.getByTestId('subtitle-document-apply').click();
+    await expect(documentEditor).toContainText('有未保存更改 · 当前字幕已更新，请重新载入');
+    await expect(segments.nth(0)).toHaveText('大家一行 二行好，已经修改');
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    await window.evaluate(() => {
+      const store = window.SRTSubtitleState.createSubtitleStore(localStorage, () => 'stale-probe-segment');
+      store.undo(getActiveProjectId(), 'stale-probe');
+      subtitleController.render();
+    });
     await window.reload();
     const restoredCard = window.getByTestId('request-status-card').last();
     await window.evaluate((card) => subtitleController.restoreAfter(card), await restoredCard.elementHandle());
@@ -139,21 +172,40 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-document-save')).toBeHidden();
     await expect(window.getByTestId('subtitle-document-apply')).toBeHidden();
     await window.getByTestId('subtitle-document-toggle').click();
-    await expect(segments.nth(0)).toContainText('一行 二行');
+    await expect(segments.nth(0)).toHaveText('大家一行 二行好，已经修改');
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
-    await window.getByTestId('subtitle-document-apply').click();
-    await expect(documentEditor).toContainText('所有修改已应用');
-    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
     await window.evaluate(() => {
       const video = document.getElementById('previewVideo');
       video.currentTime = 0.5;
       video.dispatchEvent(new Event('timeupdate'));
     });
-    await expect(window.getByTestId('preview-subtitle')).toContainText('一行 二行');
-    await segments.nth(0).fill('一行 二行（已存草稿）');
+    await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    await window.evaluate(() => {
+      window.__subtitleStorageSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key === 'srt_project_subtitles') throw new Error('forced subtitle storage failure');
+        return window.__subtitleStorageSetItem.call(this, key, value);
+      };
+    });
+    await window.getByTestId('subtitle-document-apply').click();
+    await expect(documentEditor).toContainText('草稿已保存 · 尚未应用 · 字幕应用失败，请重试');
+    await expect(segments.nth(0)).toHaveText('大家一行 二行好，已经修改');
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    await window.evaluate(() => { Storage.prototype.setItem = window.__subtitleStorageSetItem; });
+    await window.getByTestId('subtitle-document-apply').click();
+    await expect(documentEditor).toContainText('所有修改已应用');
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('大家一行 二行好，已经修改');
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      video.currentTime = 0.5;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+    await expect(window.getByTestId('preview-subtitle')).toContainText('大家一行 二行好，已经修改');
+    await segments.nth(0).fill('大家一行 二行好，已经修改（已存草稿）');
     await window.getByTestId('subtitle-document-save').click();
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
-    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('大家一行 二行好，已经修改');
     await window.locator('.input-editor').fill('再生成一次字幕');
     await window.locator('#generateBtn').click();
     await expect(window.getByTestId('request-status-card')).toHaveCount(3);
@@ -169,9 +221,9 @@ test.describe('auto subtitle conversation', () => {
     await window.evaluate(() => { window.confirm = () => true; });
     await expect.poll(() => window.evaluate(() => subtitleController.confirmUndo())).toBe(true);
     await window.evaluate((requestId) => subtitleController.undo(requestId), await latestRequestCard.getAttribute('data-request-id'));
-    await expect(window.getByTestId('subtitle-block').first()).toContainText('一行 二行');
+    await expect(window.getByTestId('subtitle-block').first()).toContainText('大家一行 二行好，已经修改');
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
-    await expect(segments.nth(0)).toContainText('一行 二行（已存草稿）');
+    await expect(segments.nth(0)).toContainText('大家一行 二行好，已经修改（已存草稿）');
   });
 
   test('rejects subtitles after an editor re-upload clears the managed video path', async ({ window }, testInfo) => {

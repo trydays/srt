@@ -9,7 +9,6 @@ var subtitleDocumentSave = subtitleDocument.querySelector('[data-testid="subtitl
 var subtitleDocumentApply = subtitleDocument.querySelector('[data-testid="subtitle-document-apply"]');
 var subtitleDocumentExpanded = false;
 var candidateTexts = null;
-var candidateDirty = false;
 
 function currentSubtitleState() { return subtitleStore.get(getActiveProjectId()); }
 function textMapForSegments(segments) {
@@ -54,22 +53,23 @@ function resetCandidateFromState() {
   if (state.draft) state.segments.forEach(function(segment) {
     candidateTexts[segment.id] = state.draft[segment.id];
   });
-  candidateDirty = false;
 }
 function documentState() {
   if (!candidateTexts) resetCandidateFromState();
   var state = currentSubtitleState();
   var applied = textMapForSegments(state.segments);
   var saved = state.draft || applied;
-  return { state: state, dirty: candidateDirty || !sameTexts(candidateTexts, saved, state.segments), hasDraft: !!state.draft };
+  return { state: state, dirty: !sameTexts(candidateTexts, saved, state.segments), hasDraft: !!state.draft };
+}
+function candidateStatusText(info) {
+  if (info.dirty) return '有未保存更改';
+  if (info.hasDraft) return '草稿已保存 · 尚未应用';
+  return '所有修改已应用';
 }
 function updateDocumentStatus(message) {
   var info = documentState();
   subtitleDocumentToggle.textContent = (subtitleDocumentExpanded ? '编辑全部字幕 · ' : '编辑字幕 · ') + info.state.segments.length + ' 段';
-  if (message) subtitleDocumentStatus.textContent = message;
-  else if (info.dirty) subtitleDocumentStatus.textContent = '有未保存更改';
-  else if (info.hasDraft) subtitleDocumentStatus.textContent = '草稿已保存 · 尚未应用';
-  else subtitleDocumentStatus.textContent = '所有修改已应用';
+  subtitleDocumentStatus.textContent = candidateStatusText(info) + (message ? ' · ' + message : '');
   subtitleDocumentSave.disabled = !info.dirty;
   subtitleDocumentApply.disabled = !info.dirty && !info.hasDraft;
 }
@@ -111,7 +111,7 @@ function candidateTextById() {
   return values;
 }
 function markCandidateChanged() {
-  candidateTextById(); candidateDirty = true; clearSegmentErrors(); updateDocumentStatus();
+  candidateTextById(); clearSegmentErrors(); updateDocumentStatus();
 }
 function showDocumentError(error) {
   if (error && error.code === 'SUBTITLE_TEXT_REQUIRED') {
@@ -130,14 +130,14 @@ function saveCandidate() {
   clearSegmentErrors();
   try {
     subtitleStore.saveDraft(getActiveProjectId(), candidateTextById());
-    candidateDirty = false; updateDocumentStatus(); return true;
+    updateDocumentStatus(); return true;
   } catch (error) { showDocumentError(error); return false; }
 }
 function applyCandidate() {
   clearSegmentErrors();
   try {
     subtitleStore.applyTexts(getActiveProjectId(), candidateTextById());
-    candidateDirty = false; renderAllSubtitles(); rebuildDocumentFromState(); return true;
+    renderAllSubtitles(); rebuildDocumentFromState(); return true;
   } catch (error) {
     if (error && error.code !== 'SUBTITLE_TEXT_REQUIRED' && error.code !== 'SUBTITLE_DOCUMENT_STALE') updateDocumentStatus('字幕应用失败，请重试');
     else showDocumentError(error);
@@ -165,7 +165,18 @@ subtitleDocumentSurface.addEventListener('keydown', function(event) {
 subtitleDocumentSurface.addEventListener('paste', function(event) {
   var field = event.target.closest('[data-testid="subtitle-document-segment"]'); if (!field) return;
   event.preventDefault();
-  field.textContent = (event.clipboardData && event.clipboardData.getData('text') || '').replace(/[\r\n]+/g, ' ');
+  var text = (event.clipboardData && event.clipboardData.getData('text') || '').replace(/[\r\n]+/g, ' ');
+  var selection = window.getSelection();
+  var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+  var textNode = document.createTextNode(text);
+  if (range && field.contains(range.commonAncestorContainer)) {
+    range.deleteContents();
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } else field.appendChild(textNode);
   markCandidateChanged();
 });
 subtitleDocumentToggle.addEventListener('click', function() { setDocumentExpanded(!subtitleDocumentExpanded); });
