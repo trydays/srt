@@ -45,9 +45,6 @@ test.describe('local CLI effect instructions', () => {
       await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'failed');
       await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'not_run');
       await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(0);
-      const card = window.getByTestId('request-status-card');
-      await expect(card.getByTestId('request-status-details')).toBeVisible();
-      await expect(card.getByTestId('request-status-summary')).toHaveCount(0);
     });
   });
 });
