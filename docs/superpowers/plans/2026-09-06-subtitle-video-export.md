@@ -133,7 +133,7 @@ const cancelled = { jobId: 'job-1', status: 'cancelled' };
 
 ---
 
-## T1：确认字幕导出能力并展示真实状态（30 分钟）
+### Task 1：确认字幕导出能力并展示真实状态（30 分钟）
 
 **唯一目的：** 最终选定的 FFmpeg/FFprobe 确实能够输出中文字幕 MP4。
 
@@ -181,7 +181,7 @@ test('installed FFmpeg is not necessarily ready for subtitle export', async () =
 
 **不做：** 新下载器、自动修复、编译 FFmpeg、供应商扫描、Windows 真机验收。
 
-## T2：创建最薄字幕配方（25 分钟）
+### Task 2：创建最薄字幕配方（25 分钟）
 
 **Files:** 新建 src/render-recipe.js、tests/render-recipe.test.js。
 
@@ -239,7 +239,7 @@ test('rejects invalid timing and executable fields', () => {
 
 **退出：** 可构建/校验实际字幕快照，已有字幕存储未迁移。没有为了“可扩展”添加第二个效果。
 
-## T3：字幕配方生成真实 MP4（95 分钟）
+### Task 3：字幕配方生成真实 MP4（95 分钟）
 
 **Files:** 新建 src/video-export.js、tests/video-export.test.js。
 
@@ -321,7 +321,7 @@ test('real FFmpeg produces an MP4 from a subtitle recipe', {
 
 **退出：** T3 渲染模块已生成真实字幕 MP4；累计目标时间 150 分钟。取消、失败和源保护可检验。到此仍无视频则停止报告。
 
-## T4：桌面桥接与视频源一致（45 分钟）
+### Task 4：桌面桥接与视频源一致（45 分钟）
 
 **Files:** main.js、preload.js、app/editor-core.js、tests/main-entry.test.js、tests/e2e/electron-main.js、tests/e2e/electron.fixture.js；本任务的源一致场景加入新 video-export-flow.spec.js。
 
@@ -356,7 +356,7 @@ onVideoExportProgress: (callback) => {
 
 **退出：** 主进程受控导出可调用，预览源与导出源一致，取消另存为不触发渲染；没有新增资产管理系统。
 
-## T5：导出交互、字幕外观与编辑锁（75 分钟）
+### Task 5：导出交互、字幕外观与编辑锁（75 分钟）
 
 **Files:** app/editor-export.js、app/剪辑.html、app/editor-subtitles.js、app/editor-timeline.js、app/editor-core.js、app/shared.js、tests/e2e/video-export-flow.spec.js、必要 fixture、package.json。
 
@@ -416,7 +416,7 @@ await expect(window.getByTestId('video-export-status')).toContainText('已取消
 
 **退出：** 用户能独立导出；UI、字幕外观、状态冻结与恢复均满足设计。不增加格式面板或后台任务中心。
 
-## T6：真实整链复跑、回归与研发日志（60 分钟）
+### Task 6：真实整链复跑、回归与研发日志（60 分钟）
 
 **Files:** docs/DEVELOPMENT_LOG.md、docs/PROJECT_STATUS.md；仅允许修改阻断上述验收的现有任务文件。
 
