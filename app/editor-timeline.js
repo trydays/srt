@@ -207,12 +207,21 @@ function isFinalRequest(record) {
 }
 function updateRequestStatus(record, card, patch) {
   Object.assign(record, patch);
-  if (activeProjectId && isFinalRequest(record)
-      && conversationRecords.indexOf(record) === -1) {
-    conversationRecords.push(record);
-    saveProjectConversation(activeProjectId, conversationRecords);
-  }
   renderRequestStatusCard(card, record);
+  if (activeProjectId && isFinalRequest(record)) {
+    var isNewRecord = conversationRecords.indexOf(record) === -1;
+    var nextConversationRecords = isNewRecord
+      ? conversationRecords.concat([record]) : conversationRecords;
+    try {
+      saveProjectConversation(activeProjectId, nextConversationRecords);
+    } catch (error) {
+      if (record.instructionStatus !== 'failed' && record.timelineStatus !== 'failed') {
+        throw error;
+      }
+      return;
+    }
+    if (isNewRecord) conversationRecords.push(record);
+  }
 }
 
 /* 判断输入是否为可执行命令 */
@@ -363,6 +372,9 @@ async function runSubtitleInstruction(record, card) {
     return;
   }
   try {
+    updateRequestStatus(record, card, {
+      timelineStatus: 'success', resultCount: result.segments.length, error: ''
+    });
     subtitleController.replace(record.id, result.segments);
     for (var i = 0; i < conversationRecords.length; i++) {
       var historicalCard = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
@@ -374,9 +386,6 @@ async function runSubtitleInstruction(record, card) {
     });
     return;
   }
-  updateRequestStatus(record, card, {
-    timelineStatus: 'success', resultCount: result.segments.length, error: ''
-  });
 }
 
 async function translateAndApply(text, record, card) {

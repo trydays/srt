@@ -2,7 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createSubtitleService } = require('../src/subtitles');
 
-function createFixture({ stdout = '[]', runError = null, missing = [] } = {}) {
+function createFixture({
+  stdout = '[]',
+  runtimeError = null,
+  runError = null,
+  missing = []
+} = {}) {
   const calls = [];
   return {
     calls,
@@ -20,6 +25,10 @@ function createFixture({ stdout = '[]', runError = null, missing = [] } = {}) {
       },
       run: async (program, args, options) => {
         calls.push({ program, args, options });
+        if (args[0] === '-c') {
+          if (runtimeError) throw runtimeError;
+          return { stdout: '', stderr: '' };
+        }
         if (runError) throw runError;
         return { stdout, stderr: '' };
       }
@@ -36,15 +45,22 @@ test('runs only the managed Python, fixed script, model directory and selected v
     { start: 0.4, end: 1.2, text: '第一句' },
     { start: 2, end: 3, text: '第二句' }
   ]);
-  assert.deepEqual(fixture.calls, [{
-    program: '/user-data/python/bin/python',
-    args: [
-      '/app/resources/tools/transcribe-subtitles.py',
-      '--model-dir', '/user-data/models/faster-whisper-small',
-      '--video', '/videos/talk.mp4'
-    ],
-    options: { timeout: 300000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, shell: false }
-  }]);
+  assert.deepEqual(fixture.calls, [
+    {
+      program: '/user-data/python/bin/python',
+      args: ['-c', 'import faster_whisper'],
+      options: { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true, shell: false }
+    },
+    {
+      program: '/user-data/python/bin/python',
+      args: [
+        '/app/resources/tools/transcribe-subtitles.py',
+        '--model-dir', '/user-data/models/faster-whisper-small',
+        '--video', '/videos/talk.mp4'
+      ],
+      options: { timeout: 300000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, shell: false }
+    }
+  ]);
 });
 
 for (const stdout of [
@@ -87,6 +103,19 @@ test('rejects a missing managed runtime or model before transcription', async ()
     { code: 'SUBTITLE_RUNTIME_NOT_READY' }
   );
   assert.equal(fixture.calls.length, 0);
+});
+
+test('classifies a broken faster-whisper import as an unready runtime', async () => {
+  const fixture = createFixture({ runtimeError: new Error('cannot import faster_whisper') });
+  await assert.rejects(
+    () => fixture.service.generate({ videoPath: '/videos/talk.mp4' }),
+    { code: 'SUBTITLE_RUNTIME_NOT_READY' }
+  );
+  assert.deepEqual(fixture.calls, [{
+    program: '/user-data/python/bin/python',
+    args: ['-c', 'import faster_whisper'],
+    options: { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true, shell: false }
+  }]);
 });
 
 test('classifies a child process failure without exposing command execution', async () => {

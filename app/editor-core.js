@@ -169,6 +169,7 @@ videoEl.addEventListener('volumechange',function(){tlVolSlider.value=Math.round(
 /* Re-upload */
 document.getElementById('reupload').addEventListener('change',function(){
   var f=this.files[0];if(!f)return;
+  window.currentProjectVideoPath = null;
   var info={name:f.name,size:f.size,type:f.type,lastMod:f.lastModified};
   try{localStorage.setItem(STORAGE_KEYS.VIDEO,JSON.stringify(info))}catch(_){}
   showVideo(f);

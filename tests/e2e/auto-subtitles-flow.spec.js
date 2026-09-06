@@ -47,8 +47,19 @@ test.describe('subtitle surface', () => {
       window.subtitleController.render();
     });
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
-    await window.getByTestId('subtitle-block').first().click();
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      video.currentTime = 0.5;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
     await expect(window.getByTestId('preview-subtitle')).toHaveText('大家好');
+    await expect(window.getByTestId('preview-subtitle')).toBeVisible();
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      video.currentTime = 1.5;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+    await expect(window.getByTestId('preview-subtitle')).toBeHidden();
   });
 });
 
@@ -87,6 +98,75 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('subtitle-undo')).toHaveCount(1);
     await latestRequestCard.getByTestId('subtitle-undo').click();
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好，已经修改');
+  });
+
+  test('rejects subtitles after an editor re-upload clears the managed video path', async ({ window }, testInfo) => {
+    const videoFixturePath = await createVideoFixture(testInfo);
+    await openEditor(window, videoFixturePath);
+    const replacementPath = testInfo.outputPath('editor-reupload.mp4');
+    await fs.promises.writeFile(replacementPath, Buffer.from('editor re-upload fixture'));
+    await window.locator('#reupload').setInputFiles(replacementPath);
+
+    await window.locator('.input-editor').fill('给视频加字幕');
+    await window.locator('#generateBtn').click();
+
+    const requestCard = window.getByTestId('request-status-card').last();
+    await expect(requestCard.getByTestId('instruction-status')).toHaveAttribute('data-state', 'success');
+    await expect(requestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
+    await expect(requestCard).toContainText('当前视频路径不可用，请返回首页重新导入视频。');
+  });
+
+  test('preserves the previous track and undo when final status persistence fails', async ({ window }, testInfo) => {
+    const videoFixturePath = await createVideoFixture(testInfo);
+    await openEditor(window, videoFixturePath);
+    await seedExistingSubtitle(window);
+    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+    await window.evaluate(() => {
+      const originalSetItem = Storage.prototype.setItem;
+      let failedOnce = false;
+      Storage.prototype.setItem = function(key, value) {
+        if (!failedOnce
+            && key === STORAGE_KEYS.PROJECT_CONVERSATIONS
+            && String(value).includes('"timelineStatus":"success"')) {
+          failedOnce = true;
+          throw new Error('forced conversation persistence failure');
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+
+    await window.locator('.input-editor').fill('给视频重新生成字幕');
+    await window.locator('#generateBtn').click();
+
+    const requestCard = window.getByTestId('request-status-card').last();
+    await expect(requestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
+    await expect(window.getByTestId('subtitle-block')).toHaveCount(1);
+    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
+    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+
+    await window.reload();
+    const persistedFailureCard = window.getByTestId('request-status-card').last();
+    await expect(persistedFailureCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
+    await expect(persistedFailureCard).toContainText('字幕暂时无法保存，请重试。');
+    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
+    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+
+    await window.evaluate(() => {
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key === STORAGE_KEYS.PROJECT_CONVERSATIONS) {
+          throw new Error('forced persistent conversation failure');
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+    await window.locator('.input-editor').fill('再生成一次字幕');
+    await window.locator('#generateBtn').click();
+    const currentFailureCard = window.getByTestId('request-status-card').last();
+    await expect(currentFailureCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
+    await expect(currentFailureCard).toContainText('字幕暂时无法保存，请重试。');
+    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
+    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
   });
 });
 

@@ -70,6 +70,16 @@ function createSubtitleService({
     for (const fileName of MODEL_FILES) {
       await requireFile(pathApi.join(modelDir, fileName), 'SUBTITLE_RUNTIME_NOT_READY');
     }
+    try {
+      await run(managedPython, ['-c', 'import faster_whisper'], {
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+        shell: false
+      });
+    } catch (_) {
+      throw codedError('SUBTITLE_RUNTIME_NOT_READY');
+    }
     let result;
     try {
       result = await run(managedPython, [
