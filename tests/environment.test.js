@@ -143,8 +143,108 @@ test('macOS 识别 Apple/Metal 与工具语义', async () => {
   assert.equal(report.canContinue, true);
 });
 
+test('installed FFmpeg is not necessarily ready for subtitle export', async () => {
+  const fixture = macFixture({
+    versions: { ffmpeg: '9.0.1' },
+    commandResults: {
+      'ffmpeg -hide_banner -filters': 'Filters:\n ... scale V->V',
+      'ffmpeg -hide_banner -encoders': ' V..... libx264\n A..... aac',
+      'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
+      'ffprobe -version': 'ffprobe version 9.0.1'
+    }
+  });
+  const environment = createEnvironmentModule(fixture);
+  const report = await environment.detectEnvironment();
+  assert.equal(report.tools.ffmpeg.installed, true);
+  assert.equal(report.modes.subtitleExport.status, 'limited');
+  assert.equal(report.modes.subtitleExport.reason, 'subtitle_filter_missing');
+  await assert.rejects(environment.getExportTools(), {
+    code: 'EXPORT_RUNTIME_NOT_READY'
+  });
+  assert.equal(report.canContinue, true);
+});
+
+test('subtitle export returns the exact ready FFmpeg and sibling ffprobe paths', async () => {
+  const ffmpegPath = '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg';
+  const ffprobePath = '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe';
+  const fixture = macFixture({
+    commandResults: {
+      [`${ffmpegPath} -version`]: 'ffmpeg version 9.0.1',
+      [`${ffmpegPath} -hide_banner -filters`]: 'Filters:\n ... ass V->V',
+      [`${ffmpegPath} -hide_banner -encoders`]: ' V..... libx264\n A..... aac',
+      [`${ffmpegPath} -hide_banner -muxers`]: ' E mp4 MP4',
+      [`${ffprobePath} -version`]: 'ffprobe version 9.0.1'
+    }
+  });
+  const environment = createEnvironmentModule(fixture);
+  const report = await environment.detectEnvironment();
+
+  assert.deepEqual(report.modes.subtitleExport, { status: 'ready', reason: 'ok', blockers: [] });
+  assert.equal(report.tools.ffmpeg.command, ffmpegPath);
+  assert.deepEqual(await environment.getExportTools(), { ffmpegPath, ffprobePath });
+  assert.equal(fixture.calls.some((call) => call.program === 'ffmpeg'), false);
+});
+
+test('subtitle export requires ass even when the subtitles filter is present', async () => {
+  const fixture = macFixture({
+    versions: { ffmpeg: '9.0.1' },
+    commandResults: {
+      'ffmpeg -hide_banner -filters': 'Filters:\n ... subtitles V->V',
+      'ffmpeg -hide_banner -encoders': ' V..... libx264\n A..... aac',
+      'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
+      'ffprobe -version': 'ffprobe version 9.0.1'
+    }
+  });
+  const report = await createEnvironmentModule(fixture).detectEnvironment();
+  assert.deepEqual(report.modes.subtitleExport, {
+    status: 'limited', reason: 'subtitle_filter_missing', blockers: ['ffmpeg']
+  });
+});
+
+test('subtitle export distinguishes encoder, ffprobe, and probe failures', async () => {
+  const shared = {
+    'ffmpeg -hide_banner -filters': 'Filters:\n ... ass V->V',
+    'ffmpeg -hide_banner -encoders': ' V..... libx264',
+    'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
+    'ffprobe -version': 'ffprobe version 9.0.1'
+  };
+  const cases = [
+    { commandResults: shared, reason: 'encoder_missing' },
+    {
+      commandResults: { ...shared, 'ffmpeg -hide_banner -encoders': ' V..... libx264\n A..... aac', 'ffprobe -version': commandError('ENOENT') },
+      reason: 'ffprobe_missing'
+    },
+    {
+      commandResults: { ...shared, 'ffmpeg -hide_banner -filters': commandError('EIO') },
+      reason: 'probe_error'
+    }
+  ];
+
+  for (const item of cases) {
+    const environment = createEnvironmentModule(macFixture({
+      versions: { ffmpeg: '9.0.1' },
+      commandResults: item.commandResults
+    }));
+    const report = await environment.detectEnvironment();
+    assert.equal(report.tools.ffmpeg.installed, true);
+    assert.deepEqual(report.modes.subtitleExport, {
+      status: 'limited', reason: item.reason, blockers: ['ffmpeg']
+    });
+    await assert.rejects(environment.getExportTools(), { code: 'EXPORT_RUNTIME_NOT_READY' });
+  }
+});
+
 test('Windows 优先使用校验通过的捆绑工具', async () => {
-  const fixture = windowsFixture({ bundled: { ffmpeg: { available: true, version: '8.0.1', path: 'C:\\bundle\\ffmpeg.exe' } } });
+  const fixture = windowsFixture({
+    bundled: { ffmpeg: { available: true, version: '8.0.1', path: 'C:\\bundle\\ffmpeg.exe' } },
+    commandResults: {
+      'C:\\bundle\\ffmpeg.exe -version': 'ffmpeg version 8.0.1',
+      'C:\\bundle\\ffmpeg.exe -hide_banner -filters': 'Filters:\n ... ass V->V',
+      'C:\\bundle\\ffmpeg.exe -hide_banner -encoders': ' V..... libx264\n A..... aac',
+      'C:\\bundle\\ffmpeg.exe -hide_banner -muxers': ' E mp4 MP4',
+      'C:\\bundle\\ffprobe.exe -version': 'ffprobe version 8.0.1'
+    }
+  });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
   assert.equal(report.platform.os, 'win32');
   assert.equal(report.hardware.graphics.name, 'NVIDIA RTX');
@@ -164,7 +264,13 @@ test('Windows 校验失败的捆绑 FFmpeg、Node 与 Python 不会遮蔽可用�
       node: { available: true, version: null, path: 'C:\\bundle\\node.exe', reason: 'incompatible' },
       python: { available: true, version: null, path: 'C:\\bundle\\python.exe', reason: 'incompatible' }
     },
-    versions: { ffmpeg: '8.0.1', node: '22.18.0', py: '3.12.9' }
+    versions: { ffmpeg: '8.0.1', node: '22.18.0', py: '3.12.9' },
+    commandResults: {
+      'ffmpeg -hide_banner -filters': 'Filters:\n ... ass V->V',
+      'ffmpeg -hide_banner -encoders': ' V..... libx264\n A..... aac',
+      'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
+      'ffprobe -version': 'ffprobe version 8.0.1'
+    }
   });
   const report = await createEnvironmentModule(fixture).detectEnvironment();
   for (const toolId of ['ffmpeg', 'node', 'python']) {
@@ -577,7 +683,7 @@ test('环境报告完整且没有额外公共字段', async () => {
   assert.deepEqual(keys(report.hardware.disk), ['freeGB', 'path', 'reason', 'status', 'totalGB']);
   assert.deepEqual(keys(report.hardware.graphics), ['metal', 'name', 'reason', 'status', 'supported']);
   assert.deepEqual(keys(report.tools), ['ffmpeg', 'node', 'npm', 'python', 'whisper']);
-  assert.deepEqual(keys(report.modes), ['ffmpeg', 'remotion', 'subtitles']);
+  assert.deepEqual(keys(report.modes), ['ffmpeg', 'remotion', 'subtitleExport', 'subtitles']);
   for (const tool of Object.values(report.tools)) {
     assert.deepEqual(keys(tool), ['command', 'compatible', 'installed', 'reason', 'source', 'status', 'version']);
   }

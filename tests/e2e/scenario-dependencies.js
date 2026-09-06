@@ -86,11 +86,45 @@ function createScenarioDependencies(name) {
       return Promise.resolve(successful('NVIDIA GeForce RTX 4090'));
     }
 
+    const macFullFfmpeg = '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg';
+    const macFullFfprobe = '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe';
+    const macFullReady = scenario.platform === 'darwin' &&
+      (name !== 'mac-missing' || state.ffmpegInstallCount === 1);
+    if (program === macFullFfmpeg && sameArgs(callArgs, ['-version']) && macFullReady) {
+      return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
+    }
+    if (program === macFullFfmpeg && sameArgs(callArgs, ['-hide_banner', '-filters']) && macFullReady) {
+      return Promise.resolve(successful('Filters:\n ... ass V->V'));
+    }
+    if (program === macFullFfmpeg && sameArgs(callArgs, ['-hide_banner', '-encoders']) && macFullReady) {
+      return Promise.resolve(successful(' V..... libx264\n A..... aac'));
+    }
+    if (program === macFullFfmpeg && sameArgs(callArgs, ['-hide_banner', '-muxers']) && macFullReady) {
+      return Promise.resolve(successful(' E mp4 MP4'));
+    }
+    if (program === macFullFfprobe && sameArgs(callArgs, ['-version']) && macFullReady) {
+      return Promise.resolve(successful('ffprobe version 7.1'));
+    }
+    if ((program === macFullFfmpeg || program === macFullFfprobe) && !macFullReady) {
+      return Promise.reject(commandError('ffmpeg-full is absent', 'ENOENT'));
+    }
     if (program === 'ffmpeg' && sameArgs(callArgs, ['-version'])) {
       if (name === 'mac-missing' && state.ffmpegInstallCount !== 1) {
         return Promise.reject(commandError('ffmpeg is absent', 'ENOENT'));
       }
       return Promise.resolve(successful('ffmpeg version 7.1 Copyright FFmpeg developers'));
+    }
+    if (program === 'ffmpeg' && sameArgs(callArgs, ['-hide_banner', '-filters'])) {
+      return Promise.resolve(successful('Filters:\n ... ass V->V'));
+    }
+    if (program === 'ffmpeg' && sameArgs(callArgs, ['-hide_banner', '-encoders'])) {
+      return Promise.resolve(successful(' V..... libx264\n A..... aac'));
+    }
+    if (program === 'ffmpeg' && sameArgs(callArgs, ['-hide_banner', '-muxers'])) {
+      return Promise.resolve(successful(' E mp4 MP4'));
+    }
+    if (program === 'ffprobe' && sameArgs(callArgs, ['-version'])) {
+      return Promise.resolve(successful('ffprobe version 7.1'));
     }
     if (scenario.platform === 'win32' && program === windowsNodeExe && sameArgs(callArgs, ['--version'])) {
       if (name === 'windows-npm-missing' && state.nodeInstallCount === 1) {
@@ -148,7 +182,7 @@ function createScenarioDependencies(name) {
 
     if (program === 'brew' && sameArgs(callArgs, ['--version'])) return Promise.resolve(successful('Homebrew 4.6.0'));
     if (program === 'winget' && sameArgs(callArgs, ['--version'])) return Promise.resolve(successful('v1.10.340'));
-    if (program === 'brew' && sameArgs(callArgs, ['install', 'ffmpeg'])) {
+    if (program === 'brew' && sameArgs(callArgs, ['install', 'ffmpeg-full'])) {
       state.ffmpegInstallCount += 1;
       if (name === 'mac-missing' && state.ffmpegInstallCount > 1) {
         return Promise.reject(commandError('ffmpeg install ran more than once'));

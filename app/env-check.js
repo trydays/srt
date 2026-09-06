@@ -17,7 +17,10 @@ if (!environmentPage) {
     absent: '未安装或未在系统路径中找到',
     incompatible: '版本不兼容，请升级后重试',
     probe_error: '检测失败，请重试或手动确认',
-    unsupported: '当前系统或硬件不支持'
+    unsupported: '当前系统或硬件不支持',
+    subtitle_filter_missing: '当前 FFmpeg 缺少 ass 字幕滤镜',
+    encoder_missing: '当前 FFmpeg 缺少 MP4 所需的编码能力',
+    ffprobe_missing: '未找到与 FFmpeg 配合使用的 ffprobe'
   };
   var TOOL_DEFINITIONS = [
     { id: 'ffmpeg', label: 'FFmpeg', description: '视频编解码引擎' },
@@ -28,6 +31,7 @@ if (!environmentPage) {
   ];
   var MODE_DEFINITIONS = [
     { id: 'ffmpeg', label: '视频处理', description: '剪切、转码与导出' },
+    { id: 'subtitleExport', label: '字幕导出', description: '将字幕烧录到 MP4' },
     { id: 'remotion', label: 'Remotion 渲染', description: '程序化视频渲染' },
     { id: 'subtitles', label: '语音字幕', description: '语音识别与字幕生成' }
   ];

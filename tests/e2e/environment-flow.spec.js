@@ -9,6 +9,8 @@ test.describe('macOS ready journey', () => {
     await expect(window.getByTestId('row-graphics')).toContainText('Metal');
     await expect(window.getByTestId('row-node')).toHaveAttribute('data-status', 'ready');
     await expect(window.getByTestId('row-python')).toHaveAttribute('data-status', 'ready');
+    await expect(window.getByTestId('mode-subtitleExport')).toHaveAttribute('data-status', 'ready');
+    await expect(window.getByTestId('mode-subtitleExport')).toContainText('将字幕烧录到 MP4');
     await expect.soft(window.locator('#cliBadge')).toHaveText('✅ 可用');
     await expect.soft(window.locator('#cliBadge')).toHaveClass(/\bok\b/);
 
@@ -80,7 +82,7 @@ test.describe('missing FFmpeg journey', () => {
     const ffmpegRow = window.getByTestId('row-ffmpeg');
     const dialog = window.getByTestId('install-dialog');
     const installCalls = (state) => state.calls.filter(({ program, args }) =>
-      program === 'brew' && JSON.stringify(args) === JSON.stringify(['install', 'ffmpeg']));
+      program === 'brew' && JSON.stringify(args) === JSON.stringify(['install', 'ffmpeg-full']));
 
     await expect(ffmpegRow).toHaveAttribute('data-status', 'missing');
     await ffmpegRow.getByRole('button', { name: '查看安装方案' }).click();
@@ -106,7 +108,7 @@ test.describe('missing FFmpeg journey', () => {
     state = await readScenarioState();
     expect(state.confirmationCount).toBe(2);
     expect(state.installMethodCount).toBe(1);
-    expect(installCalls(state)).toEqual([{ program: 'brew', args: ['install', 'ffmpeg'] }]);
+    expect(installCalls(state)).toEqual([{ program: 'brew', args: ['install', 'ffmpeg-full'] }]);
     expect(state.ffmpegInstallCount).toBe(1);
     expect(state.detectionCount).toBe(2);
   });

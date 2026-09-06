@@ -42,9 +42,9 @@ function createEnvironmentModule(dependencies) {
     return {
       darwin: {
         ffmpeg: {
-          label: 'FFmpeg', downloadEstimate: '约 100–200 MB', installLocation: '由 Homebrew 管理', durationEstimate: '约 2–10 分钟',
-          steps: ['通过 Homebrew 下载并安装 FFmpeg。'],
-          actions: [{ program: 'brew', args: ['install', 'ffmpeg'] }]
+          label: 'FFmpeg', downloadEstimate: '约 100–200 MB', installLocation: 'Homebrew ffmpeg-full 独立目录', durationEstimate: '约 2–10 分钟',
+          steps: ['通过 Homebrew 安装包含字幕滤镜依赖的 ffmpeg-full，并直接使用其独立目录。'],
+          actions: [{ program: 'brew', args: ['install', 'ffmpeg-full'] }]
         },
         node: {
           label: 'Node.js', downloadEstimate: '约 50 MB', installLocation: '由 Homebrew 管理', durationEstimate: '约 1–5 分钟',
@@ -180,6 +180,142 @@ function createEnvironmentModule(dependencies) {
       }
     }
     return installedFallback || strongestFailure;
+  }
+
+  function listingHas(output, name) {
+    const pattern = new RegExp(`^\\s*[.A-Z]+\\s+${name}(?:\\s|$)`, 'i');
+    return String(output && output.stdout !== undefined ? output.stdout : output || '')
+      .split(/\r?\n/)
+      .some((line) => pattern.test(line));
+  }
+
+  function exportCandidates(bundled) {
+    const candidates = [];
+    if (dependencies.platform === 'darwin') {
+      candidates.push(
+        { command: '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg', source: 'system' },
+        { command: '/usr/local/opt/ffmpeg-full/bin/ffmpeg', source: 'system' }
+      );
+    }
+    if (bundled && bundled.compatible) {
+      candidates.push({ command: bundled.command, source: 'bundled' });
+    }
+    candidates.push({ command: 'ffmpeg', source: 'system' });
+    return candidates;
+  }
+
+  function ffprobeCandidates(ffmpegPath) {
+    const candidates = [];
+    if (pathApi.isAbsolute(ffmpegPath)) {
+      candidates.push(pathApi.join(
+        pathApi.dirname(ffmpegPath),
+        dependencies.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
+      ));
+    }
+    if (!candidates.includes('ffprobe')) candidates.push('ffprobe');
+    return candidates;
+  }
+
+  async function probeFfprobe(ffmpegPath) {
+    let sawProbeError = false;
+    for (const ffprobePath of ffprobeCandidates(ffmpegPath)) {
+      try {
+        await dependencies.run(ffprobePath, ['-version'], runOptions);
+        return { ready: true, ffprobePath };
+      } catch (error) {
+        if (errorReason(error) === 'probe_error') sawProbeError = true;
+      }
+    }
+    return { ready: false, reason: sawProbeError ? 'probe_error' : 'ffprobe_missing' };
+  }
+
+  function exportMode(status, reason) {
+    return {
+      status,
+      reason,
+      blockers: status === 'ready' ? [] : ['ffmpeg']
+    };
+  }
+
+  async function probeExportCandidate(candidate) {
+    let ffmpeg;
+    try {
+      const output = await dependencies.run(candidate.command, ['-version'], runOptions);
+      ffmpeg = evaluatedTool(
+        candidate.command,
+        candidate.source,
+        output && output.stdout !== undefined ? output.stdout : output,
+        () => true
+      );
+    } catch (error) {
+      const reason = errorReason(error);
+      return {
+        ffmpeg: blankTool(candidate.command, candidate.source, reason),
+        mode: exportMode('missing', reason)
+      };
+    }
+
+    if (!ffmpeg.compatible) {
+      return { ffmpeg, mode: exportMode('limited', 'probe_error') };
+    }
+
+    let filters;
+    let encoders;
+    let muxers;
+    try {
+      [filters, encoders, muxers] = await Promise.all([
+        dependencies.run(candidate.command, ['-hide_banner', '-filters'], runOptions),
+        dependencies.run(candidate.command, ['-hide_banner', '-encoders'], runOptions),
+        dependencies.run(candidate.command, ['-hide_banner', '-muxers'], runOptions)
+      ]);
+    } catch (_) {
+      return { ffmpeg, mode: exportMode('limited', 'probe_error') };
+    }
+
+    if (!listingHas(filters, 'ass')) {
+      return { ffmpeg, mode: exportMode('limited', 'subtitle_filter_missing') };
+    }
+    if (!listingHas(encoders, 'libx264') || !listingHas(encoders, 'aac') || !listingHas(muxers, 'mp4')) {
+      return { ffmpeg, mode: exportMode('limited', 'encoder_missing') };
+    }
+
+    const ffprobe = await probeFfprobe(candidate.command);
+    if (!ffprobe.ready) {
+      return { ffmpeg, mode: exportMode('limited', ffprobe.reason) };
+    }
+    return {
+      ffmpeg,
+      ffmpegPath: candidate.command,
+      ffprobePath: ffprobe.ffprobePath,
+      mode: exportMode('ready', 'ok')
+    };
+  }
+
+  async function probeExportTools() {
+    const bundled = bundledTool('ffmpeg', () => true);
+    let installedFallback = null;
+    let strongestFailure = null;
+    for (const candidate of exportCandidates(bundled)) {
+      const result = await probeExportCandidate(candidate);
+      if (result.mode.status === 'ready') return result;
+      if (result.ffmpeg.installed && !installedFallback) installedFallback = result;
+      if (!strongestFailure || result.mode.reason === 'probe_error') strongestFailure = result;
+    }
+    if (installedFallback) return installedFallback;
+    if (bundled && !bundled.compatible) {
+      return { ffmpeg: bundled, mode: exportMode('limited', 'probe_error') };
+    }
+    return strongestFailure;
+  }
+
+  async function getExportTools() {
+    const result = await probeExportTools();
+    if (result && result.mode.status === 'ready') {
+      return { ffmpegPath: result.ffmpegPath, ffprobePath: result.ffprobePath };
+    }
+    const error = new Error('字幕导出运行环境未就绪');
+    error.code = 'EXPORT_RUNTIME_NOT_READY';
+    throw error;
   }
 
   async function probePython() {
@@ -374,13 +510,14 @@ function createEnvironmentModule(dependencies) {
             { program: 'cmd.exe', args: ['/d', '/s', '/c', 'npm', '--version'], command: 'npm' }
           ]
         : 'npm';
-    const [graphics, ffmpeg, node, npm, python] = await Promise.all([
+    const [graphics, exportTools, node, npm, python] = await Promise.all([
       probeGraphics(),
-      probeTool('ffmpeg', 'ffmpeg', ['-version'], () => true),
+      probeExportTools(),
       probeTool('node', nodePrograms, ['--version'], (version) => versionAtLeast(version, 20, 0)),
       probeTool('npm', npmPrograms, ['--version'], () => true),
       probePython()
     ]);
+    const ffmpeg = exportTools.ffmpeg;
     const whisper = await probeWhisper(python);
     delete python.prefixArgs;
 
@@ -390,6 +527,7 @@ function createEnvironmentModule(dependencies) {
       tools: { ffmpeg, node, npm, python, whisper },
       modes: {
         ffmpeg: mode({ ffmpeg }),
+        subtitleExport: exportTools.mode,
         remotion: mode({ node, npm }),
         subtitles: mode({ python, whisper })
       },
@@ -473,7 +611,7 @@ function createEnvironmentModule(dependencies) {
     }
   }
 
-  return { detectEnvironment, describeInstall, installTool };
+  return { detectEnvironment, getExportTools, describeInstall, installTool };
 }
 
 module.exports = { createEnvironmentModule };

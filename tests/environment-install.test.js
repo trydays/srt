@@ -44,6 +44,8 @@ test('计划可读但不泄露可执行动作', async () => {
   assert.equal(typeof plan.confirmationId, 'string');
   assert.equal('command' in plan, false);
   assert.equal('actions' in plan, false);
+  assert.match(plan.installLocation, /ffmpeg-full/);
+  assert.match(plan.steps.join(' '), /ffmpeg-full/);
 });
 
 test('一份确认最多执行一次固定动作', async () => {
@@ -53,7 +55,7 @@ test('一份确认最多执行一次固定动作', async () => {
     await environment.installTool({ toolId: 'ffmpeg', confirmationId: plan.confirmationId }),
     { ok: true, toolId: 'ffmpeg' }
   );
-  assert.deepEqual(calls.at(-1), { program: 'brew', args: ['install', 'ffmpeg'], timeoutMs: 300000 });
+  assert.deepEqual(calls.at(-1), { program: 'brew', args: ['install', 'ffmpeg-full'], timeoutMs: 300000 });
   await assert.rejects(
     () => environment.installTool({ toolId: 'ffmpeg', confirmationId: plan.confirmationId }),
     /已使用/
@@ -205,7 +207,7 @@ test('固定动作失败后停止且只返回通用错误', async () => {
 
 test('macOS 的简单工具动作完全来自固定白名单', async () => {
   const expected = {
-    ffmpeg: ['brew', ['install', 'ffmpeg']],
+    ffmpeg: ['brew', ['install', 'ffmpeg-full']],
     node: ['brew', ['install', 'node@20']],
     python: ['brew', ['install', 'python@3.12']]
   };
