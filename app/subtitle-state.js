@@ -22,10 +22,20 @@
         return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
       } catch (_) { return {}; }
     }
-    function emptyState() { return { segments: [], undo: null }; }
+    function emptyState() { return { segments: [], draft: null, undo: null }; }
     function get(projectId) {
       var state = readAll()[projectId];
-      return clone(state && Array.isArray(state.segments) ? state : emptyState());
+      if (!state || !Array.isArray(state.segments)) return emptyState();
+      var undo = state.undo && typeof state.undo === 'object' ? {
+        requestId: state.undo.requestId,
+        segments: Array.isArray(state.undo.segments) ? state.undo.segments : [],
+        draft: state.undo.draft && typeof state.undo.draft === 'object' ? state.undo.draft : null
+      } : null;
+      return clone({
+        segments: state.segments,
+        draft: state.draft && typeof state.draft === 'object' ? state.draft : null,
+        undo: undo
+      });
     }
     function write(projectId, state) {
       var all = readAll();
@@ -40,8 +50,39 @@
       });
       return write(projectId, {
         segments: nextSegments,
-        undo: { requestId: requestId, segments: current.segments }
+        draft: null,
+        undo: { requestId: requestId, segments: current.segments, draft: current.draft }
       });
+    }
+    function validateTexts(state, textById) {
+      var expected = state.segments.map(function(segment) { return segment.id; });
+      var supplied = textById && typeof textById === 'object' && !Array.isArray(textById)
+        ? Object.keys(textById) : [];
+      if (supplied.length !== expected.length || expected.some(function(id) {
+        return !Object.prototype.hasOwnProperty.call(textById || {}, id);
+      }) || supplied.some(function(id) {
+        return expected.indexOf(id) === -1;
+      })) throw codedError('SUBTITLE_DOCUMENT_STALE');
+      var values = {};
+      expected.forEach(function(id) {
+        var value = String(textById[id]).trim();
+        if (!value) throw codedError('SUBTITLE_TEXT_REQUIRED');
+        values[id] = value;
+      });
+      return values;
+    }
+    function saveDraft(projectId, textById) {
+      var state = get(projectId);
+      var draft = validateTexts(state, textById);
+      return write(projectId, { segments: state.segments, draft: draft, undo: state.undo });
+    }
+    function applyTexts(projectId, textById) {
+      var state = get(projectId);
+      var values = validateTexts(state, textById);
+      var segments = state.segments.map(function(segment) {
+        return Object.assign({}, segment, { text: values[segment.id] });
+      });
+      return write(projectId, { segments: segments, draft: null, undo: state.undo });
     }
     function updateText(projectId, segmentId, text) {
       var value = String(text || '').trim();
@@ -54,6 +95,7 @@
         return Object.assign({}, segment, { text: value });
       });
       if (!found) throw codedError('SUBTITLE_SEGMENT_NOT_FOUND');
+      state.draft = null;
       return write(projectId, state);
     }
     function canUndo(projectId, requestId) {
@@ -65,9 +107,17 @@
       if (!state.undo || state.undo.requestId !== requestId) {
         throw codedError('SUBTITLE_UNDO_UNAVAILABLE');
       }
-      return write(projectId, { segments: state.undo.segments, undo: null });
+      return write(projectId, { segments: state.undo.segments, draft: state.undo.draft, undo: null });
     }
-    return { get: get, replace: replace, updateText: updateText, canUndo: canUndo, undo: undo };
+    return {
+      get: get,
+      replace: replace,
+      saveDraft: saveDraft,
+      applyTexts: applyTexts,
+      updateText: updateText,
+      canUndo: canUndo,
+      undo: undo
+    };
   }
 
   return { STORAGE_KEY: STORAGE_KEY, createSubtitleStore: createSubtitleStore };
