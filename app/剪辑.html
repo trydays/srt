@@ -104,7 +104,7 @@
     .tl-marker{position:absolute;top:60%;transform:translate(-50%,-50%);z-index:3;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:var(--shadow-xs);transition:transform 120ms var(--ease-out)}
     .tl-marker:hover{transform:translate(-50%,-50%) scale(1.1);z-index:4}
     .tl-track.drag-over-tl{background:color-mix(in srgb,var(--accent-tint) 20%,var(--bg-panel));border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
-    .subtitle-section{display:grid;grid-template-columns:42px minmax(0,1fr);gap:6px 8px;
+    .subtitle-section{width:100%;max-width:800px;display:grid;grid-template-columns:42px minmax(0,1fr);gap:6px 8px;
       align-items:center}
     .subtitle-track-label{font-size:11px;color:var(--text-muted)}
     .subtitle-track{position:relative;height:34px;overflow:hidden;border:1px solid var(--border);
