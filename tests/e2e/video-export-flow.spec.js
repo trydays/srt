@@ -19,6 +19,25 @@ async function setUsableMetadata(window) {
   });
 }
 
+async function openUsableEditor(window, testInfo, name) {
+  const source = await createVideoFixture(testInfo, name);
+  await window.getByTestId('local-cli-codex').click();
+  await window.getByTestId('continue').click();
+  await window.getByTestId('video-input').setInputFiles(source);
+  await window.getByTestId('start-editing').click();
+  await expect(window.getByTestId('editor-page')).toBeVisible();
+  await expect.poll(() => window.locator('#previewVideo').getAttribute('src')).toBeTruthy();
+  await setUsableMetadata(window);
+  await expect.poll(() => window.evaluate(() => window.currentProjectVideoPath)).toBe(source);
+  return source;
+}
+
+async function generateAppliedSubtitles(window) {
+  await window.locator('.input-editor').fill('给视频加字幕');
+  await window.locator('#generateBtn').click();
+  await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+}
+
 test.describe('video export flow', () => {
   test.use({ localCliMode: 'two', subtitleResult: 'success' });
 
@@ -111,5 +130,43 @@ test.describe('video export flow', () => {
     await expect(window.getByTestId('video-export-button')).toBeEnabled();
     await expect(window.locator('#generateBtn')).toBeEnabled();
     await expect(window.locator('#tabsBar')).not.toHaveAttribute('inert');
+  });
+
+  test('keeps an unsaved subtitle candidate intact when export asks for applied text', async ({
+    window, readScenarioState
+  }, testInfo) => {
+    await openUsableEditor(window, testInfo, 'unsaved-candidate.mp4');
+    await generateAppliedSubtitles(window);
+    const firstSegment = window.getByTestId('subtitle-document-segment').first();
+    await firstSegment.fill('尚未保存也尚未应用');
+
+    await window.getByTestId('video-export-button').click();
+
+    await expect(window.getByTestId('video-export-status')).toHaveText('请先应用字幕修改');
+    await expect(window.getByTestId('subtitle-document-surface')).toBeVisible();
+    await expect(firstSegment).toHaveText('尚未保存也尚未应用');
+    expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
+  });
+
+  test('keeps a history-created undo action frozen when its card rerenders during export', async ({
+    window
+  }, testInfo) => {
+    await openUsableEditor(window, testInfo, 'history-rerender.mp4');
+    await generateAppliedSubtitles(window);
+    const historyCard = window.getByTestId('request-status-card').last();
+    const historySummary = historyCard.getByTestId('request-status-summary');
+    await expect(historyCard).toHaveClass(/is-collapsed/);
+
+    await window.getByTestId('video-export-button').click();
+    await expect(window.getByTestId('video-export-status')).toHaveText('导出失败');
+    await window.getByTestId('video-export-button').click();
+    await expect(window.getByTestId('video-export-progress')).toHaveText('42%');
+
+    await historySummary.click();
+    await expect(historyCard).not.toHaveClass(/is-collapsed/);
+    await expect(historyCard.getByTestId('subtitle-undo')).toBeDisabled();
+    await window.getByTestId('video-export-cancel').click();
+    await expect(window.getByTestId('video-export-status')).toHaveText('已取消');
+    await expect(historyCard.getByTestId('subtitle-undo')).toBeEnabled();
   });
 });

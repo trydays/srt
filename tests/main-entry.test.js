@@ -89,6 +89,124 @@ function observeAutomaticStart(scenario) {
   return Number(match[1]);
 }
 
+function runMainProbe(probeSource, marker) {
+  const result = spawnSync(process.execPath, ['-e', probeSource], {
+    cwd: projectRoot,
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const match = result.stdout.match(new RegExp(marker + '=(.+)'));
+  assert.ok(match, result.stdout);
+  return JSON.parse(match[1]);
+}
+
+test('export-aware close protection is attached to a reactivated main window', () => {
+  const script = `
+    const { EventEmitter } = require('node:events');
+    const Module = require('node:module');
+    const windows = [];
+    const app = new EventEmitter();
+    app.isPackaged = false;
+    app.getPath = () => '/isolated-user-data';
+    app.whenReady = () => Promise.resolve();
+    app.quit = () => {};
+    class BrowserWindow extends EventEmitter {
+      constructor() { super(); this.webContents = {}; windows.push(this); }
+      loadFile() {}
+      static fromWebContents() { return null; }
+    }
+    const electron = { app, BrowserWindow, dialog: {}, ipcMain: { handle() {} } };
+    const originalLoad = Module._load;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'electron') return electron;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    const inertEnvironment = {
+      detectEnvironment() {}, describeInstall() {}, installTool() {}, getExportTools() {}
+    };
+    const inertLocalCli = {
+      getState() {}, rescan() {}, select() {}, translateEffect() {}, translateSubtitleOrFadeIn() {}
+    };
+    require(${JSON.stringify(mainPath)}).startApplication({
+      environmentModule: inertEnvironment,
+      localCliService: inertLocalCli,
+      subtitleService: { generate() {} },
+      videoExportService: { start() {}, cancel() {} },
+      showSaveDialog() {}
+    });
+    setImmediate(() => {
+      windows[0].emit('closed');
+      app.emit('activate');
+      process.stdout.write('CLOSE_LISTENERS=' + JSON.stringify(
+        windows.map((window) => window.listenerCount('close'))
+      ) + '\\n');
+    });
+  `;
+  assert.deepEqual(runMainProbe(script, 'CLOSE_LISTENERS'), [1, 1]);
+});
+
+test('video export normalizes fulfilled service failure codes to the public allowlist', () => {
+  const script = `
+    const { EventEmitter } = require('node:events');
+    const Module = require('node:module');
+    const handlers = new Map();
+    const app = new EventEmitter();
+    app.isPackaged = false;
+    app.getPath = () => '/isolated-user-data';
+    app.whenReady = () => new Promise(() => {});
+    app.quit = () => {};
+    class BrowserWindow {
+      static fromWebContents() { return null; }
+    }
+    const electron = {
+      app, BrowserWindow, dialog: {},
+      ipcMain: { handle(name, handler) { handlers.set(name, handler); } }
+    };
+    const originalLoad = Module._load;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'electron') return electron;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    let starts = 0;
+    const inertEnvironment = {
+      detectEnvironment() {}, describeInstall() {}, installTool() {}, getExportTools() {}
+    };
+    const inertLocalCli = {
+      getState() {}, rescan() {}, select() {}, translateEffect() {}, translateSubtitleOrFadeIn() {}
+    };
+    require(${JSON.stringify(mainPath)}).startApplication({
+      environmentModule: inertEnvironment,
+      localCliService: inertLocalCli,
+      subtitleService: { generate() {} },
+      videoExportService: {
+        start(request) {
+          starts += 1;
+          return Promise.resolve({ jobId: request.jobId, status: 'failed',
+            errorCode: starts === 1 ? 'EACCES' : 'EXPORT_RENDER_FAILED' });
+        },
+        cancel() {}
+      },
+      showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/export.mp4' })
+    });
+    const sender = { isDestroyed: () => false, send() {} };
+    const start = handlers.get('video-export:start');
+    Promise.all([
+      start({ sender }, { jobId: 'unknown', videoPath: '/tmp/source.mp4', recipe: {} })
+        .then(async (first) => {
+          const second = await start({ sender }, {
+            jobId: 'known', videoPath: '/tmp/source.mp4', recipe: {}
+          });
+          return [first.errorCode, second.errorCode];
+        })
+    ]).then((codes) => {
+      process.stdout.write('EXPORT_CODES=' + JSON.stringify(codes[0]) + '\\n');
+    });
+  `;
+  assert.deepEqual(runMainProbe(script, 'EXPORT_CODES'), [
+    'EXPORT_FAILED', 'EXPORT_RENDER_FAILED'
+  ]);
+});
+
 test('default-app Electron project launch starts once', () => {
   assert.equal(observeAutomaticStart({
     processType: 'browser',

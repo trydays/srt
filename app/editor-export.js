@@ -51,6 +51,9 @@
 
   function restoreEditor() {
     frozenControls.forEach(function(state) { state.control.disabled = state.disabled; });
+    Array.from(document.querySelectorAll('.request-undo')).forEach(function(button) {
+      button.disabled = false;
+    });
     frozenEditors.forEach(function(state) {
       if (state.contenteditable === null) state.editor.removeAttribute('contenteditable');
       else state.editor.setAttribute('contenteditable', state.contenteditable);

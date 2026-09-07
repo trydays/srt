@@ -130,6 +130,7 @@ function showDocumentError(error) {
   updateDocumentStatus(error && error.code === 'SUBTITLE_DOCUMENT_STALE' ? '当前字幕已更新，请重新载入' : '字幕草稿保存失败，请重试');
 }
 function saveCandidate() {
+  if (window.isExporting) return false;
   clearSegmentErrors();
   try {
     var state = subtitleStore.saveDraft(getActiveProjectId(), candidateTextById());
@@ -139,6 +140,7 @@ function saveCandidate() {
   } catch (error) { showDocumentError(error); return false; }
 }
 function applyCandidate() {
+  if (window.isExporting) return false;
   clearSegmentErrors();
   try {
     subtitleStore.applyTexts(getActiveProjectId(), candidateTextById());
@@ -157,9 +159,11 @@ subtitleTrack.addEventListener('click', function(event) {
   subtitlePreview.hidden = false; subtitlePreview.textContent = segment.text;
 });
 subtitleDocumentSurface.addEventListener('input', function(event) {
+  if (window.isExporting) return;
   if (event.target.matches('[data-testid="subtitle-document-segment"]')) markCandidateChanged();
 });
 subtitleDocumentSurface.addEventListener('keydown', function(event) {
+  if (window.isExporting) { event.preventDefault(); return; }
   var field = event.target.closest('[data-testid="subtitle-document-segment"]'); if (!field) return;
   if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); return; }
   if (event.key !== 'Tab') return;
@@ -168,6 +172,7 @@ subtitleDocumentSurface.addEventListener('keydown', function(event) {
   if (next >= 0 && next < fields.length) { event.preventDefault(); fields[next].focus(); }
 });
 subtitleDocumentSurface.addEventListener('paste', function(event) {
+  if (window.isExporting) { event.preventDefault(); return; }
   var field = event.target.closest('[data-testid="subtitle-document-segment"]'); if (!field) return;
   event.preventDefault();
   var text = (event.clipboardData && event.clipboardData.getData('text') || '').replace(/[\r\n]+/g, ' ');
@@ -205,7 +210,8 @@ window.subtitleController = {
   openAfter: function(card) {
     if (card && card.parentNode) card.parentNode.insertBefore(subtitleDocument, card.nextSibling);
     subtitleDocument.hidden = currentSubtitleState().segments.length === 0;
-    rebuildDocumentFromState(); setDocumentExpanded(true);
+    if (card || !candidateTexts) rebuildDocumentFromState();
+    setDocumentExpanded(true);
   },
   restoreAfter: function(card) {
     if (card && card.parentNode) card.parentNode.insertBefore(subtitleDocument, card.nextSibling);

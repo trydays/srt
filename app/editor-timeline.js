@@ -178,7 +178,8 @@ function renderRequestStatusCard(card, record) {
   var undo = canUndo
     ? '<button type="button" class="request-undo" data-undo-request="'
       + escapeConversationText(record.id)
-      + '" data-testid="subtitle-undo">撤销本次字幕</button>' : '';
+      + '" data-testid="subtitle-undo"' + (window.isExporting ? ' disabled' : '')
+      + '>撤销本次字幕</button>' : '';
   var summary = isSuccessfulRequest(record)
     ? '<button type="button" class="request-status-summary" data-request-details-toggle'
       + ' data-testid="request-status-summary">' + requestCardSummary(record) + '</button>' : '';
@@ -493,6 +494,7 @@ chatArea.addEventListener('click', function(event) {
   }
   var button = event.target.closest('[data-undo-request]');
   if (!button) return;
+  if (window.isExporting) return;
   var requestId = button.dataset.undoRequest;
   var requestCard = button.closest('[data-request-id]');
   try {

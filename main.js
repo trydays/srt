@@ -28,7 +28,7 @@ try {
   console.error('[main] 配置加载失败:', e.message);
 }
 
-function createWindow() {
+function createWindow(onClose) {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
@@ -42,6 +42,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     }
   });
+  if (onClose) mainWindow.on('close', onClose);
   mainWindow.loadFile(path.join(__dirname, 'app', '主页.html'));
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -333,7 +334,13 @@ function startApplication({ environmentModule, localCliService, subtitleService,
           }
         }
       );
-      return await slot.completion;
+      const result = await slot.completion;
+      if (result && result.status === 'failed') {
+        return Object.assign({}, result, {
+          errorCode: publicExportCode({ code: result.errorCode }, 'EXPORT_FAILED')
+        });
+      }
+      return result;
     } catch (error) {
       return {
         jobId,
@@ -355,14 +362,12 @@ function startApplication({ environmentModule, localCliService, subtitleService,
     if (slot.completion) await slot.completion;
   });
 
-  app.whenReady().then(async () => {
-    createWindow();
-    mainWindow.on('close', function(event) {
+  function handleExportingWindowClose(event) {
+      const closingWindow = this;
       const slot = activeExport;
-      if (!slot || slot.sender !== mainWindow.webContents || slot.closing) return;
+      if (!slot || slot.sender !== closingWindow.webContents || slot.closing) return;
       event.preventDefault();
       slot.closing = true;
-      const closingWindow = mainWindow;
       Promise.resolve().then(async function() {
         if (slot.phase === 'dialog') slot.cancelled = true;
         else if (slot.phase !== 'finalizing') await activeVideoExportService.cancel(slot.jobId);
@@ -370,7 +375,10 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       }).finally(function() {
         if (!closingWindow.isDestroyed()) closingWindow.destroy();
       });
-    });
+  }
+
+  app.whenReady().then(async () => {
+    createWindow(handleExportingWindowClose);
   });
 
   app.on('window-all-closed', () => {
@@ -378,7 +386,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   });
 
   app.on('activate', () => {
-    if (mainWindow === null) createWindow();
+    if (mainWindow === null) createWindow(handleExportingWindowClose);
   });
 }
 

@@ -83,3 +83,51 @@
 ## 顾虑
 
 - 无阻塞顾虑。按 brief，真实取消不在本周期重复取证；正常关闭路径已实现并自审，本次组合 E2E 覆盖页面取消而未单列窗口关闭 GUI 场景。
+
+## Review 修复与复测（Changes requested）
+
+### 四项窄修复
+
+1. `openAfter(null)` 现在仅展开现有字幕文稿；已有 `candidateTexts` 时不再从持久化状态重建，因此未保存候选不会被覆盖。字幕保存、应用、输入、粘贴和键盘写入同时直接服从页面级 `window.isExporting`。
+2. 历史卡允许在导出中继续展开查看，但其重渲染出的新撤销按钮会保持禁用；撤销处理本身也检查 `window.isExporting`，导出终态后恢复当前 DOM 中的撤销入口。未引入 MutationObserver 或通用锁。
+3. 导出感知的 close handler 由每次 `createWindow` 创建窗口时安装，覆盖首次 ready 窗口和 macOS activate 重建窗口。
+4. 服务 fulfilled 的 `failed` terminal 也经过 `publicExportCode`；未知 `EACCES` 收敛为 `EXPORT_FAILED`，允许的 `EXPORT_RENDER_FAILED` 原样保留。
+
+### RED 证据
+
+- 命令：`node --test tests/main-entry.test.js`
+  - 结果：7 pass / 2 fail。
+  - 重建窗口 close listener 实际为 `[1,0]`，期望 `[1,1]`。
+  - fulfilled 服务错误码实际为 `EACCES`，期望 `EXPORT_FAILED`；允许码对照项仍为 `EXPORT_RENDER_FAILED`。
+- 命令：`npx playwright test tests/e2e/video-export-flow.spec.js --grep 'unsaved subtitle candidate|history-created undo'`
+  - 结果：2 fail。
+  - 未保存候选期望“尚未保存也尚未应用”，实际被重置为“大家好”。
+  - 历史卡在导出中重渲染后，新的 `subtitle-undo` 实际为 enabled，期望 disabled。
+
+### GREEN 证据
+
+- 命令：`node --test tests/main-entry.test.js`
+  - 结果：9 pass / 0 fail。
+- 命令：`npx playwright test tests/e2e/video-export-flow.spec.js --grep 'unsaved subtitle candidate|history-created undo'`
+  - 结果：2 pass / 0 fail（7.3s）。
+- 命令：`node --test tests/main-entry.test.js tests/render-recipe.test.js tests/video-export.test.js tests/subtitle-state.test.js`
+  - 最终结果：37 tests；36 pass / 0 fail / 1 条件 skip。
+- 命令：`npx playwright test tests/e2e/video-export-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js`
+  - 最终结果：9 pass / 0 fail（30.7s）。
+- 语法检查与 `git diff --check` 均通过。
+
+### Review 修复文件
+
+- `app/editor-subtitles.js`
+- `app/editor-timeline.js`
+- `app/editor-export.js`
+- `main.js`
+- `tests/main-entry.test.js`
+- `tests/e2e/video-export-flow.spec.js`
+- `.superpowers/sdd/task-4-report.md`
+
+### 增量时间账
+
+- 产品修复、测试与自审：约 12 分钟。
+- 新增支撑：0 分钟；未遇到新的环境或夹具问题，保留剩余 1 分钟支撑额度。
+- 外部等待：0 分钟。
