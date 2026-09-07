@@ -83,7 +83,7 @@ const localCliService = {
         { capability: 'fade.out@1', params: { start: 18, end: 20 } }
       ] };
     }
-    if (process.env.SRT_E2E_EFFECT_RESULT === 'color-transactions') {
+    if (['color-transactions', 'color-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
       if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
       const color = { capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
         params: { temperature: -0.6, brightness: 0.2, contrast: 1.3 } };
@@ -124,6 +124,9 @@ if (!useProductionEnvironment) {
       exportStartCount += 1;
       state.exportRequests = (state.exportRequests || []).concat([request]);
       onProgress({ jobId: request.jobId, phase: 'rendering', percent: 42 });
+      if (process.env.SRT_E2E_EFFECT_RESULT === 'color-transactions-success') {
+        return { jobId: request.jobId, status: 'completed', outputPath: request.outputPath };
+      }
       if (exportStartCount === 1) {
         await new Promise((resolve) => setTimeout(resolve, 80));
         return { jobId: request.jobId, status: 'failed', errorCode: 'EXPORT_RENDER_FAILED' };
