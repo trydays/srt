@@ -62,6 +62,25 @@ test('buildPrompt ignores a non-array history', () => {
   assert.doesNotMatch(prompt, /对话历史/);
 });
 
+test('buildPrompt includes video project context when provided', () => {
+  const prompt = buildPrompt('片尾淡出', [], {
+    video: { durationSeconds: 75, width: 1280, height: 720 },
+    playheadSeconds: 12
+  });
+  assert.match(prompt, /当前编辑上下文/);
+  assert.match(prompt, /视频总时长：75 秒/);
+  assert.match(prompt, /视频分辨率：1280x720/);
+  assert.match(prompt, /播放头位置：12 秒/);
+  assert.match(prompt, /能根据上面编辑上下文确定的时间与参数就直接推导/);
+  assert.match(prompt, /片尾淡出/);
+});
+
+test('buildPrompt omits project context when none is provided', () => {
+  const prompt = buildPrompt('加字幕');
+  assert.doesNotMatch(prompt, /当前编辑上下文/);
+  assert.doesNotMatch(prompt, /能根据上面编辑上下文确定的时间与参数/);
+});
+
 test('parseInstruction parses a clarify turn and trims its message', () => {
   assert.deepEqual(parseInstruction('{"kind":"clarify","message":"你想要什么氛围？"}'), {
     kind: 'clarify', message: '你想要什么氛围？'

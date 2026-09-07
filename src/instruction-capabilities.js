@@ -97,7 +97,24 @@ function invalidInstructionError() {
   return error;
 }
 
-function buildPrompt(userText, history) {
+function projectContextLines(context) {
+  if (!isPlainObject(context)) return null;
+  var lines = [];
+  var video = isPlainObject(context.video) ? context.video : null;
+  if (video && typeof video.durationSeconds === 'number' && Number.isFinite(video.durationSeconds)) {
+    lines.push('视频总时长：' + video.durationSeconds + ' 秒');
+  }
+  if (video && typeof video.width === 'number' && Number.isFinite(video.width)
+      && typeof video.height === 'number' && Number.isFinite(video.height)) {
+    lines.push('视频分辨率：' + video.width + 'x' + video.height);
+  }
+  if (typeof context.playheadSeconds === 'number' && Number.isFinite(context.playheadSeconds)) {
+    lines.push('播放头位置：' + context.playheadSeconds + ' 秒');
+  }
+  return lines.length ? lines : null;
+}
+
+function buildPrompt(userText, history, context) {
   var lines = [
     '你是视频剪辑配方推导器。把用户想要的效果实时拆解成底层能力的有序组合，不要输出“预设效果名”。',
     '推导规则：',
@@ -121,6 +138,13 @@ function buildPrompt(userText, history) {
     'steps 是一组按顺序执行的能力，可以包含一条或多条。',
     '不要输出命令、Markdown、代码块或任何额外解释，只输出 JSON。'
   ]);
+
+  var contextLines = projectContextLines(context);
+  if (contextLines) {
+    lines.push('当前编辑上下文：');
+    lines = lines.concat(contextLines);
+    lines.push('- 能根据上面编辑上下文确定的时间与参数就直接推导；只有上下文确实无法确定时才输出 clarify 追问。');
+  }
 
   if (Array.isArray(history) && history.length) {
     lines.push('对话历史：');

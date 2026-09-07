@@ -78,6 +78,19 @@ function applyInstructionSteps(steps) {
   return appliedAny;
 }
 
+/* 每次转换前冻结当前项目快照，作为本地 CLI 推导的编辑上下文 */
+function currentProjectContext() {
+  if (!videoDuration || !Number.isFinite(videoDuration)) return null;
+  return {
+    video: {
+      durationSeconds: videoDuration,
+      width: typeof videoEl.videoWidth === 'number' ? videoEl.videoWidth : null,
+      height: typeof videoEl.videoHeight === 'number' ? videoEl.videoHeight : null
+    },
+    playheadSeconds: Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0
+  };
+}
+
 /* 删除后重排后续 marker 的 idx */
 function reindexMarkers(fromIdx) {
   var markers = track.querySelectorAll('.tl-marker');
@@ -362,7 +375,8 @@ async function runSubtitleInstruction(record, card) {
 }
 
 async function translateAndApply(text, record, card) {
-  var translated = await window.srtAPI.translateInstruction(text, record.turns);
+  var context = currentProjectContext();
+  var translated = await window.srtAPI.translateInstruction(text, record.turns, context);
   if (!translated.ok) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',

@@ -180,7 +180,7 @@ function createLocalCliService({
     return { available: publicAvailable(available), selectedCliId };
   }
 
-  async function translateInstruction(text, history) {
+  async function translateInstruction(text, history, context) {
     const available = await scan();
     const selectedCliId = await readSelection();
     if (!selectedCliId) throw notSelectedError();
@@ -190,7 +190,7 @@ function createLocalCliService({
     if (typeof argsFactory !== 'function') throw translationFailedError();
     let output;
     try {
-      output = await translateEffectOutput(selectedCli.file, argsFactory(buildPrompt(text, history)));
+      output = await translateEffectOutput(selectedCli.file, argsFactory(buildPrompt(text, history, context)));
     } catch (error) {
       throw instructionTranslationError(error);
     }

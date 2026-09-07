@@ -21,7 +21,7 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
   assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
   assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
-  assert.match(preloadSource, /translateInstruction:\s*\(text, history\)\s*=>\s*ipcRenderer\.invoke\('local-cli:translate-instruction',\s*\{ text, history \}\)/);
+  assert.match(preloadSource, /translateInstruction:\s*\(text, history, context\)\s*=>\s*ipcRenderer\.invoke\('local-cli:translate-instruction',\s*\{ text, history, context \}\)/);
   assert.equal(preloadSource.includes('translateLocalCliEffect'), false);
   assert.equal(preloadSource.includes('translateSubtitleOrFadeIn'), false);
   assert.match(preloadSource, /generateSubtitles: \(request\) => ipcRenderer\.invoke\('subtitles:generate', request\)/);

@@ -213,6 +213,24 @@ test('forwards conversation history into the generated prompt', async () => {
   assert.match(calls[0].args[1], /你想要字幕还是淡入？/);
 });
 
+test('forwards video project context into the generated prompt', async () => {
+  const fsApi = fakeFs(['/bin/codex']);
+  const { calls, run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"fade.out@1","params":{}}]}');
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi, run: async () => ({ exitCode: 0 }), translate: run
+  });
+  await service.select('codex');
+  await service.translateInstruction('片尾淡出', [], {
+    video: { durationSeconds: 75, width: 1280, height: 720 },
+    playheadSeconds: 12
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /视频总时长：75 秒/);
+  assert.match(calls[0].args[1], /视频分辨率：1280x720/);
+  assert.match(calls[0].args[1], /播放头位置：12 秒/);
+});
+
 test('reports a killed CLI translation as a timeout', async () => {
   const fsApi = fakeFs(['/bin/codex']);
   const timeout = Object.assign(new Error('timed out'), { killed: true });
