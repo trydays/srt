@@ -131,28 +131,28 @@ test('omits a candidate when a probe resolves with a nonzero exit code', async (
 
 test('translates a subtitle request into subtitle.generate instruction', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { calls, run } = fakeTranslator('{"kind":"instruction","capability":"subtitle.generate@1","params":{}}');
+  const { calls, run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}}]}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
   assert.deepEqual(await service.translateInstruction('给视频加字幕'), {
-    kind: 'instruction', capability: 'subtitle.generate@1', params: {}
+    kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }]
   });
   assert.equal(calls.length, 1);
 });
 
 test('translates a fade request into fade.in instruction', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { run } = fakeTranslator('{"kind":"instruction","capability":"fade.in@1","params":{}}');
+  const { run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
   assert.deepEqual(await service.translateInstruction('给片头添加淡入'), {
-    kind: 'instruction', capability: 'fade.in@1', params: {}
+    kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }]
   });
 });
 
@@ -201,7 +201,7 @@ test('reports a killed CLI translation as a timeout', async () => {
   );
 });
 
-for (const output of ['not json', '[]', '{"kind":"instruction","capability":"trim@1"}', '{"kind":"instruction","capability":123}']) {
+for (const output of ['not json', '[]', '{"kind":"instruction","steps":[{"capability":"trim@1","params":{}}]}', '{"kind":"instruction","steps":[{"capability":123,"params":{}}]}']) {
   test(`rejects unsupported instruction output: ${output}`, async () => {
     const fsApi = fakeFs(['/bin/codex']);
     const { run } = fakeTranslator(output);
@@ -221,7 +221,7 @@ test('translate ignores stdin so interactive CLI prompts do not hang', async () 
   const calls = [];
   const execFile = (file, args, options, callback) => {
     calls.push({ file, args, options });
-    callback(null, '{"kind":"instruction","capability":"fade.in@1","params":{}}', '');
+    callback(null, '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}', '');
   };
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
