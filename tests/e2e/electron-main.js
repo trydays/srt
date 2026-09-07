@@ -64,22 +64,14 @@ const localCliService = {
     selectedCliId = id;
     return { available: localCliStates, selectedCliId };
   },
-  async translateEffect() {
-    if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
-      const error = new Error('Invalid local CLI effect output');
-      error.code = 'LOCAL_CLI_INVALID_EFFECT_OUTPUT';
-      throw error;
-    }
-    return { type: 'add_effect', effect: 'fade_in' };
-  },
-  async translateSubtitleOrFadeIn(text) {
+  async translateInstruction(text) {
     if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
       const error = new Error('Invalid local CLI instruction output');
       error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
       throw error;
     }
-    if (/字幕/.test(text)) return { type: 'generate_subtitles' };
-    return { type: 'add_effect', effect: 'fade_in' };
+    if (/字幕/.test(text)) return { capability: 'subtitle.generate@1', params: {} };
+    return { capability: 'fade.in@1', params: {} };
   }
 };
 const subtitleService = {

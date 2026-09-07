@@ -44,8 +44,8 @@ function addMarker(ef) {
   return track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
 }
 
-function applyLocalCliEffect(instruction) {
-  if (!instruction || instruction.type !== 'add_effect' || instruction.effect !== 'fade_in') return false;
+function applyInstruction(instruction) {
+  if (!instruction || instruction.capability !== 'fade.in@1') return false;
   var effect = { name: '淡入', time: videoDuration ? videoEl.currentTime : 0,
     color: 'var(--accent)' };
   var marker = createMarkerDOM(effect, timelineEffects.length);
@@ -406,7 +406,7 @@ async function runSubtitleInstruction(record, card) {
 }
 
 async function translateAndApply(text, record, card) {
-  var translated = await window.srtAPI.translateSubtitleOrFadeIn(text);
+  var translated = await window.srtAPI.translateInstruction(text);
   if (!translated.ok) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
@@ -414,8 +414,16 @@ async function translateAndApply(text, record, card) {
     });
     return;
   }
+  var instruction = translated.instruction;
+  if (!instruction || instruction.capability === null) {
+    updateRequestStatus(record, card, {
+      instructionStatus: 'failed', timelineStatus: 'not_run',
+      error: '暂不支持这个编辑操作，试试「生成字幕」或「淡入」。'
+    });
+    return;
+  }
   record.instructionStatus = 'success';
-  if (translated.instruction.type === 'generate_subtitles') {
+  if (instruction.capability === 'subtitle.generate@1') {
     await runSubtitleInstruction(record, card);
     return;
   }
@@ -423,7 +431,7 @@ async function translateAndApply(text, record, card) {
   updateRequestStatus(record, card, {
     instructionStatus: 'success', timelineStatus: 'applying', error: ''
   });
-  var applied = applyLocalCliEffect(translated.instruction);
+  var applied = applyInstruction(instruction);
   updateRequestStatus(record, card, applied
     ? { timelineStatus: 'success', error: '' }
     : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });

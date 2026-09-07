@@ -93,7 +93,7 @@ test.describe('video export flow', () => {
     expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
     await window.getByTestId('subtitle-document-apply').click();
 
-    await window.evaluate(() => applyLocalCliEffect({ type: 'add_effect', effect: 'fade_in' }));
+    await window.evaluate(() => applyInstruction({ capability: 'fade.in@1', params: {} }));
     await window.getByTestId('video-export-button').click();
     await expect(window.getByTestId('video-export-status')).toContainText('淡入');
     expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
