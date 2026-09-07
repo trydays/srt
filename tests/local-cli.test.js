@@ -129,65 +129,42 @@ test('omits a candidate when a probe resolves with a nonzero exit code', async (
   assert.deepEqual((await service.getState()).available, [{ id: 'claude', label: 'Claude Code' }]);
 });
 
-test('translates a selected local CLI effect into the only allowed instruction', async () => {
+test('translates a subtitle request into subtitle.generate capability', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { calls, run } = fakeTranslator('{"type":"add_effect","effect":"fade_in"}');
-  const service = createLocalCliService({
-    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
-    fsApi, run: async () => ({ exitCode: 0 }), translate: run
-  });
-
-  await service.select('codex');
-  assert.deepEqual(await service.translateEffect('添加淡入'), { type: 'add_effect', effect: 'fade_in' });
-  assert.equal(calls.length > 0, true);
-});
-
-for (const [name, output] of [
-  ['rejects non-json effect output', 'not json'],
-  ['rejects effect output with extra fields', '{"type":"add_effect","effect":"fade_in","extra":true}'],
-  ['rejects array effect output', '[{"type":"add_effect","effect":"fade_in"}]']
-]) {
-  test(name, async () => {
-    const fsApi = fakeFs(['/bin/codex']);
-    const { run } = fakeTranslator(output);
-    const service = createLocalCliService({
-      platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
-      fsApi, run: async () => ({ exitCode: 0 }), translate: run
-    });
-
-    await service.select('codex');
-    await assert.rejects(
-      () => service.translateEffect('添加淡入'),
-      { code: 'LOCAL_CLI_INVALID_EFFECT_OUTPUT' }
-    );
-  });
-}
-
-test('translates a subtitle request into the only subtitle instruction', async () => {
-  const fsApi = fakeFs(['/bin/codex']);
-  const { calls, run } = fakeTranslator('{"type":"generate_subtitles"}');
+  const { calls, run } = fakeTranslator('{"capability":"subtitle.generate@1","params":{}}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  assert.deepEqual(await service.translateSubtitleOrFadeIn('给视频加字幕'), {
-    type: 'generate_subtitles'
+  assert.deepEqual(await service.translateInstruction('给视频加字幕'), {
+    capability: 'subtitle.generate@1', params: {}
   });
   assert.equal(calls.length, 1);
 });
 
-test('keeps the existing fade-in instruction as a regression capability', async () => {
+test('translates a fade request into fade.in capability', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { run } = fakeTranslator('{"type":"add_effect","effect":"fade_in"}');
+  const { run } = fakeTranslator('{"capability":"fade.in@1","params":{}}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  assert.deepEqual(await service.translateSubtitleOrFadeIn('给片头添加淡入'), {
-    type: 'add_effect', effect: 'fade_in'
+  assert.deepEqual(await service.translateInstruction('给片头添加淡入'), {
+    capability: 'fade.in@1', params: {}
   });
+});
+
+test('returns unsupported when the CLI answers capability null', async () => {
+  const fsApi = fakeFs(['/bin/codex']);
+  const { run } = fakeTranslator('{"capability":null}');
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi, run: async () => ({ exitCode: 0 }), translate: run
+  });
+  await service.select('codex');
+  assert.deepEqual(await service.translateInstruction('做个三明治'), { capability: null });
 });
 
 test('reports a killed CLI translation as a timeout', async () => {
@@ -200,18 +177,12 @@ test('reports a killed CLI translation as a timeout', async () => {
   });
   await service.select('codex');
   await assert.rejects(
-    () => service.translateSubtitleOrFadeIn('给视频加字幕'),
+    () => service.translateInstruction('给视频加字幕'),
     { code: 'LOCAL_CLI_TRANSLATION_TIMEOUT' }
   );
 });
 
-for (const output of [
-  'not json',
-  '{}',
-  '[{"type":"generate_subtitles"}]',
-  '{"type":"generate_subtitles","language":"zh"}',
-  '{"type":"trim","start":0,"end":2}'
-]) {
+for (const output of ['not json', '[]', '{"capability":"trim@1"}', '{"capability":123}']) {
   test(`rejects unsupported instruction output: ${output}`, async () => {
     const fsApi = fakeFs(['/bin/codex']);
     const { run } = fakeTranslator(output);
@@ -221,7 +192,7 @@ for (const output of [
     });
     await service.select('codex');
     await assert.rejects(
-      () => service.translateSubtitleOrFadeIn('任意请求'),
+      () => service.translateInstruction('任意请求'),
       { code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT' }
     );
   });
