@@ -1,6 +1,6 @@
 # 通用 AI 剪辑执行链设计
 
-**日期：** 2026-09-07  
+**日期：** 2026-09-07
 **状态：** 已确认方向，进入实施规划
 
 ## 1. 产品目标
@@ -25,7 +25,7 @@
 
 1. 采用“AI Recipe → ProjectEditing → EditDocument → RenderGraph → 各目标 Adapter”的结构。
 2. AI 只输出声明式 JSON，不输出 Shell、FFmpeg 命令、HTML、CSS 或 JavaScript。
-3. AI 可见能力必须已经同时具备参数校验、项目写入、时间轴展示、画面预览和真实导出。
+3. AI 可见的每个 capability 版本必须已经同时具备其全部声明参数的校验、项目写入、时间轴展示、画面预览和真实导出；不完整参数不能提前写进 schema。
 4. 一条自然语言指令产生一个事务。全部步骤准备、校验和编译成功后才写入项目。
 5. `EditDocument` 是已应用编辑的唯一事实来源。
 6. `RenderGraph` 从指定版本的 `EditDocument` 即时编译，不单独持久化。
@@ -55,6 +55,13 @@
 统一 seam 位于 AI 已产生有效 `instruction.steps` 之后。调用者只使用 `ProjectEditing`：
 
 ```js
+projectEditing.initializeProject({
+  projectId,
+  mediaFacts,
+  legacySubtitleState
+})
+// => { document, graph }
+
 projectEditing.load(projectId)
 // => { document, graph }
 
@@ -69,11 +76,13 @@ projectEditing.applyRecipe({
 projectEditing.replaceEdit({
   projectId,
   expectedRevision,
-  requestId,
   editId,
   payload
 })
-// => { document, graph, transactionId }
+// => { document, graph }
+
+projectEditing.canUndo({ projectId, transactionId })
+// => boolean
 
 projectEditing.undo({
   projectId,
@@ -81,15 +90,25 @@ projectEditing.undo({
   transactionId
 })
 // => { document, graph }
+
+projectEditing.timelineItems(projectId)
+// => [{ editId, transactionId, lane, range, label, summary }]
+
+projectEditing.aiContext(projectId)
+// => { revision, edits, subtitleSummary }
 ```
 
 `translateAndApply`、字幕编辑区、时间轴和导出按钮都不判断 capability ID。能力校验、时间补全、资源准备、事务提交、撤销、RenderGraph 编译和项目上下文投影全部隐藏在该 seam 后。
+
+`applyRecipe` 是 Recipe 标准化的唯一所有者，renderer 不预先转换另一份中间结构。`initializeProject` 是新项目媒体事实和旧字幕迁移的唯一入口；新项目必须等待视频 metadata 就绪，不能创建时长为 0 的文档。
+
+`replaceEdit` 用于字幕文稿和未来属性面板的“应用”。它增加 document revision，但不创建新事务。若被修改的 edit 属于当前可撤销事务，则推进该 undo 记录的 `afterRevision` 并保留原 inverse；否则清空旧的一次撤销，避免 inverse 应用到不匹配状态。
 
 ## 6. 三种数据的职责
 
 ### 6.1 AI Recipe
 
-AI Recipe 是不可信提案。第一周期兼容现有 `capability + params + start/end` 输入，进入 `ProjectEditing` 后立即标准化。长期形状为：
+AI Recipe 是不可信提案。进入 `ProjectEditing` 后才标准化。支持时间范围的能力使用长期形状：
 
 ```json
 {
@@ -106,6 +125,8 @@ AI Recipe 是不可信提案。第一周期兼容现有 `capability + params + s
 ```
 
 AI 不得提供项目 revision、事务 ID、本地路径、Adapter 名称或执行命令。这些可信字段由软件补充。
+
+第一周期的 `subtitle.generate@1` 只生成全片字幕，`range.allowed` 为 `false`，不接受 `start/end`。这样不会出现时间轴显示局部区间、导出却烧录全片字幕的双重语义。局部字幕需要单独定义后才能开放。
 
 ### 6.2 EditDocument
 
@@ -162,75 +183,91 @@ AI 不得提供项目 revision、事务 ID、本地路径、Adapter 名称或执
       "range": { "start": 0, "end": 18.4 },
       "inputs": [],
       "props": { "assetId": "asset-video-1" }
+    },
+    {
+      "id": "node-subtitles",
+      "type": "visual.subtitle@1",
+      "range": { "start": 0, "end": 18.4 },
+      "inputs": [
+        { "port": "base", "nodeId": "node-video" }
+      ],
+      "props": { "segments": [], "style": {} }
     }
   ],
   "outputs": {
-    "video": { "nodeId": "node-video", "port": "video" },
-    "audio": null
+    "video": { "nodeId": "node-subtitles", "port": "video" },
+    "audio": { "nodeId": "node-video", "port": "audio" }
   }
 }
 ```
 
-节点 ID 唯一；节点按拓扑顺序排列，只能引用更早的节点；端口类型必须匹配；时间和关键帧必须位于项目时长内；所有 `props` 拒绝未知字段；图必须有一个视频输出，音频输出可选。
+第一周期只实现并校验上面的线性图：节点 ID 唯一、节点类型已注册、字幕节点连接当前 video head、范围位于项目时长内、只有一个视频输出。任意分支、通用端口类型、向后引用和关键帧校验在图层或关键帧周期真正需要时再加入。
 
 ## 7. Capability Catalog
 
-Catalog 是 AI 提示、Recipe 校验和执行支持的唯一能力来源。每个定义包含：
+Catalog 是 AI 提示、Recipe 校验和执行支持的唯一能力来源。它不只保存描述，而是把同一 capability 版本的定义与真实 Adapter 函数注册在一起：
 
 ```js
 {
-  id: 'video.color.adjust@1',
-  label: '画面调色',
-  description: '调整色温、亮度、饱和度和对比度',
-  params: { /* 类型、范围、默认值 */ },
-  range: { allowed: true, default: 'wholeTarget' },
-  prepareAdapter: null,
-  compileAdapter: 'compile.video.color.adjust@1',
-  editTypes: ['video.color@1'],
-  graphNodeTypes: ['video.color@1'],
-  presentation: {
-    lane: 'video-effects',
-    label: '调色',
-    summaryKeys: ['temperature', 'brightness']
-  }
+  definition: {
+    schemaVersion: 1,
+    id: 'video.color.adjust@1',
+    label: '画面调色',
+    description: '调整色温、亮度、饱和度和对比度',
+    params: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        temperature: { type: 'number', minimum: -1, maximum: 1, default: 0 },
+        brightness: { type: 'number', minimum: -1, maximum: 1, default: 0 }
+      }
+    },
+    range: { allowed: true, default: 'wholeTarget' }
+  },
+  prepare: Function,
+  toEdit: Function,
+  toGraph: Function,
+  toTimeline: Function,
+  preview: Function,
+  toExport: Function
 }
 ```
 
 某项能力只有同时满足以下条件才加入 AI 提示：
 
 ```text
-参数与时间 schema 可用
-AND prepareAdapter（如需要）可用
-AND compileAdapter 可用
-AND timeline presentation 可用
-AND 所有 graphNodeTypes 有 Preview Adapter
-AND 所有 graphNodeTypes 有 Export Adapter
+完整参数与时间 schema 可用
+AND prepare 函数可用（不需要准备的能力使用明确的 no-op）
+AND toEdit 函数可用
+AND toGraph 函数可用
+AND toTimeline 函数可用
+AND preview 函数可用
+AND toExport 函数可用
 ```
 
-这项判断由程序和契约测试完成，不依赖手工维护一个独立的 `enabled` 开关。
+这项判断直接从 registration 上的实际函数计算，并由契约测试删除任一函数后验证能力会消失；不依赖手工维护的 `enabled` 或支持 ID 集合。
 
 ## 8. 通用底层积木
 
-底层积木按可组合的视觉和音频变化设计，不按用户效果名称设计：
+当前核心底层积木按可组合的视觉变化设计，不按用户效果名称设计：
 
 - `video.color@1`：色温、亮度、曝光、饱和度、对比度和色彩矩阵。
-- `video.transform@1`：位移、缩放、旋转、翻转和裁剪。
-- `visual.shape@1`、`visual.text@1`、`visual.image@1`：覆盖层内容。
+- `video.transform@1`：首版只开放翻转和中心缩放；旋转、位置和裁剪在各自 Adapter 完整后再扩展 schema。
+- `visual.shape@1`、`visual.text@1`：覆盖层内容。
 - `video.composite@1`：图层顺序、遮罩和混合。
-- 通用关键帧值：静态值或 `{kind:'keyframes', frames:[...]}`。
-- `video.noise@1`、`video.vignette@1`、`video.blur@1`：基础质感。
-- `audio.gain@1`、`audio.mix@1`：音量和混音。
+- 关键帧值：首版只用于透明度和缩放，并只开放固定缓动；其他属性后续按真实需求加入。
+- `video.noise@1`、`video.vignette@1`：基础质感。
 - `visual.subtitle@1`：可编辑字幕轨。
 
-“跳出卡片”由形状、文字、合成、缩放、位移和透明度关键帧组成，不注册同名预设能力。
+“跳出卡片”首版由形状、文字、合成、缩放和透明度关键帧组成，不注册同名预设能力。
 
 ## 9. Adapters
 
 - `ProjectStore Adapter`：生产使用按项目的 localStorage；测试使用内存实现。
 - `Prepare Adapter`：字幕生成使用现有 Whisper IPC；将生成结果变为可信 edit payload。
-- `Timeline Projection`：把 edits 转为统一 `{editId, transactionId, lane, range, label, summary}`，不判断具体 capability。
-- `Preview Adapter`：根据当前播放时间解释 RenderGraph，驱动视频变换、滤镜和覆盖层。
-- `Export Adapter`：把相同 RenderGraph 编译成受控 FFmpeg 参数数组和辅助资源，继续使用 `shell:false`。
+- `Timeline Projection`：registration 的 `toTimeline` 把 edit 转为统一 `{editId, transactionId, lane, range, label, summary}`。
+- `Preview Adapter`：registration 的 `preview` 根据当前播放时间解释 RenderGraph，不能绕过 graph 直接维护第二份状态。
+- `Export Adapter`：registration 的 `toExport` 把相同 RenderGraph 编译成受控 FFmpeg 参数数组和辅助资源，继续使用 `shell:false`。
 
 新增用户效果组合不会改变这些调用流程。新增真正的底层节点时，只新增其 schema、lowering 以及目标 Adapter 实现。
 
@@ -253,9 +290,11 @@ AND 所有 graphNodeTypes 有 Export Adapter
 }
 ```
 
-第一周期沿用一次撤销，不建设无限历史。异步资源准备结束后必须再次检查 `expectedRevision`，避免旧任务覆盖新编辑。
+第一周期沿用一次撤销，不建设无限历史。异步资源准备结束后必须再次检查 `expectedRevision`，避免旧任务覆盖新编辑。`subtitle.generate@1` 使用 `replaceByType`：重复生成替换项目唯一字幕轨，inverse 保存生成前的完整字幕轨或空状态。
 
 AI Recipe、EditDocument、RenderGraph 和 CapabilityDefinition 分别使用 `schemaVersion`。能力、edit type 和 graph node type 使用 `@1` 版本；参数含义或视觉语义不兼容时升级版本。RenderGraph 不需要迁移，因为它可以从 EditDocument 重新生成。
+
+旧字幕迁移由 renderer composition root 读取旧状态，再交给 `initializeProject`。只有新 EditDocument 不存在且视频 metadata 已就绪时才迁移；先成功写入新状态，再迁移独立字幕草稿。旧 key 保持只读，任何一次失败都可在下次打开时幂等重试。
 
 ## 11. 错误语义
 
@@ -293,7 +332,7 @@ AI Recipe、EditDocument、RenderGraph 和 CapabilityDefinition 分别使用 `sc
 
 ## 13. 受控 AI 渲染扩展
 
-现有通用积木无法表达新的底层算法时，可以在未来实验周期探索受控扩展。扩展生成、校验、预览和导出全部完成前，不得加入 AI 的常规能力目录。第一阶段不执行 AI 返回的任意 Shell、FFmpeg 字符串或程序代码。
+现有通用积木无法表达新的底层算法时，可以在未来重新立项探索受控扩展。扩展生成、校验、预览和导出全部完成前，不得加入 AI 的常规能力目录。核心开发路线不执行 AI 返回的任意 Shell、FFmpeg 字符串或程序代码。
 
 ## 14. 开发周期
 
@@ -301,29 +340,23 @@ AI Recipe、EditDocument、RenderGraph 和 CapabilityDefinition 分别使用 `sc
 |---|---|---|---:|
 | 1 | 统一执行主干 | 字幕通过 ProjectEditing 完整运行；刷新、撤销、导出一致；未接通能力不再假成功 | 6 小时 |
 | 2 | 通用颜色 | 冷暖、亮度、饱和度、对比度可按区间预览、保存、撤销、导出 | 5 小时 |
-| 3 | 通用变换 | 翻转、旋转、缩放、位置变化可完整执行 | 5 小时 |
+| 3 | 基础画面变换 | 水平/垂直翻转与中心缩放可完整执行 | 5 小时 |
 | 4 | 文字与形状图层 | AI 可临时组合静态提示卡片并完整导出 | 6 小时 |
-| 5 | 通用关键帧动画 | 卡片可通过缩放、位移和透明度形成跳出、滑入和淡出 | 6 小时 |
-| 6 | 质感与合成 | 颗粒、暗角、模糊及多积木氛围组合完整执行 | 4 小时 |
-| 7 | 音频积木 | 音量、音频淡入淡出和基础混音进入同一项目状态 | 5 小时 |
-| 8 | 内容定位 | 支持依据字幕、镜头和音频事件定位编辑区间 | 6 小时 |
-| 9 | 个人剪辑技能 | 保存意图、偏好和参考配方，在新视频中重新推导 | 4 小时 |
-| 10 | 受控扩展实验 | 用一个隔离实验验证 AI 生成新底层算法的可行性，再决定是否产品化 | 8 小时 |
+| 5 | 最小关键帧动画 | 卡片可通过缩放和透明度形成跳出和淡入淡出 | 6 小时 |
+| 6 | 质感积木 | 颗粒、暗角及其与颜色的组合完整执行 | 4 小时 |
+| 7 | 个人剪辑技能 | 保存意图、偏好和参考配方，在新视频中重新推导 | 4 小时 |
 
-这些时间是单周期止损上限，不是必须花满的预估。周期 1–9 的累计上限为 47 小时；周期 10 独立计算。每个周期验收通过后立即结束，后续能力进入自己的周期。
+这些时间是单周期止损上限，不是必须花满的预估。核心周期累计上限为 36 小时。每个周期验收通过后立即结束，后续能力进入自己的周期。
 
 依赖关系：
 
 ```text
 周期 1
 ├─ 周期 2 ─ 周期 6
-├─ 周期 3 ─ 周期 4 ─ 周期 5
-├─ 周期 7
-├─ 周期 8
-└─ 周期 9（建议在周期 4–5 后实施）
-
-周期 10 独立实验
+└─ 周期 3 ─ 周期 4 ─ 周期 5 ─ 周期 7
 ```
+
+音频编辑、内容定位和受控 AI 扩展不属于当前核心 83% 的交付承诺：音频以后先从源视频音量开始；内容定位先从现有字幕语义开始，镜头与音频事件分别立项；受控扩展仅在基础积木无法满足高频需求后做独立实验。
 
 ## 15. 总体验收
 
@@ -331,6 +364,6 @@ AI Recipe、EditDocument、RenderGraph 和 CapabilityDefinition 分别使用 `sc
 2. 用户可以把多个积木组成一条自然语言编辑，整条提交或整条失败。
 3. 刷新、重新打开项目、撤销和导出后，用户看到的编辑保持一致。
 4. 下一条指令能够引用前面的项目状态和编辑结果。
-5. 冷色、提亮、翻转和跳出卡片都由通用积木组合产生，不存在同名固定效果脚本。
+5. 冷色、提亮、翻转、跳出卡片和复古氛围都由通用积木组合产生，不存在同名固定效果脚本。
 6. 个人技能在不同视频上生成不同配方，但保持同一用户意图和偏好。
 7. AI 输出始终是声明式数据，执行器不会运行 AI 返回的任意命令或代码。
