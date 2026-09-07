@@ -261,3 +261,20 @@ test('translate ignores stdin so interactive CLI prompts do not hang', async () 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
 });
+
+test('waits up to 60s for a local CLI translation response', async () => {
+  const calls = [];
+  const execFile = (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(null, '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}', '');
+  };
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/claude']),
+    run: async () => ({ exitCode: 0 }),
+    execFile
+  });
+  await service.select('claude');
+  await service.translateInstruction('加淡入');
+  assert.equal(calls[0].options.timeout, 60000);
+});

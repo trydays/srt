@@ -10,6 +10,8 @@ const CLI_DEFINITIONS = [
   { id: 'gemini', label: 'Gemini CLI', command: 'gemini' }
 ];
 
+const TRANSLATION_TIMEOUT_MS = 60000;
+
 const EFFECT_ARGS = {
   codex: (prompt) => ['exec', prompt],
   claude: (prompt) => ['-p', prompt],
@@ -46,7 +48,7 @@ function createDefaultRun(execFile, platform, env) {
 function createDefaultTranslate(execFile) {
   return function translate(file, args) {
     return new Promise((resolve, reject) => {
-      execFile(file, args, { timeout: 15000, maxBuffer: 64 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout) => {
+      execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout) => {
         if (error) reject(error);
         else resolve(stdout);
       });
