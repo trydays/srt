@@ -46,7 +46,7 @@ function createDefaultRun(execFile, platform, env) {
 function createDefaultTranslate(execFile) {
   return function translate(file, args) {
     return new Promise((resolve, reject) => {
-      execFile(file, args, { timeout: 15000, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+      execFile(file, args, { timeout: 15000, maxBuffer: 64 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout) => {
         if (error) reject(error);
         else resolve(stdout);
       });
@@ -178,7 +178,7 @@ function createLocalCliService({
     return { available: publicAvailable(available), selectedCliId };
   }
 
-  async function translateInstruction(text) {
+  async function translateInstruction(text, history) {
     const available = await scan();
     const selectedCliId = await readSelection();
     if (!selectedCliId) throw notSelectedError();
@@ -188,7 +188,7 @@ function createLocalCliService({
     if (typeof argsFactory !== 'function') throw translationFailedError();
     let output;
     try {
-      output = await translateEffectOutput(selectedCli.file, argsFactory(buildPrompt(text)));
+      output = await translateEffectOutput(selectedCli.file, argsFactory(buildPrompt(text, history)));
     } catch (error) {
       throw instructionTranslationError(error);
     }

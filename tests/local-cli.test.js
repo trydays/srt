@@ -129,42 +129,61 @@ test('omits a candidate when a probe resolves with a nonzero exit code', async (
   assert.deepEqual((await service.getState()).available, [{ id: 'claude', label: 'Claude Code' }]);
 });
 
-test('translates a subtitle request into subtitle.generate capability', async () => {
+test('translates a subtitle request into subtitle.generate instruction', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { calls, run } = fakeTranslator('{"capability":"subtitle.generate@1","params":{}}');
+  const { calls, run } = fakeTranslator('{"kind":"instruction","capability":"subtitle.generate@1","params":{}}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
   assert.deepEqual(await service.translateInstruction('给视频加字幕'), {
-    capability: 'subtitle.generate@1', params: {}
+    kind: 'instruction', capability: 'subtitle.generate@1', params: {}
   });
   assert.equal(calls.length, 1);
 });
 
-test('translates a fade request into fade.in capability', async () => {
+test('translates a fade request into fade.in instruction', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { run } = fakeTranslator('{"capability":"fade.in@1","params":{}}');
+  const { run } = fakeTranslator('{"kind":"instruction","capability":"fade.in@1","params":{}}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
   assert.deepEqual(await service.translateInstruction('给片头添加淡入'), {
-    capability: 'fade.in@1', params: {}
+    kind: 'instruction', capability: 'fade.in@1', params: {}
   });
 });
 
-test('returns unsupported when the CLI answers capability null', async () => {
+test('returns a clarify turn when the CLI asks a follow-up', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { run } = fakeTranslator('{"capability":null}');
+  const { run } = fakeTranslator('{"kind":"clarify","message":"你想要字幕还是淡入？"}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  assert.deepEqual(await service.translateInstruction('做个三明治'), { capability: null });
+  assert.deepEqual(await service.translateInstruction('做个效果'), {
+    kind: 'clarify', message: '你想要字幕还是淡入？'
+  });
+});
+
+test('forwards conversation history into the generated prompt', async () => {
+  const fsApi = fakeFs(['/bin/codex']);
+  const { calls, run } = fakeTranslator('{"kind":"clarify","message":"再说清楚点"}');
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi, run: async () => ({ exitCode: 0 }), translate: run
+  });
+  await service.select('codex');
+  await service.translateInstruction('对', [
+    { role: 'user', text: '做个效果' },
+    { role: 'assistant', text: '你想要字幕还是淡入？' }
+  ]);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /做个效果/);
+  assert.match(calls[0].args[1], /你想要字幕还是淡入？/);
 });
 
 test('reports a killed CLI translation as a timeout', async () => {
@@ -182,7 +201,7 @@ test('reports a killed CLI translation as a timeout', async () => {
   );
 });
 
-for (const output of ['not json', '[]', '{"capability":"trim@1"}', '{"capability":123}']) {
+for (const output of ['not json', '[]', '{"kind":"instruction","capability":"trim@1"}', '{"kind":"instruction","capability":123}']) {
   test(`rejects unsupported instruction output: ${output}`, async () => {
     const fsApi = fakeFs(['/bin/codex']);
     const { run } = fakeTranslator(output);
@@ -197,3 +216,21 @@ for (const output of ['not json', '[]', '{"capability":"trim@1"}', '{"capability
     );
   });
 }
+
+test('translate ignores stdin so interactive CLI prompts do not hang', async () => {
+  const calls = [];
+  const execFile = (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(null, '{"kind":"instruction","capability":"fade.in@1","params":{}}', '');
+  };
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/claude']),
+    run: async () => ({ exitCode: 0 }),
+    execFile
+  });
+  await service.select('claude');
+  await service.translateInstruction('加淡入');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
+});

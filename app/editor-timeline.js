@@ -108,6 +108,8 @@ var editorEl = document.querySelector('.input-editor');
 var activeProjectId = getActiveProjectId();
 var conversationRecords = getProjectConversation(activeProjectId);
 var requestInFlight = false;
+var pendingClarifyRecord = null;
+var pendingClarifyCard = null;
 function setSubmitState(){generateBtn.disabled=requestInFlight||editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
@@ -125,6 +127,7 @@ var requestStatusMeta = {
   waiting: { label: '等待', icon: '·' },
   success: { label: '成功', icon: '✓' },
   failed: { label: '失败', icon: '×' },
+  clarifying: { label: '待补充', icon: '？' },
   not_run: { label: '未执行', icon: '—' }
 };
 function formatRequestTime(timestamp) {
@@ -136,6 +139,9 @@ function escapeConversationText(text) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function requestCardTitle(record) {
+  if (record.instructionStatus === 'clarifying') {
+    return '等待补充信息';
+  }
   if (record.instructionStatus === 'converting'
       || record.timelineStatus === 'applying' || record.timelineStatus === 'generating') {
     return '正在处理这次编辑';
@@ -171,6 +177,9 @@ function renderRequestStatusCard(card, record) {
   var secondLabel = isSubtitle ? '生成字幕'
     : (record.subtitleRequest === null ? '执行编辑' : '应用到时间轴');
   var secondTestId = isSubtitle ? 'subtitle-status' : 'timeline-status';
+  var clarify = record.clarifyMessage
+    ? '<div class="request-clarify" data-testid="request-clarify">'
+      + escapeConversationText(record.clarifyMessage) + '</div>' : '';
   var error = record.error
     ? '<div class="request-error">' + escapeConversationText(record.error) + '</div>' : '';
   var canUndo = isSubtitle && window.subtitleController
@@ -191,7 +200,7 @@ function renderRequestStatusCard(card, record) {
     + statusRowHTML(secondTestId, secondLabel, record.timelineStatus)
     + (isSubtitle && record.timelineStatus === 'success'
       ? '<div class="request-result">已生成 ' + Number(record.resultCount || 0) + ' 条字幕</div>' : '')
-    + error + undo + '</div>';
+    + clarify + error + undo + '</div>';
 }
 function appendRequestStatusCard(record) {
   if (chatEmpty) chatEmpty.style.display = 'none';
@@ -210,9 +219,18 @@ function appendRequestStatusCard(record) {
   chatArea.scrollTop = chatArea.scrollHeight;
   return card;
 }
+function appendFollowupMessage(card, text) {
+  var message = document.createElement('div');
+  message.className = 'request-user-message';
+  message.dataset.testid = 'request-user-message';
+  message.textContent = text;
+  chatArea.insertBefore(message, card);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
 function createConversationRequest(text) {
   return { id: createLocalId(), text: text, submittedAt: Date.now(),
-    instructionStatus: 'converting', timelineStatus: 'waiting', subtitleRequest: null };
+    instructionStatus: 'converting', timelineStatus: 'waiting', subtitleRequest: null,
+    turns: [{ role: 'user', text: text }], clarifyMessage: '' };
 }
 function isFinalRequest(record) {
   if (record.instructionStatus === 'failed') return true;
@@ -321,7 +339,7 @@ async function runSubtitleInstruction(record, card) {
 }
 
 async function translateAndApply(text, record, card) {
-  var translated = await window.srtAPI.translateInstruction(text);
+  var translated = await window.srtAPI.translateInstruction(text, record.turns);
   if (!translated.ok) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
@@ -329,16 +347,26 @@ async function translateAndApply(text, record, card) {
     });
     return;
   }
-  var instruction = translated.instruction;
-  if (!instruction || instruction.capability === null) {
+  var turn = translated.instruction;
+  if (!turn) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
       error: '暂不支持这个编辑操作，试试「生成字幕」或「淡入」。'
     });
     return;
   }
+  if (turn.kind === 'clarify') {
+    record.turns.push({ role: 'assistant', text: turn.message });
+    record.clarifyMessage = turn.message;
+    updateRequestStatus(record, card, {
+      instructionStatus: 'clarifying', timelineStatus: 'waiting', error: ''
+    });
+    pendingClarifyRecord = record;
+    pendingClarifyCard = card;
+    return;
+  }
   record.instructionStatus = 'success';
-  if (instruction.capability === 'subtitle.generate@1') {
+  if (turn.capability === 'subtitle.generate@1') {
     await runSubtitleInstruction(record, card);
     return;
   }
@@ -346,7 +374,7 @@ async function translateAndApply(text, record, card) {
   updateRequestStatus(record, card, {
     instructionStatus: 'success', timelineStatus: 'applying', error: ''
   });
-  var applied = applyInstruction(instruction);
+  var applied = applyInstruction(turn);
   updateRequestStatus(record, card, applied
     ? { timelineStatus: 'success', error: '' }
     : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });
@@ -374,7 +402,8 @@ hydrateConversationHistory();
 generateBtn.addEventListener('click', async function() {
   var text = editorEl.textContent.trim();
   if (!text || generateBtn.disabled) return;
-  if (window.subtitleController && !await subtitleController.prepareForNextRequest()) {
+  var isClarifyFollowup = Boolean(pendingClarifyRecord && pendingClarifyCard);
+  if (!isClarifyFollowup && window.subtitleController && !await subtitleController.prepareForNextRequest()) {
     setSubmitState();
     return;
   }
@@ -382,13 +411,27 @@ generateBtn.addEventListener('click', async function() {
   setSubmitState();
 
   if (isCommand(text)) {
+    if (isClarifyFollowup) {
+      pendingClarifyRecord = null;
+      pendingClarifyCard = null;
+    }
     addMsg('user', text);
     executeCommand(text);
     return;
   }
 
-  var record = createConversationRequest(text);
-  var card = appendRequestStatusCard(record);
+  var record, card;
+  if (isClarifyFollowup) {
+    record = pendingClarifyRecord;
+    card = pendingClarifyCard;
+    pendingClarifyRecord = null;
+    pendingClarifyCard = null;
+    record.turns.push({ role: 'user', text: text });
+    appendFollowupMessage(card, text);
+  } else {
+    record = createConversationRequest(text);
+    card = appendRequestStatusCard(record);
+  }
   requestInFlight = true;
   setSubmitState();
   try {

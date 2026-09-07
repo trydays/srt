@@ -47,4 +47,22 @@ test.describe('local CLI effect instructions', () => {
       await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(0);
     });
   });
+
+  test.describe('multi-turn clarify', () => {
+    test.use({ localCliEffectResult: 'clarify-once' });
+
+    test('asks a follow-up then converges after the reply', async ({ window }) => {
+      await openEditorWithCodex(window);
+      await window.locator('.input-editor').fill('做个效果');
+      await window.locator('#generateBtn').click();
+      await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'clarifying');
+      await expect(window.getByTestId('request-clarify')).toHaveText(/你想要字幕还是淡入/);
+      await window.locator('.input-editor').fill('要淡入');
+      await window.locator('#generateBtn').click();
+      await expect(window.getByTestId('instruction-status')).toHaveAttribute('data-state', 'success');
+      await expect(window.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
+      await expect(window.getByTestId('timeline-effect-fade-in')).toHaveCount(1);
+      await expect(window.getByTestId('request-user-message')).toHaveCount(2);
+    });
+  });
 });

@@ -64,14 +64,20 @@ const localCliService = {
     selectedCliId = id;
     return { available: localCliStates, selectedCliId };
   },
-  async translateInstruction(text) {
+  async translateInstruction(text, history) {
     if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
       const error = new Error('Invalid local CLI instruction output');
       error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
       throw error;
     }
-    if (/字幕/.test(text)) return { capability: 'subtitle.generate@1', params: {} };
-    return { capability: 'fade.in@1', params: {} };
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'clarify-once') {
+      if (!Array.isArray(history) || history.length <= 1) {
+        return { kind: 'clarify', message: '你想要字幕还是淡入？' };
+      }
+      return { kind: 'instruction', capability: 'fade.in@1', params: {} };
+    }
+    if (/字幕/.test(text)) return { kind: 'instruction', capability: 'subtitle.generate@1', params: {} };
+    return { kind: 'instruction', capability: 'fade.in@1', params: {} };
   }
 };
 const subtitleService = {

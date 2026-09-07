@@ -8,7 +8,8 @@ contextBridge.exposeInMainWorld('srtAPI', {
   getLocalCliState: () => ipcRenderer.invoke('local-cli:get-state'),
   rescanLocalCli: () => ipcRenderer.invoke('local-cli:rescan'),
   selectLocalCli: (id) => ipcRenderer.invoke('local-cli:select', id),
-  translateInstruction: (text) => ipcRenderer.invoke('local-cli:translate-instruction', text),
+  translateInstruction: (text, history) =>
+    ipcRenderer.invoke('local-cli:translate-instruction', { text, history }),
   generateSubtitles: (request) => ipcRenderer.invoke('subtitles:generate', request),
   resolveVideoSource: (videoPath) => ipcRenderer.invoke('video:resolve-source', videoPath),
   startVideoExport: (request) => ipcRenderer.invoke('video-export:start', request),
