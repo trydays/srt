@@ -268,13 +268,9 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   ipcMain.handle('local-cli:get-state', () => activeLocalCliService.getState());
   ipcMain.handle('local-cli:rescan', () => activeLocalCliService.rescan());
   ipcMain.handle('local-cli:select', (_event, id) => activeLocalCliService.select(id));
-  ipcMain.handle('local-cli:translate-effect', (_event, text) => activeLocalCliService.translateEffect(text));
-  ipcMain.handle('local-cli:translate-subtitle-or-fade-in', async (_event, text) => {
+  ipcMain.handle('local-cli:translate-instruction', async (_event, text) => {
     try {
-      return {
-        ok: true,
-        instruction: await activeLocalCliService.translateSubtitleOrFadeIn(text)
-      };
+      return { ok: true, instruction: await activeLocalCliService.translateInstruction(text) };
     } catch (error) {
       return publicFailure(error, 'LOCAL_CLI_TRANSLATION_FAILED');
     }
