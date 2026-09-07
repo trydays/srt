@@ -236,6 +236,23 @@ subtitleDocumentApply.addEventListener('click', applyCandidate);
 videoEl.addEventListener('timeupdate', renderCurrentSubtitle);
 videoEl.addEventListener('loadedmetadata', renderAllSubtitles);
 window.subtitleController = {
+  afterProjectEdit: function(beforeDocument, afterDocument) {
+    var before = beforeDocument.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
+    var after = afterDocument.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
+    if (!before || !after || JSON.stringify(before) !== JSON.stringify(after)) return;
+    // Only carry a draft across the exact unchanged subtitle version we just committed from.
+    try {
+      var draft = subtitleDraftStore.get(getActiveProjectId(), after.id);
+      if (draft && draft.baseRevision === beforeDocument.revision) {
+        subtitleDraftStore.rebase(getActiveProjectId(), after.id, afterDocument.revision, after.payload.segments);
+        subtitleDraftWarning = '';
+      }
+    } catch (_) { subtitleDraftWarning = '编辑已应用；字幕草稿版本同步失败，请重新保存'; }
+    if (candidateEditId === after.id && candidateRevision === beforeDocument.revision) {
+      candidateRevision = afterDocument.revision;
+    }
+    renderSubtitleDocument(); renderAllSubtitles();
+  },
   afterUndo: function(result) {
     var edit = result.document.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
     if (edit) {

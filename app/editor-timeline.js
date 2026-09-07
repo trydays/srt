@@ -296,6 +296,17 @@ function transactionResult(document, transactionId) {
     resultItemCount: items.length, resultSummary: items.map(function(item) { return item.label + ' · ' + item.summary; }).join('；') };
 }
 
+function reconcileTransactionRecords(document) {
+  conversationRecords.forEach(function(record) {
+    var applied = document.edits.find(function(edit) { return edit.enabled && edit.transactionId === (record.transactionId || record.id); });
+    if (!applied) return;
+    record.transactionId = applied.transactionId;
+    record.instructionStatus = 'success'; record.timelineStatus = 'success';
+    Object.assign(record, transactionResult(document, applied.transactionId));
+    record.error = ''; record.clarifyMessage = ''; record.subtitleUndone = false;
+  });
+}
+
 async function translateAndApply(text, record, card) {
   record.awaitingMetadata = !projectStateReady || window.projectVideoLoading;
   renderRequestStatusCard(card, record);
@@ -344,10 +355,12 @@ async function translateAndApply(text, record, card) {
   record.timelineStatus = 'success';
   updateRequestStatus(record, card, Object.assign({ timelineStatus: 'success', error: '' },
     transactionResult(applied.document, applied.transactionId)));
-  window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
-  if (record.subtitleRequest && window.subtitleController) {
-    subtitleController.render(); subtitleController.openAfter(card);
+  if (window.subtitleController) {
+    if (record.subtitleRequest) {
+      subtitleController.render(); subtitleController.openAfter(card);
+    } else subtitleController.afterProjectEdit(loaded.document, applied.document);
   }
+  window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
   refreshRequestCards();
 }
 
@@ -376,14 +389,7 @@ window.addEventListener('project-edit-state-changed', function() {
 window.projectEditingReady.then(function() {
   projectStateReady = true;
   var document = window.projectEditing.load(activeProjectId).document;
-  conversationRecords.forEach(function(record) {
-    var applied = document.edits.find(function(edit) { return edit.transactionId === (record.transactionId || record.id); });
-    if (!applied) return;
-    record.transactionId = applied.transactionId;
-    record.instructionStatus = 'success'; record.timelineStatus = 'success';
-    Object.assign(record, transactionResult(document, applied.transactionId));
-    record.error = ''; record.clarifyMessage = ''; record.subtitleUndone = false;
-  });
+  reconcileTransactionRecords(document);
   document.edits.forEach(function(edit) {
     var hasRecord = conversationRecords.some(function(record) { return (record.transactionId || record.id) === edit.transactionId; });
     if (hasRecord || !window.projectEditing.canUndo({ projectId: activeProjectId, transactionId: edit.transactionId })) return;
@@ -465,12 +471,9 @@ chatArea.addEventListener('click', function(event) {
     var undone = window.projectEditing.undo({ projectId: activeProjectId, expectedRevision: loaded.document.revision,
       transactionId: undoneRecord.transactionId || undoneRecord.id });
     subtitleController.afterUndo(undone);
-    window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
+    reconcileTransactionRecords(undone.document);
     updateRequestStatus(undoneRecord, requestCard, { subtitleUndone: true });
-    for (var i = 0; i < conversationRecords.length; i++) {
-      var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
-      if (card) renderRequestStatusCard(card, conversationRecords[i]);
-    }
+    window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
     if (subtitleController.count()) {
       var latestSubtitleCard = latestValidSubtitleCard();
       if (latestSubtitleCard) subtitleController.openAfter(latestSubtitleCard);

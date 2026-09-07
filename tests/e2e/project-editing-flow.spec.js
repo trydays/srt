@@ -127,6 +127,67 @@ async function seek(window, seconds, event = 'timeupdate') {
 test.describe('graph-derived color transactions', () => {
   test.use({ localCliMode: 'two', localCliEffectResult: 'color-transactions' });
 
+  for (const hasDraft of [false, true]) {
+    test(`keeps subtitles editable after a color-only transaction with saved draft=${hasDraft}`, async ({ window }, testInfo) => {
+      await openEditor(window, testInfo);
+      await metadata(window);
+      await submit(window, '生成字幕');
+      const field = window.getByTestId('subtitle-document-segment').first();
+      await field.fill('调色前已应用的字幕');
+      await window.getByTestId('subtitle-document-apply').click();
+      if (hasDraft) {
+        await field.fill('调色前保存的草稿');
+        await window.getByTestId('subtitle-document-save').click();
+      }
+      const before = await window.evaluate(() => projectEditing.load(getActiveProjectId()).document);
+      await submit(window, '仅调整颜色');
+      const after = await window.evaluate(() => projectEditing.load(getActiveProjectId()).document);
+      expect(after.revision).toBe(before.revision + 1);
+      expect(after.edits.find(edit => edit.type === 'subtitle.track@1'))
+        .toEqual(before.edits.find(edit => edit.type === 'subtitle.track@1'));
+      if (hasDraft) {
+        const draft = await window.evaluate(() => {
+          const snapshot = projectEditing.load(getActiveProjectId());
+          const edit = snapshot.document.edits.find(item => item.type === 'subtitle.track@1');
+          return subtitleDraftStore.get(getActiveProjectId(), edit.id);
+        });
+        expect(draft.baseRevision).toBe(after.revision);
+      }
+      await window.getByTestId('subtitle-document-toggle').click();
+      await expect(field).toHaveText(hasDraft ? '调色前保存的草稿' : '调色前已应用的字幕');
+      await field.fill('调色后继续修改的字幕');
+      await window.getByTestId('subtitle-document-save').click();
+      await expect(window.getByTestId('subtitle-document-status')).toHaveText('草稿已保存 · 尚未应用');
+      await window.getByTestId('subtitle-document-apply').click();
+      await expect(window.getByTestId('subtitle-block').first()).toHaveText('调色后继续修改的字幕');
+      await expect(window.getByTestId('subtitle-document-status')).toHaveText('所有修改已应用');
+    });
+  }
+
+  test('restores the earlier mixed transaction card and subtitle editor after reload then undo', async ({ window }, testInfo) => {
+    await openEditor(window, testInfo);
+    await metadata(window);
+    await submit(window, '第一次调色并生成字幕');
+    await window.getByTestId('subtitle-document-segment').first().fill('事务 A 的字幕');
+    await window.getByTestId('subtitle-document-apply').click();
+    const original = await window.evaluate(() => projectEditing.load(getActiveProjectId()).document);
+    await submit(window, '第二次调色并生成字幕');
+    await window.reload();
+    await metadata(window);
+    const cardA = window.getByTestId('request-status-card').first();
+    const cardB = window.getByTestId('request-status-card').last();
+    await expect(cardA.getByTestId('subtitle-status')).toHaveCount(0);
+    await cardB.getByTestId('request-status-summary').click();
+    await cardB.getByRole('button', { name: '撤销本次编辑', exact: true }).click();
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.edits)).toEqual(original.edits);
+    await expect(cardA.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await expect(cardA.getByTestId('request-status-summary')).toContainText('字幕');
+    await expect(window.getByTestId('subtitle-document-surface')).toBeVisible();
+    await expect(window.getByTestId('subtitle-document-segment').first()).toHaveText('事务 A 的字幕');
+    expect(await window.locator('[data-subtitle-document]').evaluate(el => el.previousElementSibling.dataset.requestId))
+      .toBe(await cardA.getAttribute('data-request-id'));
+  });
+
   test('projects ranged color into preview and timeline across reload, context and undo', async ({ window, readScenarioState }, testInfo) => {
     await openEditor(window, testInfo);
     await metadata(window);
