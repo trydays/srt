@@ -1,4 +1,4 @@
-/* === editor-timeline.js — 三天remotion 时间轴 + 聊天 + AI 翻译 === */
+/* === editor-timeline.js — 三天remotion 时间轴 + 聊天 === */
 
 /* ── Timeline ── */
 var track=document.getElementById('tlTrack'),playhead=document.getElementById('tlPlayhead'),tlCur=document.getElementById('tlCurrent'),tlTotal=document.getElementById('tlTotal'),dragging=false;
@@ -260,91 +260,6 @@ function executeCommand(text) {
       addMsg('ai','❌ 命令失败 (exit code '+r.exitCode+')\n\n'+r.stderr+'\n\n💡 提示：请检查命令是否正确，或确认工具已安装。');
     }
   });
-}
-
-function executeEffect(translated) {
-  addMsg('ai','💡 匹配到效果：'+translated.desc+'\n\n```\n'+translated.cmd+'\n```\n\n🔄 执行中…');
-  var statusMsg = chatArea.lastElementChild;
-  cliExec(translated.cmd, 30000, function(r){
-    statusMsg.remove();
-    if(r.ok){
-      addMsg('ai','✅ 效果已应用\n\n'+r.stdout+'\n\n💡 提示：请用上方播放器预览输出文件。');
-    } else {
-      addMsg('ai','❌ 执行失败 (exit code '+r.exitCode+')\n\n'+r.stderr+'\n\n💡 请检查 FFmpeg 是否已安装，或复制上方命令手动执行。');
-    }
-  });
-}
-
-function showAIHints(text) {
-  var hints = ['淡入','淡出','霓虹','光晕','模糊','锐化','黑白','加速','减速','翻转','裁剪','缩放','静音','复古','暖色','冷色'];
-  addMsg('ai','收到：「'+text+'」\n\n未识别到效果关键词。当前支持的效果：\n\n🎬 ' + hints.slice(0,8).join(' · ') + '\n🎨 ' + hints.slice(8).join(' · ') + '\n\n💡 试试效果关键词，或配置 AI 获得任意效果翻译。\n也可以直接输入 FFmpeg 命令。');
-}
-
-function executeElectronAI(text) {
-  addMsg('ai','正在通过 AI 分析效果描述...');
-  var aiStatusMsg = chatArea.lastElementChild;
-  window.electronAPI.aiTranslate(text).then(function(r) {
-    aiStatusMsg.remove();
-    if (r.ok) {
-      var label = r.source === 'ollama' ? '🦙 Ollama' : '🤖 AI';
-      addMsg('ai',label+' 翻译：`'+r.cmd+'`\n\n🔄 执行中...');
-      var execMsg = chatArea.lastElementChild;
-      cliExec(r.cmd, 300000, function(r2){
-        execMsg.remove();
-        if(r2.ok) addMsg('ai','✅ 执行成功\n\n'+r2.stdout);
-        else addMsg('ai','❌ 执行失败\n\n'+r2.stderr+'\n\n💡 命令：`'+r.cmd+'`');
-      });
-    } else if (r.needConfig) {
-      addMsg('ai','❌ 未配置 AI\n\n💡 零配置方案：\n• 安装 Ollama 获得免费本地 AI\n• 让 Agent 运行 npx srt-setup\n• 或在环境检测页手动填写 Key');
-    } else {
-      addMsg('ai','❌ 翻译失败：'+r.error+'\n\n💡 试试效果关键词或直接输入 FFmpeg 命令。');
-    }
-  }).catch(function(){
-    aiStatusMsg.remove();
-    addMsg('ai','❌ AI 请求失败\n\n💡 试试效果关键词或检查网络。\n也可以直接输入 FFmpeg 命令。');
-  });
-}
-
-function executeFetchAI(text, aiCfg) {
-  addMsg('ai','正在通过 AI 分析效果描述...');
-  var fetchStatusMsg = chatArea.lastElementChild;
-  var ep = aiCfg.provider === 'deepseek' ? 'https://api.deepseek.com/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-  var model = aiCfg.provider === 'deepseek' ? 'deepseek-chat' : 'gpt-3.5-turbo';
-  var prompt = '将以下自然语言翻译为单个 ffmpeg 命令（只输出完整命令，不要解释和markdown代码块，直接以 ffmpeg 开头）：' + text;
-  fetch(ep, { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+aiCfg.key}, body:JSON.stringify({model:model, messages:[{role:'user',content:prompt}], max_tokens:300, temperature:0}) })
-    .then(function(r){ if(!r.ok){ return r.json().then(function(d){ throw new Error((d.error&&d.error.message)||'HTTP '+r.status); }); } return r.json(); })
-    .then(function(d){
-      fetchStatusMsg.remove();
-      if (d.choices && d.choices[0]) {
-        var aiCmd = d.choices[0].message.content.trim();
-        var m = aiCmd.match(/(ffmpeg\s+[\s\S]+)/i); if (m) aiCmd = m[1].trim();
-        if (aiCmd.indexOf('ffmpeg') === 0) {
-          addMsg('ai','🤖 AI 翻译：`'+aiCmd+'`\n\n🔄 执行中...');
-          var fetchExecMsg = chatArea.lastElementChild;
-          cliExec(aiCmd, 300000, function(r2){
-            fetchExecMsg.remove();
-            if(r2.ok) addMsg('ai','✅ 执行成功\n\n'+r2.stdout);
-            else addMsg('ai','❌ 执行失败\n\n'+r2.stderr+'\n\n💡 命令：`'+aiCmd+'`');
-          });
-          return;
-        }
-      }
-      addMsg('ai','❌ AI 未能生成有效命令\n\n💡 试试效果关键词：淡入、霓虹、模糊、加速...');
-    })
-    .catch(function(e){
-      fetchStatusMsg.remove();
-      addMsg('ai','❌ AI 请求失败\n\n💡 试试效果关键词或检查网络和 API Key。\n也可以直接输入 FFmpeg 命令。');
-    });
-}
-
-function electronAIAvail() {
-  return !!(window.electronAPI && window.electronAPI.aiTranslate);
-}
-
-function getAIConfig() {
-  var cfg = null;
-  try { cfg = JSON.parse(localStorage.getItem(STORAGE_KEYS.AI_CONFIG)); } catch(_){}
-  return cfg && cfg.key ? cfg : null;
 }
 
 function subtitleErrorMessage(code) {
