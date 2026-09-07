@@ -81,12 +81,22 @@
       var current = entry(readMap(), input.projectId); check(current, input.expectedRevision);
       if (typeof input.requestId !== 'string' || !input.requestId.trim()) throw error('EDIT_INVALID_TRANSACTION');
       var normalized = registry.normalizeRecipe(input.recipe, facts(current.document));
-      var step = normalized.steps[0], registration = registry.get(step.capability);
       var context = typeof options.executionContext === 'function' ? options.executionContext(input.projectId) : options.executionContext;
-      var prepared = await registration.prepare(step, context);
-      var lowered = registration.toEdit(prepared, step, { idFactory: idFactory, duration: current.document.timeline.duration });
+      var prepared = [];
+      for (var i = 0; i < normalized.steps.length; i++) {
+        var step = normalized.steps[i], registration = registry.get(step.capability);
+        prepared.push({ step: step, registration: registration, value: await registration.prepare(step, context) });
+      }
       var document = clone(current.document);
-      document.edits = [{ id: idFactory('edit'), transactionId: input.requestId, type: lowered.type, target: clone(step.target), range: clone(lowered.range), payload: clone(lowered.payload), order: 0, enabled: true }];
+      var order = document.edits.reduce(function(next, edit) { return Math.max(next, edit.order + 1); }, 0);
+      prepared.forEach(function(item) {
+        var lowered = item.registration.toEdit(item.value, item.step, { idFactory: idFactory, duration: document.timeline.duration });
+        if (lowered.type !== item.registration.editType) throw error('EDIT_INVALID_TYPE');
+        if (item.registration.editMode === 'replaceByType') {
+          document.edits = document.edits.filter(function(edit) { return edit.type !== item.registration.editType; });
+        }
+        document.edits.push({ id: idFactory('edit'), transactionId: input.requestId, type: lowered.type, target: clone(item.step.target), range: clone(lowered.range), payload: clone(lowered.payload), order: order++, enabled: true });
+      });
       document.revision++;
       return commit(input.projectId, input.expectedRevision, document, [{ transactionId: input.requestId, afterRevision: document.revision, edits: clone(current.document.edits) }], input.requestId);
     }
@@ -110,8 +120,9 @@
     function timelineItems(projectId) { return load(projectId).document.edits.filter(function(edit) { return edit.enabled; }).map(function(edit) { return clone(registry.forEditType(edit.type).toTimeline(edit)); }); }
     function aiContext(projectId) {
       var document = load(projectId).document, active = document.edits.filter(function(edit) { return edit.enabled; });
-      var segments = active.length ? active[0].payload.segments : [];
-      return { revision: document.revision, video: { durationSeconds: document.timeline.duration, width: document.timeline.canvas.width, height: document.timeline.canvas.height }, operations: active.map(function(edit) { return { capability: registry.forEditType(edit.type).definition.id, params: {} }; }), subtitles: segments.slice(0, 500).map(function(segment) { return { id: segment.id, start: segment.start, end: segment.end, text: segment.text.slice(0, 80) }; }), subtitleTotal: segments.length, edits: document.edits.map(function(edit) { return { id: edit.id, type: edit.type, range: clone(edit.range), order: edit.order, enabled: edit.enabled }; }) };
+      var subtitle = active.find(function(edit) { return edit.type === 'subtitle.track@1'; });
+      var segments = subtitle ? subtitle.payload.segments : [];
+      return { revision: document.revision, video: { durationSeconds: document.timeline.duration, width: document.timeline.canvas.width, height: document.timeline.canvas.height }, operations: active.map(function(edit) { return { capability: registry.forEditType(edit.type).definition.id, params: clone(edit.payload), range: clone(edit.range) }; }), subtitles: segments.slice(0, 500).map(function(segment) { return { id: segment.id, start: segment.start, end: segment.end, text: segment.text.slice(0, 80) }; }), subtitleTotal: segments.length, edits: document.edits.map(function(edit) { return { id: edit.id, type: edit.type, range: clone(edit.range), order: edit.order, enabled: edit.enabled }; }) };
     }
     return { initializeProject: initializeProject, load: load, applyRecipe: applyRecipe, replaceEdit: replaceEdit, canUndo: canUndo, undo: undo, timelineItems: timelineItems, aiContext: aiContext };
   }

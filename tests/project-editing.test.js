@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createProjectEditing } = require('../src/project-editing');
 const { SUBTITLE_STYLE } = require('../src/render-recipe');
+const { createCapabilityRegistry, createSubtitleRegistration, createColorRegistration } = require('../src/edit-capabilities');
+const { createRenderGraphCompiler } = require('../src/render-graph');
 const facts = { duration: 8, canvas: { width: 1280, height: 720 }, source: { id: 'main-video', assetId: 'asset-1' } };
 const recipe = { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
 function fixture(extra) {
@@ -66,3 +68,83 @@ test('rejects corrupt existing store and exposes bounded path-free AI and timeli
   assert.throws(()=>createProjectEditing({storage:{getItem:()=>'{bad',setItem:()=>assert.fail('write')}}).initializeProject({projectId:'p1',mediaFacts:facts}),{code:'EDIT_STORAGE_CORRUPT'});
   const f=fixture();f.init();await f.generate('r');const context=f.editing.aiContext('p1');assert.equal(context.video.durationSeconds,8);assert.equal(context.subtitleTotal,1);assert.equal(context.edits.length,1);assert.equal(f.editing.timelineItems('p1')[0].editId,context.edits[0].id);assert.equal(JSON.stringify(context).includes('/private'),false);
 });
+
+function colorStep(start = 2, end = 5) {
+  return { capability: 'video.color.adjust@1', params: { temperature: 0.4 }, range: { start, end } };
+}
+function applySteps(f, steps, requestId, expectedRevision = 0) {
+  return f.editing.applyRecipe({ projectId: 'p1', recipe: { kind: 'instruction', steps }, requestId, expectedRevision });
+}
+test('appends color ranges and projects normalized payloads without runtime paths', async () => {
+  const f = fixture(); f.init();
+  const first = await applySteps(f, [colorStep()], 'request-1');
+  assert.equal(first.document.edits.filter(e => e.type === 'video.color.adjustment@1').length, 1);
+  assert.deepEqual(first.document.edits[0].range, { start: 2, end: 5 });
+  const second = await applySteps(f, [colorStep(5, 8), recipe.steps[0]], 'request-2', 1);
+  assert.deepEqual(second.document.edits[0], first.document.edits[0]);
+  assert.equal(second.document.edits.length, 3);
+  const context = f.editing.aiContext('p1');
+  assert.deepEqual(context.operations, second.document.edits.map(edit => ({
+    capability: edit.type === 'subtitle.track@1' ? 'subtitle.generate@1' : 'video.color.adjust@1',
+    params: edit.payload, range: edit.range
+  })));
+  assert.equal(context.subtitleTotal, 1);
+  assert.equal(context.subtitles[0].text, 'hello');
+  assert.equal(JSON.stringify(context).includes('/private'), false);
+  context.operations[0].params.temperature = -1;
+  assert.equal(f.editing.aiContext('p1').operations[0].params.temperature, 0.4);
+  assert.deepEqual(f.editing.timelineItems('p1').map(item => item.lane), ['video-effect', 'video-effect', 'subtitle']);
+});
+test('multi-step replacement shares one revision, write, inverse and candidate compilation', async () => {
+  const compiled = [], compiler = createRenderGraphCompiler();
+  const f = fixture({ graphCompiler: { compile(doc) { compiled.push(structuredClone(doc)); return compiler.compile(doc); } } });
+  const before = f.init(), writes = f.writes(); compiled.length = 0;
+  const result = await applySteps(f, [recipe.steps[0], colorStep(), recipe.steps[0]], 'request-2');
+  assert.deepEqual(new Set(result.document.edits.map(e => e.transactionId)), new Set(['request-2']));
+  assert.equal(result.document.revision, before.document.revision + 1);
+  assert.equal(result.document.edits.length, 2);
+  assert.equal(result.document.edits.filter(e => e.type === 'subtitle.track@1').length, 1);
+  assert.equal(new Set(result.document.edits.map(e => e.id)).size, 2);
+  assert.deepEqual(result.document.edits.map(e => e.order), [1, 2]);
+  assert.equal(f.writes(), writes + 1);
+  assert.equal(compiled.filter(doc => doc.revision === result.document.revision).length, 1);
+  assert.equal(JSON.parse(f.raw()).p1.undoStack.length, 1);
+  const undone = f.editing.undo({ projectId: 'p1', expectedRevision: 1, transactionId: 'request-2' });
+  assert.deepEqual(undone.document.edits, before.document.edits);
+});
+test('whole-request undo restores existing color and subtitle edits exactly', async () => {
+  const f = fixture(); f.init();
+  const before = await applySteps(f, [colorStep(), recipe.steps[0]], 'before');
+  const result = await applySteps(f, [recipe.steps[0], colorStep(0, 1)], 'after', 1);
+  assert.equal(result.document.edits.length, 3);
+  assert.ok(result.document.edits[1].order > Math.max(...before.document.edits.map(e => e.order)));
+  const undone = f.editing.undo({ projectId: 'p1', expectedRevision: 2, transactionId: 'after' });
+  assert.deepEqual(undone.document.edits, before.document.edits);
+});
+test('prepares every step before lowering or accessing storage again', async () => {
+  const subtitle = createSubtitleRegistration(), color = createColorRegistration(), events = [];
+  for (const [name, registration] of [['subtitle', subtitle], ['color', color]]) {
+    const prepare = registration.prepare, lower = registration.toEdit;
+    registration.prepare = async (...args) => { events.push('prepare ' + name); return prepare(...args); };
+    registration.toEdit = (...args) => { events.push('lower ' + name); return lower(...args); };
+  }
+  const f = fixture({ capabilityRegistry: createCapabilityRegistry([subtitle, color]) }); f.init();
+  const read = f.storage.getItem;
+  f.storage.getItem = (...args) => { events.push('read'); return read(...args); };
+  await applySteps(f, [recipe.steps[0], colorStep()], 'r');
+  assert.deepEqual(events.slice(0, 5), ['read', 'prepare subtitle', 'prepare color', 'lower subtitle', 'lower color']);
+});
+for (const stage of ['prepare', 'toEdit', 'toGraph']) {
+  test('failure in second-step ' + stage + ' preserves storage, revision and undo byte-for-byte', async () => {
+    const color = createColorRegistration(), original = color[stage];
+    let fail = false;
+    color[stage] = (...args) => { if (fail) throw new Error('second-step ' + stage); return original(...args); };
+    const f = fixture({ capabilityRegistry: createCapabilityRegistry([createSubtitleRegistration(), color]) });
+    f.init(); await f.generate('before');
+    const rawBeforeFailure = f.raw(), writes = f.writes(); fail = true;
+    await assert.rejects(applySteps(f, [recipe.steps[0], colorStep()], 'failed', 1), new RegExp('second-step ' + stage));
+    assert.equal(f.raw(), rawBeforeFailure);
+    assert.equal(f.writes(), writes);
+    assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
+  });
+}

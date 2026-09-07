@@ -162,6 +162,7 @@
       },
 
       toGraph: function(edit, graphContext) {
+        validateSubtitlePayload(edit.payload, graphContext.duration === undefined ? edit.range.end : graphContext.duration);
         return {
           id: 'node-' + edit.id,
           type: 'visual.subtitle@1',
@@ -243,6 +244,7 @@
       },
 
       toGraph: function(edit, graphContext) {
+        colorAdjustment.normalizeParams(edit.payload, false);
         return {
           id: 'node-' + edit.id,
           type: 'video.color@1',
