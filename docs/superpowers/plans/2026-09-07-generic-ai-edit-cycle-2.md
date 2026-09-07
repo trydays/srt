@@ -430,7 +430,7 @@ git commit -m "feat: preview and present color edit transactions"
 
 - [ ] **Step 1: Add a real FFmpeg fixture and frame probes**
 
-Generate a short constant-color MP4 with audio using the resolved test FFmpeg; export four separate Recipes, each changing exactly one non-neutral parameter. Extract RGB/statistics at times before, inside and after `[1,3)` and assert:
+Generate one short static multi-color MP4 with audio using the resolved test FFmpeg; export four separate Recipes, each changing exactly one non-neutral parameter. A multi-color source is required so the contrast assertion can measure luma spread. Extract RGB/statistics at times before, inside and after `[1,3)` and assert:
 
 - temperature `-1` makes inside-frame blue/red ratio increase;
 - brightness `0.5` increases inside-frame luma;
@@ -441,7 +441,7 @@ Generate a short constant-color MP4 with audio using the resolved test FFmpeg; e
 
 - [ ] **Step 2: Add the deterministic full UI flow**
 
-The E2E scenario must return a two-step Recipe (`video.color.adjust@1` + `subtitle.generate@1`), then verify one revision increment, two edits with one transaction ID, interval preview, reload persistence, export Recipe order, and one undo restoring the exact pre-request document.
+The E2E scenario must return a two-step Recipe (`video.color.adjust@1` + `subtitle.generate@1`), then verify one revision increment, two edits with one transaction ID, interval preview, reload persistence, export Recipe order, and one undo restoring the exact pre-request business state while the revision remains monotonic.
 
 - [ ] **Step 3: Run the complete Cycle 2 verification**
 
