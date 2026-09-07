@@ -92,3 +92,36 @@
 - 视频播放到不同时间点时画面字幕同步变化；首条文字修改为“最终复跑：字幕编辑已持久保存”后刷新仍保留；再次生成后，唯一一次撤销恢复了该修改版。
 - 复跑期间没有下载模型、没有触发安装、没有生成导出文件；结束时没有残留 CLI 或转录子进程。
 - 最终整枝审查：**未发现 Critical、Important 或 Minor，Ready to merge: Yes**。
+
+## 2026-09-07：字幕视频导出真实整链验收
+
+### 本轮目标
+
+把周期 1 的 FFmpeg 渲染与周期 2 的编辑器接入串成真实可用链路，并跑冻结回归，确认“给视频加字幕 → 导出烧录 MP4”达到最低可用。
+
+### 用户可见成果
+
+- 编辑器右上角“导出视频”入口走系统原生另存为，把已应用字幕烧进 MP4。
+- 导出期间显示真实进度、可取消，仍可播放 / seek；字幕修改未应用时会阻止导出。
+- 导出全程保护源文件与已有目标文件，不覆盖。
+
+### 实际实现
+
+- preload 暴露 `resolveVideoSource`、`startVideoExport`、`cancelVideoExport`、`onVideoExportProgress` 四个窄方法。
+- 主进程只维护一个普通 `activeExport` slot，覆盖对话框、路径处理、进度转发与失败码收口；无 Job 类、队列或任务中心。
+- 页面只维护一个 `window.isExporting`，冻结写入口；无通用锁或事件总线。
+- 渲染服务固定 MP4 / H.264 / AAC / yuv420p，用 libass 烧录白字 + 0.72 半透明黑底。
+
+### 最终验证
+
+- 冻结回归：`node --test tests/environment.test.js tests/render-recipe.test.js tests/video-export.test.js tests/main-entry.test.js` → 56 通过 / 0 失败 / 1 条件跳过。
+- 编辑器 E2E：`npx playwright test tests/e2e/video-export-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js` → 9 通过 / 0 失败（30.9s）。
+- 真实渲染（ffmpeg-full 9.0.1，`/opt/homebrew/opt/ffmpeg-full/bin`）：
+  - 横屏 640×360，H.264 + AAC，4.0s，字幕区 `YMAX=236` 证明白字已烧录。
+  - 竖屏 360×640，H.264 + AAC，中文长句烧录（`YMAX=242`），音频保留。
+  - 真实取消：返回 `cancelled`，无伪产物文件，源文件字节数不变。
+
+### 明确延期 / 限制
+
+- 真实 GUI 手动整链（导入真实视频 → 本地 CLI 识别 → Whisper 生成 → 点导出 → 外部播放器人工确认）仍需在真实窗口点验；本周期用真实 ffmpeg 渲染与自动化 E2E 分别覆盖渲染与交互，未重复人工矩阵。
+- 带显示矩阵旋转元数据的手机竖屏：官方 ffmpeg 无法生成忠实夹具（`-display_rotation` 只会物理旋转、不写矩阵），已用物理 360×640 竖屏端到端验证；该元数据路径仅由 `probeMedia` 维度计算覆盖，留待真实手机片段复验。
