@@ -163,6 +163,7 @@ git commit -m "feat: register executable color adjustment capability"
 ### Task 2: Make ProjectEditing and RenderGraph support generic atomic multi-step execution
 
 **Files:**
+- Modify: `src/edit-capabilities.js` (registration-owned persisted payload validation only)
 - Modify: `src/project-editing.js`
 - Modify: `src/render-graph.js`
 - Test: `tests/project-editing.test.js`
@@ -338,11 +339,13 @@ git commit -m "feat: export ranged color adjustments"
 **Files:**
 - Create: `app/editor-color-preview.js`
 - Modify: `app/剪辑.html`
+- Modify: `src/instruction-capabilities.js`
 - Modify: `app/editor-timeline.js`
 - Modify: `app/editor-subtitles.js`
 - Modify: `app/editor-export.js`
 - Test: `tests/e2e/project-editing-flow.spec.js`
 - Test: `tests/e2e/video-export-flow.spec.js`
+- Test: `tests/instruction-capabilities.test.js`
 
 **Interfaces:**
 - Consumes: `projectEditing.load(projectId).graph`, registration `preview(graph, time)`, and generic transaction result.
@@ -387,11 +390,15 @@ Marker 使用 `left=start/duration` 与 `width=(end-start)/duration`。`translat
 
 字幕生成状态仍可在包含字幕的事务中显示“生成字幕”，但判断必须使用 `steps.some(...)`，不能影响颜色步骤执行或隐藏第二个 timeline item。
 
-- [ ] **Step 5: Remove subtitle-index assumptions**
+- [ ] **Step 5: Serialize applied operations into the next AI prompt**
+
+`projectContextLines()` 读取 `context.operations`，逐条输出 capability、range 与其 capability schema 中已声明的参数；字幕 payload 的 segments/style 不得在 operations 中展开，字幕正文仍只走现有最多 500 段、每段 80 字的摘要。这样下一次推导能知道已经做过哪些调色，而不会注入路径或无界内容。
+
+- [ ] **Step 6: Remove subtitle-index assumptions**
 
 `editor-subtitles.js` 的撤销后恢复必须通过 `type === 'subtitle.track@1'` 查找字幕 edit；没有字幕时隐藏字幕文档，但不得报错。导出继续读取当前 graph，不新增颜色状态副本。
 
-- [ ] **Step 6: Run focused E2E and unit regression**
+- [ ] **Step 7: Run focused E2E and unit regression**
 
 Run: `npx playwright test tests/e2e/project-editing-flow.spec.js tests/e2e/video-export-flow.spec.js`
 
@@ -399,10 +406,10 @@ Run: `npm test`
 
 Expected: E2E PASS；unit PASS；时间轴、预览、项目保存和撤销指向同一 revision。
 
-- [ ] **Step 7: Commit Task 4**
+- [ ] **Step 8: Commit Task 4**
 
 ```bash
-git add app/editor-color-preview.js app/剪辑.html app/editor-timeline.js app/editor-subtitles.js app/editor-export.js tests/e2e/project-editing-flow.spec.js tests/e2e/video-export-flow.spec.js
+git add app/editor-color-preview.js app/剪辑.html src/instruction-capabilities.js app/editor-timeline.js app/editor-subtitles.js app/editor-export.js tests/instruction-capabilities.test.js tests/e2e/project-editing-flow.spec.js tests/e2e/video-export-flow.spec.js
 git commit -m "feat: preview and present color edit transactions"
 ```
 
