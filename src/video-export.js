@@ -11,6 +11,23 @@ function codedError(code) {
   return error;
 }
 
+// The recipe has already crossed the strict export validator. Only numeric
+// values enter these fixed filter templates; ASS uses a service-owned filename.
+function buildVideoFilters(recipe) {
+  const filters = [];
+  for (const step of recipe.steps) {
+    if (step.capability === 'video.color.adjust@1') {
+      const { temperature, brightness, saturation, contrast } = step.params;
+      const enable = `enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`;
+      filters.push(`colorchannelmixer=rr=${1 + 0.2 * temperature}:gg=1:bb=${1 - 0.2 * temperature}:${enable}`);
+      filters.push(`eq=brightness=${0.25 * brightness}:saturation=${saturation}:contrast=${contrast}:${enable}`);
+    } else if (step.capability === 'subtitle.burn@1') {
+      filters.push('ass=captions.ass');
+    }
+  }
+  return filters.join(',');
+}
+
 function createVideoExportService(options) {
   const getExportTools = options.getExportTools;
   const spawnImpl = options.spawnImpl || spawn;
@@ -106,13 +123,13 @@ function createVideoExportService(options) {
     return `&H${alpha}${blue}${green}${red}`.toUpperCase();
   }
 
-  function buildAss(recipe, media) {
+  function buildAss(subtitleStep, media) {
     const fontSize = media.displayHeight * SUBTITLE_STYLE.fontSize / SUBTITLE_STYLE.referenceHeight;
     const marginH = Math.round(media.displayWidth * (100 - SUBTITLE_STYLE.maxWidthPercent) / 200);
     const marginV = Math.round(media.displayHeight * SUBTITLE_STYLE.bottomPercent / 100);
     const textColor = assColor(SUBTITLE_STYLE.textColor, 1);
     const boxColor = assColor(SUBTITLE_STYLE.backgroundColor, SUBTITLE_STYLE.backgroundOpacity);
-    const dialogue = recipe.steps[0].params.segments.map((segment) => {
+    const dialogue = subtitleStep.params.segments.map((segment) => {
       const text = segment.text
         .replace(/\\/g, `\\\u2060`)
         .replace(/{/g, '\\{')
@@ -166,20 +183,25 @@ function createVideoExportService(options) {
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       const source = await probeMedia(tools.ffprobePath, sourcePath);
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
-      if (recipe.steps[0].params.segments.some((segment) => segment.start >= source.duration
-          || segment.end > source.duration + 0.001)) {
+      if (recipe.steps.some((step) => {
+        const isColor = step.capability === 'video.color.adjust@1';
+        const ranges = isColor ? [step.range] : step.params.segments;
+        return ranges.some((range) => range.start >= source.duration
+          || range.end > source.duration + (isColor ? 0 : 0.001));
+      })) {
         throw codedError('EXPORT_INVALID_MEDIA');
       }
       taskDir = await fsApi.mkdtemp(path.join(os.tmpdir(), 'srt-video-export-'));
       const assPath = path.join(taskDir, 'captions.ass');
       const stagedPath = path.join(taskDir, 'staged.mp4');
-      await fsApi.writeFile(assPath, buildAss(recipe, source), 'utf8');
+      const subtitleStep = recipe.steps.find((step) => step.capability === 'subtitle.burn@1');
+      if (subtitleStep) await fsApi.writeFile(assPath, buildAss(subtitleStep, source), 'utf8');
       current.phase = 'rendering';
       sendProgress(onProgress, { jobId: job.jobId, phase: 'rendering', percent: 0 });
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       const renderArgs = [
         '-hide_banner', '-nostdin', '-n', '-i', sourcePath,
-        '-map', '0:v:0', '-map', '0:a:0?', '-vf', 'ass=captions.ass',
+        '-map', '0:v:0', '-map', '0:a:0?', '-vf', buildVideoFilters(recipe),
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
         '-pix_fmt', 'yuv420p', '-fps_mode', 'passthrough',
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',

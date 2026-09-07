@@ -1,8 +1,11 @@
 (function(root, factory) {
-  var api = factory();
+  var api = factory(function() {
+    return typeof module === 'object' && module.exports
+      ? require('./color-adjustment') : root.SRTColorAdjustment;
+  });
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTRenderRecipe = api;
-})(typeof window === 'undefined' ? null : window, function() {
+})(typeof window === 'undefined' ? null : window, function(getColorAdjustment) {
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
@@ -32,32 +35,17 @@
     });
   }
 
-  function freezeRecipe(recipe) {
-    recipe.steps.forEach(function(step) {
-      step.params.segments.forEach(Object.freeze);
-      Object.freeze(step.params.segments);
-      Object.freeze(step.params);
-      Object.freeze(step);
+  function freezeData(value) {
+    if (!value || typeof value !== 'object') return value;
+    Object.keys(value).forEach(function(key) {
+      freezeData(value[key]);
     });
-    Object.freeze(recipe.steps);
-    return Object.freeze(recipe);
+    return Object.freeze(value);
   }
 
-  function validateRenderRecipe(recipe) {
-    if (!isPlainObject(recipe) || !hasOnlyKeys(recipe, ['steps', 'version'])
-        || recipe.version !== 1 || !Array.isArray(recipe.steps) || recipe.steps.length !== 1) {
+  function validateSubtitleStep(step) {
+    if (!hasOnlyKeys(step, ['capability', 'params'])) {
       throw codedError('EXPORT_INVALID_RECIPE');
-    }
-
-    var step = recipe.steps[0];
-    if (!isPlainObject(step) || !hasOnlyKeys(step, ['capability', 'params'])) {
-      throw codedError('EXPORT_INVALID_RECIPE');
-    }
-    if (typeof step.capability !== 'string') {
-      throw codedError('EXPORT_INVALID_RECIPE');
-    }
-    if (step.capability !== 'subtitle.burn@1') {
-      throw codedError('EXPORT_UNSUPPORTED_OPERATION');
     }
     if (!isPlainObject(step.params) || !hasOnlyKeys(step.params, ['segments'])
         || !Array.isArray(step.params.segments) || step.params.segments.length === 0) {
@@ -78,10 +66,50 @@
       return { id: segment.id, start: segment.start, end: segment.end, text: segment.text };
     });
 
-    return freezeRecipe({
-      version: 1,
-      steps: [{ capability: 'subtitle.burn@1', params: { segments: segments } }]
+    return { capability: 'subtitle.burn@1', params: { segments: segments } };
+  }
+
+  function validateColorStep(step) {
+    if (!hasOnlyKeys(step, ['capability', 'params', 'range'])
+        || !isPlainObject(step.range) || !hasOnlyKeys(step.range, ['end', 'start'])
+        || !Number.isFinite(step.range.start) || !Number.isFinite(step.range.end)
+        || step.range.start < 0 || step.range.end <= step.range.start
+        || !isPlainObject(step.params)
+        || !hasOnlyKeys(step.params, ['brightness', 'contrast', 'saturation', 'temperature'])) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    var params;
+    try {
+      params = getColorAdjustment().normalizeParams(step.params, false);
+    } catch (_) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    return {
+      capability: 'video.color.adjust@1',
+      range: { start: step.range.start, end: step.range.end },
+      params: params
+    };
+  }
+
+  function validateRenderRecipe(recipe) {
+    if (!isPlainObject(recipe) || !hasOnlyKeys(recipe, ['steps', 'version'])
+        || recipe.version !== 1 || !Array.isArray(recipe.steps) || recipe.steps.length === 0) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    var hasSubtitle = false;
+    var steps = Array.from(recipe.steps, function(step) {
+      if (!isPlainObject(step) || typeof step.capability !== 'string') {
+        throw codedError('EXPORT_INVALID_RECIPE');
+      }
+      if (step.capability !== 'video.color.adjust@1' && step.capability !== 'subtitle.burn@1') {
+        throw codedError('EXPORT_UNSUPPORTED_OPERATION');
+      }
+      if (hasSubtitle) throw codedError('EXPORT_INVALID_RECIPE');
+      if (step.capability === 'video.color.adjust@1') return validateColorStep(step);
+      hasSubtitle = true;
+      return validateSubtitleStep(step);
     });
+    return freezeData({ version: 1, steps: steps });
   }
 
   function buildSubtitleRecipe(segments) {

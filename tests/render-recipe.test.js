@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createCapabilityRegistry } = require('../src/edit-capabilities');
 const {
   buildSubtitleRecipe,
   buildRenderRecipe,
@@ -135,6 +136,102 @@ test('rejects invalid timing, blank text and executable fields', () => {
       [field]: 'not allowed'
     };
     assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
+});
+
+function colorStep() {
+  return {
+    capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
+    params: { temperature: -0.8, brightness: 0.25, saturation: 1, contrast: 1 }
+  };
+}
+
+for (const withSubtitle of [false, true]) {
+  test(`builds defensive frozen color graph snapshots with subtitle=${withSubtitle}`, () => {
+    const graph = subtitleGraph();
+    if (!withSubtitle) graph.nodes.pop();
+    const first = colorStep();
+    const second = colorStep();
+    second.params.temperature = 0.5;
+    const colors = [first, second].map((step, index) => ({
+      id: `color-${index}`, type: 'video.color@1', range: step.range,
+      inputs: [], props: step.params
+    }));
+    graph.nodes.splice(1, 0, ...colors);
+    const recipe = buildRenderRecipe(graph, createCapabilityRegistry());
+    assert.deepEqual(recipe.steps.slice(0, 2), [first, second]);
+    assert.equal(recipe.steps.length, withSubtitle ? 3 : 2);
+    if (withSubtitle) assert.equal(recipe.steps[2].capability, 'subtitle.burn@1');
+    colors[0].range.start = 2;
+    colors[0].props.temperature = 1;
+    assert.equal(recipe.steps[0].range.start, 1);
+    assert.equal(recipe.steps[0].params.temperature, -0.8);
+    function assertFrozen(value) {
+      if (!value || typeof value !== 'object') return;
+      assert.ok(Object.isFrozen(value));
+      Object.values(value).forEach(assertFrozen);
+    }
+    assertFrozen(recipe);
+  });
+}
+
+test('rejects invalid color ranges, incomplete parameters and executable fields', () => {
+  const invalid = [];
+  for (const range of [null, { start: 1, end: 1 }, { start: -1, end: 3 },
+    { start: 1, end: Infinity }, { start: NaN, end: 3 }, { start: '1', end: 3 },
+    { start: 1, end: 3, filter: 'movie=evil' }]) {
+    invalid.push({ ...colorStep(), range });
+  }
+  for (const [name, values] of Object.entries({
+    temperature: [-1.01, 1.01, NaN, Infinity, '0'], brightness: [-1.01, 1.01],
+    saturation: [-0.01, 2.01], contrast: [-0.01, 2.01]
+  })) {
+    for (const value of values) {
+      const step = colorStep();
+      step.params[name] = value;
+      invalid.push(step);
+    }
+  }
+  const missing = colorStep();
+  delete missing.params.contrast;
+  invalid.push(missing);
+  for (const field of ['command', 'args', 'script', 'filter', 'path']) {
+    invalid.push({ ...colorStep(), [field]: 'movie=evil' });
+    const step = colorStep();
+    step.params[field] = 'movie=evil';
+    invalid.push(step);
+  }
+  for (const step of invalid) {
+    assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
+});
+
+test('accepts color parameter boundaries and rejects unregistered color capabilities', () => {
+  for (const params of [
+    { temperature: -1, brightness: -1, saturation: 0, contrast: 0 },
+    { temperature: 1, brightness: 1, saturation: 2, contrast: 2 }
+  ]) {
+    const step = { ...colorStep(), params };
+    assert.deepEqual(validateRenderRecipe({ version: 1, steps: [step] }).steps[0], step);
+  }
+  assert.throws(() => validateRenderRecipe({
+    version: 1, steps: [{ ...colorStep(), capability: 'video.color.adjust@2' }]
+  }), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+});
+
+test('rejects duplicate subtitles and colors placed after subtitles', () => {
+  const subtitle = buildSubtitleRecipe([{ id: 's1', start: 0, end: 1, text: '字幕' }]).steps[0];
+  for (const steps of [[subtitle, subtitle], [subtitle, colorStep()]]) {
+    assert.throws(() => validateRenderRecipe({ version: 1, steps }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
+});
+
+test('rejects sparse step arrays instead of producing an empty filter chain', () => {
+  for (const steps of [Array(1), [colorStep(), ,]]) {
+    assert.throws(() => validateRenderRecipe({ version: 1, steps }),
       { code: 'EXPORT_INVALID_RECIPE' });
   }
 });

@@ -468,3 +468,140 @@ test('rejects subtitle timing beyond a millisecond rounding tolerance', async (t
   });
   assert.equal(spawnCalls, 1);
 });
+
+function colorRecipe(withSubtitle = false) {
+  const steps = [{
+    capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
+    params: { temperature: -1, brightness: 0.25, saturation: 1.5, contrast: 0.5 }
+  }, {
+    capability: 'video.color.adjust@1', range: { start: 0, end: 4 },
+    params: { temperature: 1, brightness: -1, saturation: 0, contrast: 2 }
+  }];
+  if (withSubtitle) steps.push(oneCaption('literal movie=evil; $(command)').steps[0]);
+  return { version: 1, steps };
+}
+
+for (const withSubtitle of [false, true]) {
+  test(`exports controlled color argv and creates ASS only with subtitle=${withSubtitle}`, async (t) => {
+    const paths = await createFakePaths(t);
+    const calls = [];
+    const writes = [];
+    let renderedFiles;
+    let assContents;
+    const service = createFakeService((command, args, options) => {
+      calls.push({ command, args, options });
+      if (!args.includes('-progress')) return fakeChild({ stdoutChunks: [PROBE_JSON] });
+      return fakeChild({
+        stdoutChunks: ['out_time_us=2000000\n'],
+        beforeClose: async () => {
+          renderedFiles = await fs.readdir(options.cwd);
+          if (withSubtitle) assContents = await fs.readFile(path.join(options.cwd, 'captions.ass'), 'utf8');
+          await fs.writeFile(args.at(-1), 'rendered');
+        }
+      });
+    }, { fsApi: { ...fs, writeFile: async (...args) => {
+      writes.push(args[0]);
+      return fs.writeFile(...args);
+    } } });
+    const progress = [];
+    const result = await service.start({
+      jobId: 'colors', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+      recipe: colorRecipe(withSubtitle)
+    }, (event) => progress.push(event));
+    assert.deepEqual(result, { jobId: 'colors', status: 'completed', outputPath: paths.outputPath });
+    assert.equal(calls.length, 3);
+    const render = calls[1];
+    const filters = [
+      "colorchannelmixer=rr=0.8:gg=1:bb=1.2:enable='gte(t,1)*lt(t,3)'",
+      "eq=brightness=0.0625:saturation=1.5:contrast=0.5:enable='gte(t,1)*lt(t,3)'",
+      "colorchannelmixer=rr=1.2:gg=1:bb=0.8:enable='gte(t,0)*lt(t,4)'",
+      "eq=brightness=-0.25:saturation=0:contrast=2:enable='gte(t,0)*lt(t,4)'"
+    ];
+    if (withSubtitle) filters.push('ass=captions.ass');
+    assert.equal(render.command, 'ffmpeg');
+    assert.deepEqual(render.args, [
+      '-hide_banner', '-nostdin', '-n', '-i', await fs.realpath(paths.sourcePath),
+      '-map', '0:v:0', '-map', '0:a:0?', '-vf', filters.join(','),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', '-fps_mode', 'passthrough',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+      '-progress', 'pipe:1', '-nostats', path.join(render.options.cwd, 'staged.mp4')
+    ]);
+    assert.ok(calls.every((call) => call.options.shell === false));
+    assert.deepEqual(renderedFiles, withSubtitle ? ['captions.ass'] : []);
+    assert.deepEqual(writes, withSubtitle ? [path.join(render.options.cwd, 'captions.ass')] : []);
+    if (withSubtitle) assert.ok(assContents.includes('literal movie=evil; $(command)'));
+    assert.ok(progress.some((event) => event.phase === 'rendering' && event.percent === 50));
+    assert.equal(await fs.readFile(paths.sourcePath, 'utf8'), 'source');
+    await assert.rejects(fs.stat(render.options.cwd), { code: 'ENOENT' });
+  });
+}
+
+test('rejects color and mixed recipe ranges outside source duration before rendering', async (t) => {
+  const paths = await createFakePaths(t);
+  let spawnCalls = 0;
+  const service = createFakeService(() => {
+    spawnCalls += 1;
+    return fakeChild({ stdoutChunks: [PROBE_JSON] });
+  });
+  for (const withSubtitle of [false, true]) {
+    for (const range of [{ start: 1, end: 4.01 }, { start: 4, end: 5 }]) {
+      const recipe = colorRecipe(withSubtitle);
+      recipe.steps[1].range = range;
+      const result = await service.start({
+        jobId: 'range', videoPath: paths.sourcePath, outputPath: paths.outputPath, recipe
+      });
+      assert.deepEqual(result, { jobId: 'range', status: 'failed', errorCode: 'EXPORT_INVALID_MEDIA' });
+    }
+  }
+  const recipe = colorRecipe(true);
+  recipe.steps[2] = {
+    capability: 'subtitle.burn@1',
+    params: { segments: [{ id: 's1', start: 0.5, end: 4.01, text: '字幕' }] }
+  };
+  assert.equal((await service.start({
+    jobId: 'subtitle-range', videoPath: paths.sourcePath, outputPath: paths.outputPath, recipe
+  })).errorCode, 'EXPORT_INVALID_MEDIA');
+  assert.equal(spawnCalls, 5);
+});
+
+test('rejects recipe commands, paths and filter strings without spawning tools', async (t) => {
+  const paths = await createFakePaths(t);
+  let spawnCalls = 0;
+  const service = createFakeService(() => { spawnCalls += 1; throw new Error('must not spawn'); });
+  const recipes = [];
+  for (const field of ['command', 'args', 'filter', 'path', 'ffmpegPath', 'outputPath']) {
+    const recipe = colorRecipe();
+    recipe.steps[0][field] = 'movie=evil';
+    recipes.push(recipe);
+  }
+  for (const value of ['1,drawtext=text=evil', Infinity, NaN]) {
+    const recipe = colorRecipe();
+    recipe.steps[0].params.temperature = value;
+    recipes.push(recipe);
+  }
+  for (const recipe of recipes) {
+    assert.equal((await service.start({
+      jobId: 'injection', videoPath: paths.sourcePath, outputPath: paths.outputPath, recipe
+    })).errorCode, 'EXPORT_INVALID_RECIPE');
+  }
+  assert.equal(spawnCalls, 0);
+});
+
+test('requires color ranges to end within source duration without subtitle rounding tolerance', async (t) => {
+  const paths = await createFakePaths(t);
+  let spawnCalls = 0;
+  const service = createFakeService((_command, args) => {
+    spawnCalls += 1;
+    if (args.includes('-progress')) {
+      return fakeChild({ beforeClose: () => fs.writeFile(args.at(-1), 'rendered') });
+    }
+    return fakeChild({ stdoutChunks: [PROBE_JSON] });
+  });
+  const recipe = colorRecipe();
+  recipe.steps[0].range.end = 4.0005;
+  assert.deepEqual(await service.start({
+    jobId: 'exact-range', videoPath: paths.sourcePath, outputPath: paths.outputPath, recipe
+  }), { jobId: 'exact-range', status: 'failed', errorCode: 'EXPORT_INVALID_MEDIA' });
+  assert.equal(spawnCalls, 1);
+});
