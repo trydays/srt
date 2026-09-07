@@ -44,15 +44,38 @@ function addMarker(ef) {
   return track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
 }
 
-function applyInstruction(instruction) {
-  if (!instruction || instruction.capability !== 'fade.in@1') return false;
-  var effect = { name: '淡入', time: videoDuration ? videoEl.currentTime : 0,
-    color: 'var(--accent)' };
+function effectName(step) {
+  var params = step.params || {};
+  var base = step.capability === 'fade.in@1' ? '淡入' : '淡出';
+  if (typeof params.start === 'number' && typeof params.end === 'number') {
+    return base + ' ' + formatDur(params.start) + '–' + formatDur(params.end);
+  }
+  return base;
+}
+
+function applyEffectStep(step) {
+  if (!step || (step.capability !== 'fade.in@1' && step.capability !== 'fade.out@1')) {
+    return false;
+  }
+  var params = step.params || {};
+  var time = typeof params.start === 'number' ? params.start
+    : (videoDuration ? videoEl.currentTime : 0);
+  var effect = { name: effectName(step), time: time, color: 'var(--accent)' };
   var marker = createMarkerDOM(effect, timelineEffects.length);
-  marker.dataset.testid = 'timeline-effect-fade-in';
+  marker.dataset.testid = step.capability === 'fade.in@1'
+    ? 'timeline-effect-fade-in' : 'timeline-effect-fade-out';
   track.appendChild(marker);
   timelineEffects.push(effect);
   return true;
+}
+
+function applyInstructionSteps(steps) {
+  var appliedAny = false;
+  for (var i = 0; i < steps.length; i++) {
+    if (steps[i].capability === 'subtitle.generate@1') continue;
+    if (applyEffectStep(steps[i])) appliedAny = true;
+  }
+  return appliedAny;
 }
 
 /* 删除后重排后续 marker 的 idx */
@@ -366,15 +389,23 @@ async function translateAndApply(text, record, card) {
     return;
   }
   record.instructionStatus = 'success';
-  if (turn.capability === 'subtitle.generate@1') {
+  var steps = turn.steps || [];
+  var hasSubtitle = steps.some(function (step) {
+    return step.capability === 'subtitle.generate@1';
+  });
+  var effectSteps = steps.filter(function (step) {
+    return step.capability !== 'subtitle.generate@1';
+  });
+  if (hasSubtitle) {
     await runSubtitleInstruction(record, card);
+    applyInstructionSteps(effectSteps);
     return;
   }
   record.subtitleRequest = false;
   updateRequestStatus(record, card, {
     instructionStatus: 'success', timelineStatus: 'applying', error: ''
   });
-  var applied = applyInstruction(turn);
+  var applied = applyInstructionSteps(effectSteps);
   updateRequestStatus(record, card, applied
     ? { timelineStatus: 'success', error: '' }
     : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });

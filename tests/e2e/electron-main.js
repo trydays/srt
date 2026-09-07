@@ -74,10 +74,21 @@ const localCliService = {
       if (!Array.isArray(history) || history.length <= 1) {
         return { kind: 'clarify', message: '你想要字幕还是淡入？' };
       }
-      return { kind: 'instruction', capability: 'fade.in@1', params: {} };
+      return { kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }] };
     }
-    if (/字幕/.test(text)) return { kind: 'instruction', capability: 'subtitle.generate@1', params: {} };
-    return { kind: 'instruction', capability: 'fade.in@1', params: {} };
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'multi-step') {
+      return { kind: 'instruction', steps: [
+        { capability: 'subtitle.generate@1', params: { start: 12, end: 18 } },
+        { capability: 'fade.out@1', params: { start: 18, end: 20 } }
+      ] };
+    }
+    if (/字幕/.test(text)) {
+      return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
+    }
+    if (/淡出/.test(text)) {
+      return { kind: 'instruction', steps: [{ capability: 'fade.out@1', params: {} }] };
+    }
+    return { kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }] };
   }
 };
 const subtitleService = {
