@@ -1,10 +1,91 @@
-var INSTRUCTION_CAPABILITIES = Object.freeze({
-  'subtitle.generate@1': '给视频（或指定时间区间）生成字幕',
-  'fade.in@1': '在片头（或指定时间区间）添加淡入',
-  'fade.out@1': '在片尾（或指定时间区间）添加淡出'
-});
+var CAPABILITY_SCHEMAS = Object.freeze([
+  Object.freeze({
+    id: 'subtitle.generate@1',
+    description: '给视频（或指定时间区间）生成字幕',
+    timing: true,
+    params: Object.freeze({})
+  }),
+  Object.freeze({
+    id: 'fade.in@1',
+    description: '画面从黑场淡入（或指定时间区间淡入）',
+    timing: true,
+    params: Object.freeze({})
+  }),
+  Object.freeze({
+    id: 'fade.out@1',
+    description: '画面淡出到黑场（或指定时间区间淡出）',
+    timing: true,
+    params: Object.freeze({})
+  }),
+  Object.freeze({
+    id: 'color.grade@1',
+    description: '调整画面整体色调',
+    timing: true,
+    params: Object.freeze({
+      warmth: Object.freeze({
+        type: 'number', min: -1, max: 1, default: 0,
+        description: '正值偏暖色，负值偏冷色'
+      }),
+      saturation: Object.freeze({
+        type: 'number', min: 0, max: 2, default: 1,
+        description: '1 为原饱和度，0 为黑白，大于 1 更鲜艳'
+      }),
+      contrast: Object.freeze({
+        type: 'number', min: 0, max: 2, default: 1,
+        description: '1 为原对比度，大于 1 更强，小于 1 更柔和'
+      })
+    })
+  }),
+  Object.freeze({
+    id: 'texture.grain@1',
+    description: '叠加胶片颗粒质感',
+    timing: true,
+    params: Object.freeze({
+      amount: Object.freeze({
+        type: 'number', min: 0, max: 1, default: 0,
+        description: '0 无颗粒，1 颗粒最强'
+      })
+    })
+  }),
+  Object.freeze({
+    id: 'vignette@1',
+    description: '为画面四周添加暗角',
+    timing: true,
+    params: Object.freeze({
+      strength: Object.freeze({
+        type: 'number', min: 0, max: 1, default: 0,
+        description: '0 无暗角，1 暗角最强'
+      })
+    })
+  })
+]);
 
-var CAPABILITY_PARAM_KEYS = Object.freeze(['start', 'end']);
+var SCHEMA_BY_ID = (function () {
+  var map = {};
+  for (var i = 0; i < CAPABILITY_SCHEMAS.length; i++) {
+    map[CAPABILITY_SCHEMAS[i].id] = CAPABILITY_SCHEMAS[i];
+  }
+  return map;
+})();
+
+function getCapabilitySchema(id) {
+  return SCHEMA_BY_ID[id] || null;
+}
+
+function describeParam(key, spec) {
+  var range = typeof spec.min === 'number' ? ' ' + spec.min + '~' + spec.max : '';
+  return key + '(' + spec.type + range + ', 默认 ' + spec.default + ')：' + spec.description;
+}
+
+function capabilityLine(schema) {
+  var ownParams = Object.keys(schema.params).map(function (key) {
+    return describeParam(key, schema.params[key]);
+  });
+  var text = '- ' + schema.id + '：' + schema.description;
+  if (ownParams.length) text += '；参数：' + ownParams.join('，');
+  if (schema.timing) text += '；可带 start/end 时间区间（秒）';
+  return text;
+}
 
 function isPlainObject(value) {
   return value && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -17,22 +98,29 @@ function invalidInstructionError() {
 }
 
 function buildPrompt(userText, history) {
-  var list = Object.keys(INSTRUCTION_CAPABILITIES).map(function (id) {
-    return '- ' + id + '：' + INSTRUCTION_CAPABILITIES[id];
-  }).join('\n');
-
   var lines = [
-    '你是视频编辑对话助手，负责把用户的剪辑需求澄清成一组按顺序执行的可编辑步骤。',
-    '可用能力（底层积木）：',
-    list,
-    '每条能力可以带可选时间区间参数，形如 {"start": 开始秒数, "end": 结束秒数}。',
-    'start 与 end 都必须是数字（秒），start 必须大于等于 0，end 必须大于 start；不需要区间时用 {}。',
+    '你是视频剪辑配方推导器。把用户想要的效果实时拆解成底层能力的有序组合，不要输出“预设效果名”。',
+    '推导规则：',
+    '- 先判断这个效果由哪些底层画面变化构成，再选择能力；一个能力只负责一种变化。',
+    '- 颜色变化优先选 color.grade@1；颗粒质感选 texture.grain@1；暗角选 vignette@1；明暗过渡选 fade.in@1/fade.out@1；需要画面文字时选 subtitle.generate@1。',
+    '- 必须只使用下面“可用能力（底层积木）”中列出的 id；没有合适能力时输出 clarify 追问，不要创建新的能力。',
+    '- 一个步骤只能调用一个能力，只能输出该能力声明过的参数；没有把握的强度参数就用能力声明的默认值，不要写。',
+    '- 需要限定作用时间时，只使用 start/end（数字秒，start 大于等于 0，end 大于 start）；不限定就不写。',
+    '- 多个步骤按实际施加顺序排列：先发生的在前，整体过渡（如淡出）放最后。',
+    '可用能力（底层积木）：'
+  ];
+
+  for (var i = 0; i < CAPABILITY_SCHEMAS.length; i++) {
+    lines.push(capabilityLine(CAPABILITY_SCHEMAS[i]));
+  }
+
+  lines = lines.concat([
     '每次只输出一个 JSON 对象，只能是下面两种之一：',
     '1. 信息不足、需要向用户追问时：{"kind":"clarify","message":"追问内容"}',
     '2. 信息已经足够时：{"kind":"instruction","steps":[{"capability":"能力id","params":{}}]}',
     'steps 是一组按顺序执行的能力，可以包含一条或多条。',
     '不要输出命令、Markdown、代码块或任何额外解释，只输出 JSON。'
-  ];
+  ]);
 
   if (Array.isArray(history) && history.length) {
     lines.push('对话历史：');
@@ -46,24 +134,45 @@ function buildPrompt(userText, history) {
   return lines.join('\n');
 }
 
-function normalizeParams(params) {
-  var keys = Object.keys(params);
-  for (var i = 0; i < keys.length; i++) {
-    if (CAPABILITY_PARAM_KEYS.indexOf(keys[i]) === -1) throw invalidInstructionError();
+function validateNumericValue(key, value, spec) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw invalidInstructionError();
   }
+  if (typeof spec.min === 'number' && value < spec.min) throw invalidInstructionError();
+  if (typeof spec.max === 'number' && value > spec.max) throw invalidInstructionError();
+}
+
+function normalizeParams(schema, params) {
+  if (!isPlainObject(params)) throw invalidInstructionError();
+  var allowed = {};
+  Object.keys(schema.params).forEach(function (key) { allowed[key] = true; });
+  if (schema.timing) {
+    allowed.start = true;
+    allowed.end = true;
+  }
+  Object.keys(params).forEach(function (key) {
+    if (!allowed[key]) throw invalidInstructionError();
+  });
+
   var out = {};
-  if (params.start !== undefined) {
-    if (typeof params.start !== 'number' || !Number.isFinite(params.start) || params.start < 0) {
+  Object.keys(schema.params).forEach(function (key) {
+    if (params[key] === undefined) return;
+    validateNumericValue(key, params[key], schema.params[key]);
+    out[key] = params[key];
+  });
+
+  if (schema.timing) {
+    if (params.start !== undefined) {
+      validateNumericValue('start', params.start, { min: 0 });
+      out.start = params.start;
+    }
+    if (params.end !== undefined) {
+      validateNumericValue('end', params.end, { min: 0 });
+      out.end = params.end;
+    }
+    if (out.start !== undefined && out.end !== undefined && out.end <= out.start) {
       throw invalidInstructionError();
     }
-    out.start = params.start;
-  }
-  if (params.end !== undefined) {
-    if (typeof params.end !== 'number' || !Number.isFinite(params.end)) {
-      throw invalidInstructionError();
-    }
-    if (out.start !== undefined && params.end <= out.start) throw invalidInstructionError();
-    out.end = params.end;
   }
   return out;
 }
@@ -74,11 +183,12 @@ function normalizeStep(step) {
   if (keys.length !== 2 || keys[0] !== 'capability' || keys[1] !== 'params') {
     throw invalidInstructionError();
   }
-  if (typeof step.capability !== 'string' || !INSTRUCTION_CAPABILITIES[step.capability]) {
-    throw invalidInstructionError();
-  }
-  if (!isPlainObject(step.params)) throw invalidInstructionError();
-  return { capability: step.capability, params: normalizeParams(step.params) };
+  var schema = getCapabilitySchema(step.capability);
+  if (!schema) throw invalidInstructionError();
+  return {
+    capability: step.capability,
+    params: normalizeParams(schema, step.params)
+  };
 }
 
 function parseInstruction(output) {
@@ -106,8 +216,8 @@ function parseInstruction(output) {
 }
 
 module.exports = {
-  INSTRUCTION_CAPABILITIES: INSTRUCTION_CAPABILITIES,
-  CAPABILITY_PARAM_KEYS: CAPABILITY_PARAM_KEYS,
+  CAPABILITY_SCHEMAS: CAPABILITY_SCHEMAS,
+  getCapabilitySchema: getCapabilitySchema,
   buildPrompt: buildPrompt,
   parseInstruction: parseInstruction
 };
