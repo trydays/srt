@@ -109,6 +109,10 @@ var PARAMETER_SCHEMA = Object.freeze({
     return { type: 'video.color.adjustment@1', range: clone(step.range),
       payload: normalizeParams(step.params, true) };
   },
+  toGraph: function(edit, graphContext) {
+    return { id: 'node-' + edit.id, type: 'video.color@1', range: clone(edit.range),
+      inputs: [{ port: 'base', nodeId: graphContext.videoHead }], props: clone(edit.payload) };
+  },
   toTimeline: function(edit) {
     return { editId: edit.id, transactionId: edit.transactionId, lane: 'video-effect',
       range: clone(edit.range), label: '画面调色', summary: colorSummary(edit.payload) };
