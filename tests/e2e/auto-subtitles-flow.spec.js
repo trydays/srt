@@ -9,7 +9,7 @@ async function createVideoFixture(testInfo) {
 
 async function setUsableMetadata(window) {
   await expect.poll(() => window.locator('#previewVideo').getAttribute('src')).toBeTruthy();
-  await window.evaluate(() => {
+  await window.evaluate(async () => {
     const video = document.getElementById('previewVideo');
     Object.defineProperties(video, {
       duration: { configurable: true, value: 4 },
@@ -17,6 +17,7 @@ async function setUsableMetadata(window) {
       videoHeight: { configurable: true, value: 360 }
     });
     video.dispatchEvent(new Event('loadedmetadata'));
+    await window.projectEditingReady;
   });
 }
 
@@ -30,14 +31,16 @@ async function openEditor(window, videoFixturePath) {
 }
 
 async function seedExistingSubtitle(window) {
-  await window.evaluate(() => {
-    const store = window.SRTSubtitleState.createSubtitleStore(
-      localStorage,
-      () => 'seed-segment'
-    );
-    store.replace(getActiveProjectId(), 'seed-request', [
-      { start: 0, end: 1, text: '原字幕不能丢失' }
-    ]);
+  await window.evaluate(async () => {
+    const store = SRTProjectEditing.createProjectEditing({
+      storage: localStorage,
+      executionContext: { videoPath: '/fixture/video.mp4', generateSubtitles: async () => ({ ok: true,
+        segments: [{ start: 0, end: 1, text: '原字幕不能丢失' }]
+      }) }
+    });
+    await store.applyRecipe({ projectId: getActiveProjectId(), expectedRevision: projectEditing.load(getActiveProjectId()).document.revision,
+      requestId: 'seed-request', recipe: { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] }
+    });
     window.subtitleController.render();
   });
 }
@@ -48,16 +51,10 @@ test.describe('subtitle surface', () => {
   test('shows fixed segments in one track and the preview', async ({ window }, testInfo) => {
     const videoFixturePath = await createVideoFixture(testInfo);
     await openEditor(window, videoFixturePath);
-    await window.evaluate(() => {
-      let id = 0;
-      const store = window.SRTSubtitleState.createSubtitleStore(
-        localStorage,
-        () => `fixture-segment-${++id}`
-      );
-      store.replace(getActiveProjectId(), 'fixture-request', [
-        { start: 0.2, end: 1.4, text: '大家好' },
-        { start: 1.6, end: 3.0, text: '欢迎测试自动字幕' }
-      ]);
+    await window.evaluate(async () => {
+      await projectEditing.applyRecipe({ projectId: getActiveProjectId(), expectedRevision: projectEditing.load(getActiveProjectId()).document.revision,
+        requestId: 'fixture-request', recipe: { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] }
+      });
       window.subtitleController.render();
     });
     await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
@@ -204,7 +201,7 @@ test.describe('auto subtitle conversation', () => {
     await window.evaluate(() => {
       window.__subtitleStorageSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function(key, value) {
-        if (key === 'srt_project_subtitles') throw new Error('forced subtitle storage failure');
+        if (key === 'srt_project_edit_state') throw new Error('forced subtitle storage failure');
         return window.__subtitleStorageSetItem.call(this, key, value);
       };
     });
@@ -239,7 +236,7 @@ test.describe('auto subtitle conversation', () => {
     const beforeCancelledUndo = await window.evaluate((requestId) => ({
       track: Array.from(document.querySelectorAll('[data-testid="subtitle-block"]')).map((node) => node.textContent),
       candidate: Array.from(document.querySelectorAll('[data-testid="subtitle-document-segment"]')).map((node) => node.textContent),
-      draft: SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused').get(getActiveProjectId()).draft,
+      draft: currentSubtitleState().draft,
       canUndo: subtitleController.canUndo(requestId)
     }), latestRequestId);
     await latestRequestCard.getByTestId('request-status-summary').click();
@@ -252,7 +249,7 @@ test.describe('auto subtitle conversation', () => {
     await expect.poll(() => window.evaluate((requestId) => ({
       track: Array.from(document.querySelectorAll('[data-testid="subtitle-block"]')).map((node) => node.textContent),
       candidate: Array.from(document.querySelectorAll('[data-testid="subtitle-document-segment"]')).map((node) => node.textContent),
-      draft: SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused').get(getActiveProjectId()).draft,
+      draft: currentSubtitleState().draft,
       canUndo: subtitleController.canUndo(requestId)
     }), latestRequestId)).toEqual(beforeCancelledUndo);
     await window.evaluate(() => { window.confirm = () => true; });
@@ -289,13 +286,12 @@ test.describe('auto subtitle conversation', () => {
     await expect(window.getByTestId('request-user-message')).toHaveCount(2);
     await expect(window.getByTestId('request-status-card')).toHaveCount(2);
     await expect(window.getByTestId('request-status-card').last().getByTestId('timeline-status'))
-      .toHaveAttribute('data-state', 'success');
+      .toHaveAttribute('data-state', 'waiting');
     await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑字幕 · 2 段');
     await expect(window.getByTestId('subtitle-document-draft-marker')).toHaveText('草稿未应用');
     await expect(window.getByTestId('subtitle-document-surface')).toBeHidden();
     await expect.poll(() => window.evaluate(() => {
-      return SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused')
-        .get(getActiveProjectId()).draft;
+      return currentSubtitleState().draft;
     })).toMatchObject({ [firstSegmentId]: '发送前已保存的草稿' });
 
     await window.getByTestId('subtitle-document-toggle').click();
@@ -303,7 +299,7 @@ test.describe('auto subtitle conversation', () => {
     await window.evaluate(() => {
       window.__subtitleStorageSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function(key, value) {
-        if (key === 'srt_project_subtitles') throw new Error('forced subtitle storage failure');
+        if (key === 'srt_project_subtitle_drafts') throw new Error('forced subtitle storage failure');
         return window.__subtitleStorageSetItem.call(this, key, value);
       };
     });
@@ -318,8 +314,7 @@ test.describe('auto subtitle conversation', () => {
     await expect(segments.nth(0)).toHaveText('保存失败时仍保留的候选文字');
     await expect(documentEditor).toContainText('字幕草稿保存失败，请重试');
     await expect.poll(() => window.evaluate(() => {
-      return SRTSubtitleState.createSubtitleStore(localStorage, () => 'unused')
-        .get(getActiveProjectId()).draft;
+      return currentSubtitleState().draft;
     })).toMatchObject({ [firstSegmentId]: '发送前已保存的草稿' });
     await window.evaluate(() => { Storage.prototype.setItem = window.__subtitleStorageSetItem; });
   });
@@ -340,7 +335,7 @@ test.describe('auto subtitle conversation', () => {
     await expect(requestCard).toContainText('当前视频路径不可用，请返回首页重新导入视频。');
   });
 
-  test('preserves the previous track and undo when final status persistence fails', async ({ window }, testInfo) => {
+  test('keeps the committed edit when conversation persistence fails and reconciles it on reload', async ({ window }, testInfo) => {
     const videoFixturePath = await createVideoFixture(testInfo);
     await openEditor(window, videoFixturePath);
     await seedExistingSubtitle(window);
@@ -363,18 +358,20 @@ test.describe('auto subtitle conversation', () => {
     await window.locator('#generateBtn').click();
 
     const requestCard = window.getByTestId('request-status-card').last();
-    await expect(requestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
-    await expect(window.getByTestId('subtitle-block')).toHaveCount(1);
-    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
-    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+    await expect(requestCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await expect(requestCard).toContainText('对话历史暂时未保存');
+    await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
+    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(false);
+    const committed = await window.evaluate(() => projectEditing.load(getActiveProjectId()).document);
+    expect(committed.edits[0].payload.segments[0].text).toBe('大家好');
+    expect(await window.evaluate((transactionId) => subtitleController.canUndo(transactionId), committed.edits[0].transactionId)).toBe(true);
 
     await window.reload();
     await setUsableMetadata(window);
-    const persistedFailureCard = window.getByTestId('request-status-card').last();
-    await expect(persistedFailureCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
-    await expect(persistedFailureCard).toContainText('字幕暂时无法保存，请重试。');
-    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
-    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+    const persistedCard = window.getByTestId('request-status-card').last();
+    await expect(persistedCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('subtitle-block').first()).toHaveText('大家好');
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document)).toEqual(committed);
 
     await window.evaluate(() => {
       const originalSetItem = Storage.prototype.setItem;
@@ -387,11 +384,11 @@ test.describe('auto subtitle conversation', () => {
     });
     await window.locator('.input-editor').fill('再生成一次字幕');
     await window.locator('#generateBtn').click();
-    const currentFailureCard = window.getByTestId('request-status-card').last();
-    await expect(currentFailureCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
-    await expect(currentFailureCard).toContainText('字幕暂时无法保存，请重试。');
-    await expect(window.getByTestId('subtitle-block')).toHaveText('原字幕不能丢失');
-    await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
+    const currentCard = window.getByTestId('request-status-card').last();
+    await expect(currentCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await expect(currentCard).toContainText('对话历史暂时未保存');
+    await expect(window.getByTestId('subtitle-block')).toHaveCount(2);
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.revision)).toBe(committed.revision + 1);
   });
 });
 

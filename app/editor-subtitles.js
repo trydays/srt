@@ -1,4 +1,3 @@
-var subtitleStore = SRTSubtitleState.createSubtitleStore(localStorage, createLocalId);
 var subtitleTrack = document.getElementById('subtitleTrack');
 var subtitlePreview = document.getElementById('previewSubtitle');
 var subtitleDocument = document.querySelector('[data-subtitle-document]');
@@ -10,8 +9,26 @@ var subtitleDocumentSave = subtitleDocument.querySelector('[data-testid="subtitl
 var subtitleDocumentApply = subtitleDocument.querySelector('[data-testid="subtitle-document-apply"]');
 var subtitleDocumentExpanded = false;
 var candidateTexts = null;
+var candidateRevision = null;
+var candidateEditId = null;
 
-function currentSubtitleState() { return subtitleStore.get(getActiveProjectId()); }
+function currentSubtitleState() {
+  if (projectEditingState !== 'ready') return { segments: [], draft: null, edit: null, revision: null };
+  var snapshot = projectEditing.load(getActiveProjectId());
+  var edit = snapshot.document.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
+  var draft = null;
+  try { draft = edit && subtitleDraftStore.get(getActiveProjectId(), edit.id); }
+  catch (_) { subtitleDraftWarning = '字幕草稿读取失败；已应用字幕不受影响'; }
+  if (draft && draft.baseRevision !== snapshot.document.revision) {
+    // Keep the old sidecar on disk, but never rebase it onto a different applied version implicitly.
+    draft = null;
+    if (!subtitleDraftWarning) subtitleDraftWarning = '旧草稿版本已过期，当前显示已应用字幕';
+  }
+  return {
+    segments: edit ? edit.payload.segments : [], edit: edit || null, revision: snapshot.document.revision,
+    draft: draft ? draft.textById : null, draftRevision: draft ? draft.baseRevision : null
+  };
+}
 function textMapForSegments(segments) {
   var texts = {};
   segments.forEach(function(segment) { texts[segment.id] = String(segment.text); });
@@ -41,15 +58,16 @@ function renderSubtitleTrack() {
   });
 }
 function renderCurrentSubtitle() {
-  var time = videoEl.currentTime;
-  var active = currentSubtitleState().segments.find(function(segment) {
-    return time >= segment.start && time < segment.end;
-  });
-  subtitlePreview.hidden = !active;
-  subtitlePreview.textContent = active ? active.text : '';
+  if (projectEditingState !== 'ready') { subtitlePreview.hidden = true; return; }
+  var snapshot = projectEditing.load(getActiveProjectId());
+  var active = editCapabilityRegistry.get('subtitle.generate@1').preview(snapshot.graph, videoEl.currentTime);
+  subtitlePreview.hidden = !active.visible;
+  subtitlePreview.textContent = active.text;
 }
 function resetCandidateFromState(state) {
   state = state || currentSubtitleState();
+  candidateRevision = state.draft ? state.draftRevision : state.revision;
+  candidateEditId = state.edit && state.edit.id;
   candidateTexts = textMapForSegments(state.segments);
   if (state.draft) state.segments.forEach(function(segment) {
     candidateTexts[segment.id] = state.draft[segment.id];
@@ -72,7 +90,7 @@ function updateDocumentStatus(message) {
   subtitleDocumentToggle.textContent = (subtitleDocumentExpanded ? '编辑全部字幕 · ' : '编辑字幕 · ') + info.state.segments.length + ' 段';
   subtitleDocumentDraftMarker.hidden = subtitleDocumentExpanded || (!info.dirty && !info.hasDraft);
   subtitleDocumentDraftMarker.textContent = info.dirty ? '有未保存更改' : '草稿未应用';
-  subtitleDocumentStatus.textContent = candidateStatusText(info) + (message ? ' · ' + message : '');
+  subtitleDocumentStatus.textContent = candidateStatusText(info) + (message || subtitleDraftWarning ? ' · ' + (message || subtitleDraftWarning) : '');
   subtitleDocumentSave.disabled = !info.dirty;
   subtitleDocumentApply.disabled = !info.dirty && !info.hasDraft;
 }
@@ -127,14 +145,23 @@ function showDocumentError(error) {
     }
     updateDocumentStatus('请补全空白字幕'); return;
   }
-  updateDocumentStatus(error && error.code === 'SUBTITLE_DOCUMENT_STALE' ? '当前字幕已更新，请重新载入' : '字幕草稿保存失败，请重试');
+  updateDocumentStatus(error && (error.code === 'SUBTITLE_DOCUMENT_STALE' || error.code === 'EDIT_REVISION_CONFLICT') ? '当前字幕已更新，请重新载入' : '字幕草稿保存失败，请重试');
+}
+function candidateBaseState() {
+  var state = currentSubtitleState();
+  if (!state.edit || state.edit.id !== candidateEditId || state.revision !== candidateRevision) {
+    throw SRTEditCapabilities.codedError('SUBTITLE_DOCUMENT_STALE');
+  }
+  return state;
 }
 function saveCandidate() {
   if (window.isExporting) return false;
   clearSegmentErrors();
   try {
-    var state = subtitleStore.saveDraft(getActiveProjectId(), candidateTextById());
-    resetCandidateFromState(state);
+    var state = candidateBaseState();
+    subtitleDraftStore.save(getActiveProjectId(), state.edit.id, candidateRevision, candidateTextById(), state.segments);
+    subtitleDraftWarning = '';
+    resetCandidateFromState();
     renderSubtitleDocument();
     return true;
   } catch (error) { showDocumentError(error); return false; }
@@ -143,10 +170,24 @@ function applyCandidate() {
   if (window.isExporting) return false;
   clearSegmentErrors();
   try {
-    subtitleStore.applyTexts(getActiveProjectId(), candidateTextById());
-    renderAllSubtitles(); rebuildDocumentFromState(); return true;
+    var state = candidateBaseState();
+    var texts = subtitleDraftStore.validateTexts(candidateTextById(), state.segments);
+    var payload = Object.assign({}, state.edit.payload, {
+      segments: state.segments.map(function(segment) { return Object.assign({}, segment, { text: texts[segment.id] }); })
+    });
+    projectEditing.replaceEdit({ projectId: getActiveProjectId(), expectedRevision: candidateRevision, editId: state.edit.id, payload: payload });
+    // The applied commit already succeeded. A sidecar cleanup failure must not report an apply failure.
+    try { subtitleDraftStore.clear(getActiveProjectId(), state.edit.id); subtitleDraftWarning = ''; }
+    catch (_) { subtitleDraftWarning = '字幕已应用；旧草稿清理失败，请重新打开后检查'; }
+    candidateTexts = texts;
+    candidateRevision = projectEditing.load(getActiveProjectId()).document.revision;
+    renderAllSubtitles();
+    resetCandidateFromState(Object.assign({}, currentSubtitleState(), { draft: null }));
+    renderSubtitleDocument();
+    window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
+    return true;
   } catch (error) {
-    if (error && error.code !== 'SUBTITLE_TEXT_REQUIRED' && error.code !== 'SUBTITLE_DOCUMENT_STALE') updateDocumentStatus('字幕应用失败，请重试');
+    if (error && error.code !== 'SUBTITLE_TEXT_REQUIRED' && error.code !== 'SUBTITLE_DOCUMENT_STALE' && error.code !== 'EDIT_REVISION_CONFLICT') updateDocumentStatus('字幕应用失败，请重试');
     else showDocumentError(error);
     return false;
   }
@@ -156,7 +197,7 @@ subtitleTrack.addEventListener('click', function(event) {
   var segment = currentSubtitleState().segments.find(function(item) { return item.id === block.dataset.segmentId; });
   if (!segment) return;
   try { videoEl.currentTime = segment.start; } catch (_) {}
-  subtitlePreview.hidden = false; subtitlePreview.textContent = segment.text;
+  renderCurrentSubtitle();
 });
 subtitleDocumentSurface.addEventListener('input', function(event) {
   if (window.isExporting) return;
@@ -195,16 +236,19 @@ subtitleDocumentApply.addEventListener('click', applyCandidate);
 videoEl.addEventListener('timeupdate', renderCurrentSubtitle);
 videoEl.addEventListener('loadedmetadata', renderAllSubtitles);
 window.subtitleController = {
-  replace: function(requestId, segments) {
-    var state = subtitleStore.replace(getActiveProjectId(), requestId, segments);
-    rebuildDocumentFromState(); renderAllSubtitles(); return state;
-  },
-  undo: function(requestId) {
-    var state = subtitleStore.undo(getActiveProjectId(), requestId);
+  afterUndo: function(result) {
+    var edit = result.document.edits[0];
+    if (edit) {
+      try { subtitleDraftStore.rebase(getActiveProjectId(), edit.id, result.document.revision, edit.payload.segments); }
+      catch (_) { subtitleDraftWarning = '字幕已撤销；之前的草稿尚未恢复'; }
+    }
+    var state = currentSubtitleState();
     subtitleDocument.hidden = state.segments.length === 0;
     rebuildDocumentFromState(); renderAllSubtitles(); return state;
   },
-  canUndo: function(requestId) { return subtitleStore.canUndo(getActiveProjectId(), requestId); },
+  canUndo: function(requestId) {
+    return projectEditingState === 'ready' && projectEditing.canUndo({ projectId: getActiveProjectId(), transactionId: requestId });
+  },
   count: function() { return currentSubtitleState().segments.length; },
   render: function() { rebuildDocumentFromState(); renderAllSubtitles(); },
   openAfter: function(card) {
@@ -236,3 +280,8 @@ window.subtitleController = {
   }
 };
 renderAllSubtitles();
+projectEditingReady.then(function() {
+  rebuildDocumentFromState(); renderAllSubtitles();
+}).catch(function() {
+  subtitleDocumentStatus.textContent = '项目数据未能载入，未修改已有字幕';
+});

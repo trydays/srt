@@ -7,7 +7,8 @@ const { execFile } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { promisify } = require('node:util');
-const { buildSubtitleRecipe } = require('../src/render-recipe');
+const { buildSubtitleRecipe, buildRenderRecipe, SUBTITLE_STYLE } = require('../src/render-recipe');
+const { createCapabilityRegistry } = require('../src/edit-capabilities');
 const { createVideoExportService } = require('../src/video-export');
 
 const execFileAsync = promisify(execFile);
@@ -59,6 +60,17 @@ function oneCaption(text = '字幕') {
   return buildSubtitleRecipe([{ id: 's1', start: 0.5, end: 3.5, text }]);
 }
 
+function oneCaptionGraph(text = '字幕') {
+  return {
+    schemaVersion: 1, projectId: 'project-1', documentRevision: 1, duration: 4,
+    nodes: [
+      { id: 'node-main-video', type: 'source.video@1', range: { start: 0, end: 4 }, inputs: [], props: { assetId: 'asset-1' } },
+      { id: 'node-edit-1', type: 'visual.subtitle@1', range: { start: 0, end: 4 }, inputs: [{ port: 'base', nodeId: 'node-main-video' }], props: { segments: [{ id: 's1', start: 0.5, end: 3.5, text }], style: SUBTITLE_STYLE } }
+    ],
+    outputs: { video: { nodeId: 'node-edit-1', port: 'video' }, audio: { nodeId: 'node-main-video', port: 'audio' } }
+  };
+}
+
 async function createRealInput(t, ffmpegPath) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'srt-cycle1-'));
   const sourcePath = path.join(directory, 'source.mp4');
@@ -91,9 +103,9 @@ test('renders applied subtitles into a real playable MP4', {
   const service = createVideoExportService({
     getExportTools: async () => ({ ffmpegPath, ffprobePath })
   });
-  const recipe = buildSubtitleRecipe([
-    { id: 'real-1', start: 0.5, end: 3.5, text: '周期一真实字幕' }
-  ]);
+  const graph = oneCaptionGraph('周期一真实字幕');
+  graph.nodes[1].props.segments[0].id = 'real-1';
+  const recipe = buildRenderRecipe(graph, createCapabilityRegistry());
 
   const result = await service.start({
     jobId: 'real-export',

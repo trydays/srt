@@ -108,6 +108,13 @@ var videoEl=document.getElementById('previewVideo'),videoUrl=null,videoDuration=
 var activeProject = getProjectById(getActiveProjectId());
 var managedVideoLoad = 0;
 window.currentProjectVideoPath = null;
+window.projectVideoLoading = false;
+window.currentProjectVideoReady = Promise.resolve(null);
+var resolveManagedVideoReady = function() {};
+function finishManagedVideoReady(value) {
+  window.projectVideoLoading = false;
+  resolveManagedVideoReady(value);
+}
 var playBtn=document.getElementById('playBtn'),previewOverlay=document.getElementById('previewOverlay');
 var tlPlayBtn=document.getElementById('tlPlayBtn');
 function formatDur(s){var m=Math.floor(s/60),se=Math.floor(s%60);return(m<10?'0':'')+m+':'+(se<10?'0':'')+se}
@@ -138,14 +145,23 @@ function showVideo(file){
   if (window.srtAPI && window.srtAPI.resolveVideoSource) {
     if (!projectVideoPath) return;
     var loadId = ++managedVideoLoad;
+    window.projectVideoLoading = true;
+    window.currentProjectVideoReady = new Promise(function(resolve) { resolveManagedVideoReady = resolve; });
     window.srtAPI.resolveVideoSource(projectVideoPath).then(function(result) {
-      if (loadId !== managedVideoLoad || !result || !result.ok) return;
+      if (loadId !== managedVideoLoad) return;
+      if (!result || !result.ok) { finishManagedVideoReady(null); return; }
       bindVideoMetadata(function() {
-        if (loadId === managedVideoLoad) window.currentProjectVideoPath = result.path;
+        if (loadId === managedVideoLoad) {
+          window.currentProjectVideoPath = result.path;
+          finishManagedVideoReady(result.path);
+        }
       });
+      videoEl.addEventListener('error', function() {
+        if (loadId === managedVideoLoad) finishManagedVideoReady(null);
+      }, { once: true });
       videoEl.src = result.url;
       revealVideo();
-    }).catch(function() {});
+    }).catch(function() { if (loadId === managedVideoLoad) finishManagedVideoReady(null); });
     return;
   }
   try {
@@ -190,6 +206,8 @@ videoEl.addEventListener('volumechange',function(){tlVolSlider.value=Math.round(
 document.getElementById('reupload').addEventListener('change',function(){
   var f=this.files[0];if(!f)return;
   managedVideoLoad += 1;
+  finishManagedVideoReady(null);
+  window.currentProjectVideoReady = Promise.resolve(null);
   window.currentProjectVideoPath = null;
   var info={name:f.name,size:f.size,type:f.type,lastMod:f.lastModified};
   try{localStorage.setItem(STORAGE_KEYS.VIDEO,JSON.stringify(info))}catch(_){}

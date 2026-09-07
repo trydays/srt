@@ -64,7 +64,8 @@ const localCliService = {
     selectedCliId = id;
     return { available: localCliStates, selectedCliId };
   },
-  async translateInstruction(text, history) {
+  async translateInstruction(text, history, context) {
+    state.translationCalls = (state.translationCalls || []).concat([{ text, history, context }]);
     if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
       const error = new Error('Invalid local CLI instruction output');
       error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
@@ -72,9 +73,9 @@ const localCliService = {
     }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'clarify-once') {
       if (!Array.isArray(history) || history.length <= 1) {
-        return { kind: 'clarify', message: '你想要字幕还是淡入？' };
+        return { kind: 'clarify', message: '你是想为整段视频生成字幕吗？' };
       }
-      return { kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }] };
+      return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
     }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'multi-step') {
       return { kind: 'instruction', steps: [
@@ -85,10 +86,7 @@ const localCliService = {
     if (/字幕/.test(text)) {
       return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
     }
-    if (/淡出/.test(text)) {
-      return { kind: 'instruction', steps: [{ capability: 'fade.out@1', params: {} }] };
-    }
-    return { kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }] };
+    return { kind: 'clarify', message: '当前可以为整段视频生成字幕。你需要生成字幕吗？' };
   }
 };
 const subtitleService = {

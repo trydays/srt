@@ -143,7 +143,7 @@ test('translates a subtitle request into subtitle.generate instruction', async (
   assert.equal(calls.length, 1);
 });
 
-test('translates a fade request into fade.in instruction', async () => {
+test('rejects a fade recipe returned for an unavailable request', async () => {
   const fsApi = fakeFs(['/bin/codex']);
   const { run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}');
   const service = createLocalCliService({
@@ -151,12 +151,12 @@ test('translates a fade request into fade.in instruction', async () => {
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  assert.deepEqual(await service.translateInstruction('给片头添加淡入'), {
-    kind: 'instruction', steps: [{ capability: 'fade.in@1', params: {} }]
+  await assert.rejects(() => service.translateInstruction('给片头添加淡入'), {
+    code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT'
   });
 });
 
-test('passes through an AI-derived multi-primitive recipe in order', async () => {
+test('rejects an unavailable multi-effect recipe', async () => {
   const fsApi = fakeFs(['/bin/codex']);
   const { run } = fakeTranslator(JSON.stringify({
     kind: 'instruction',
@@ -172,14 +172,8 @@ test('passes through an AI-derived multi-primitive recipe in order', async () =>
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  assert.deepEqual(await service.translateInstruction('把 12 到 18 秒做成复古胶片感，片尾淡出'), {
-    kind: 'instruction',
-    steps: [
-      { capability: 'color.grade@1', params: { warmth: 0.18, saturation: 0.8, contrast: 1.1, start: 12, end: 18 } },
-      { capability: 'texture.grain@1', params: { amount: 0.22, start: 12, end: 18 } },
-      { capability: 'vignette@1', params: { strength: 0.35, start: 12, end: 18 } },
-      { capability: 'fade.out@1', params: { start: 18, end: 20 } }
-    ]
+  await assert.rejects(() => service.translateInstruction('把 12 到 18 秒做成复古胶片感，片尾淡出'), {
+    code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT'
   });
 });
 
@@ -213,28 +207,32 @@ test('forwards conversation history into the generated prompt', async () => {
   assert.match(calls[0].args[1], /你想要字幕还是淡入？/);
 });
 
-test('forwards video project context into the generated prompt', async () => {
+test('forwards unified project context into the generated prompt', async () => {
   const fsApi = fakeFs(['/bin/codex']);
-  const { calls, run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"fade.out@1","params":{}}]}');
+  const { calls, run } = fakeTranslator('{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}}]}');
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi, run: async () => ({ exitCode: 0 }), translate: run
   });
   await service.select('codex');
-  await service.translateInstruction('片尾淡出', [], {
+  await service.translateInstruction('重新生成字幕', [], {
+    revision: 3,
     video: { durationSeconds: 75, width: 1280, height: 720 },
     playheadSeconds: 12,
-    operations: [{ capability: 'fade.out@1', params: { start: 70, end: 75 } }],
+    operations: [{ id: 'tx-1', capability: 'subtitle.generate@1' }],
+    edits: [{ id: 'edit-1', type: 'subtitle.track@1', range: { start: 0, end: 75 }, payload: { segments: [{ text: '不要重复' }] } }],
     subtitles: [{ index: 1, start: 2, end: 5, text: '大家好' }],
     subtitleTotal: 1
   });
   assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /当前 revision：3/);
   assert.match(calls[0].args[1], /视频总时长：75 秒/);
   assert.match(calls[0].args[1], /视频分辨率：1280x720/);
   assert.match(calls[0].args[1], /播放头位置：12 秒/);
-  assert.match(calls[0].args[1], /1\. fade\.out@1，参数 \{start:70, end:75\}/);
+  assert.match(calls[0].args[1], /1\. edit-1，subtitle\.track@1，范围 \[0–75 秒\]/);
   assert.match(calls[0].args[1], /字幕轨（共 1 段）/);
   assert.match(calls[0].args[1], /第1段 \[2–5 秒\]：大家好/);
+  assert.doesNotMatch(calls[0].args[1], /不要重复/);
 });
 
 test('reports a killed CLI translation as a timeout', async () => {
@@ -272,7 +270,7 @@ test('translate ignores stdin so interactive CLI prompts do not hang', async () 
   const calls = [];
   const execFile = (file, args, options, callback) => {
     calls.push({ file, args, options });
-    callback(null, '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}', '');
+    callback(null, '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}}]}', '');
   };
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
@@ -281,7 +279,7 @@ test('translate ignores stdin so interactive CLI prompts do not hang', async () 
     execFile
   });
   await service.select('claude');
-  await service.translateInstruction('加淡入');
+  await service.translateInstruction('加字幕');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
 });
@@ -290,7 +288,7 @@ test('waits up to 60s for a local CLI translation response', async () => {
   const calls = [];
   const execFile = (file, args, options, callback) => {
     calls.push({ file, args, options });
-    callback(null, '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}', '');
+    callback(null, '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}}]}', '');
   };
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
@@ -299,6 +297,6 @@ test('waits up to 60s for a local CLI translation response', async () => {
     execFile
   });
   await service.select('claude');
-  await service.translateInstruction('加淡入');
+  await service.translateInstruction('加字幕');
   assert.equal(calls[0].options.timeout, 60000);
 });

@@ -1,10 +1,22 @@
 const { test, expect } = require('./electron.fixture');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const fixtureDirectories = new Set();
+
+test.afterEach(async () => {
+  await Promise.all(Array.from(fixtureDirectories, (directory) =>
+    fs.promises.rm(directory, { recursive: true, force: true })));
+  fixtureDirectories.clear();
+});
 
 async function createVideoFixture(testInfo, name) {
-  const file = testInfo.outputPath(name);
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-export-e2e-'));
+  fixtureDirectories.add(directory);
+  const file = path.join(directory, name);
   await fs.promises.writeFile(file, Buffer.from(name));
-  return file;
+  return fs.promises.realpath(file);
 }
 
 async function setUsableMetadata(window) {
@@ -78,14 +90,13 @@ test.describe('video export flow', () => {
     await setUsableMetadata(window);
     await expect.poll(() => window.evaluate(() => window.currentProjectVideoPath)).toBe(sourceA);
 
-    await window.evaluate(() => {
-      const store = window.SRTSubtitleState.createSubtitleStore(localStorage, () => 'applied-segment');
-      store.replace(getActiveProjectId(), 'seed-request', [
-        { start: 0.2, end: 1.4, text: '已应用字幕' }
-      ]);
-      subtitleController.openAfter(null);
-    });
-    const segment = window.getByTestId('subtitle-document-segment');
+    await window.getByTestId('video-export-button').click();
+    await expect(window.getByTestId('video-export-status')).toHaveText('当前字幕无法导出');
+    expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
+
+    await generateAppliedSubtitles(window);
+    await window.evaluate(() => subtitleController.openAfter(null));
+    const segment = window.getByTestId('subtitle-document-segment').first();
     await segment.fill('尚未应用的草稿');
     await window.getByTestId('subtitle-document-save').click();
     await window.getByTestId('video-export-button').click();
@@ -93,11 +104,18 @@ test.describe('video export flow', () => {
     expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
     await window.getByTestId('subtitle-document-apply').click();
 
-    await window.evaluate(() => applyInstruction({ capability: 'fade.in@1', params: {} }));
-    await window.getByTestId('video-export-button').click();
-    await expect(window.getByTestId('video-export-status')).toContainText('淡入');
-    expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
-    await window.getByTestId('timeline-effect-fade-in').dispatchEvent('contextmenu');
+    await window.evaluate(() => {
+      window.__buildRenderRecipeCalls = 0;
+      const build = window.SRTRenderRecipe.buildRenderRecipe;
+      window.SRTRenderRecipe.buildRenderRecipe = function(graph, registry) {
+        window.__buildRenderRecipeCalls += 1;
+        window.__exportGraph = graph;
+        return build(graph, registry);
+      };
+      window.SRTRenderRecipe.buildSubtitleRecipe = function() {
+        throw new Error('legacy subtitle export path used');
+      };
+    });
     await window.locator('.input-editor').fill('保留这段输入');
 
     await window.getByTestId('video-export-button').click();
@@ -106,6 +124,9 @@ test.describe('video export flow', () => {
     await expect(window.getByTestId('video-export-button')).toBeEnabled();
     await expect(window.locator('#generateBtn')).toBeEnabled();
     await expect(window.locator('#tabsBar')).not.toHaveAttribute('inert');
+    expect(await window.evaluate(() => window.__buildRenderRecipeCalls)).toBe(1);
+    expect(await window.evaluate(() => window.__exportGraph.documentRevision))
+      .toBe(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.revision));
 
     await window.getByTestId('video-export-button').click();
     await expect(window.getByTestId('video-export-progress')).toHaveText('42%');
@@ -146,6 +167,48 @@ test.describe('video export flow', () => {
     await expect(window.getByTestId('subtitle-document-surface')).toBeVisible();
     await expect(firstSegment).toHaveText('尚未保存也尚未应用');
     expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
+  });
+
+  test('rechecks drafts restored while export waits for readiness and releases its button', async ({ window, readScenarioState }, testInfo) => {
+    await openUsableEditor(window, testInfo, 'readiness-draft.mp4');
+    await generateAppliedSubtitles(window);
+    await window.evaluate(() => {
+      window.projectEditingReady = new Promise(resolve => { window.__resolveExportReadiness = resolve; });
+      const button = document.querySelector('[data-testid="video-export-button"]');
+      button.dispatchEvent(new Event('click'));
+      button.dispatchEvent(new Event('click'));
+    });
+    const segment = window.getByTestId('subtitle-document-segment').first();
+    await segment.fill('等待期间恢复的草稿');
+    await window.getByTestId('subtitle-document-save').click();
+    await window.evaluate(() => window.__resolveExportReadiness());
+    await expect(window.getByTestId('video-export-status')).toHaveText('请先应用字幕修改');
+    await expect(window.getByTestId('video-export-button')).toBeEnabled();
+    await expect(segment).toHaveText('等待期间恢复的草稿');
+    expect((await readScenarioState()).exportRequests || []).toHaveLength(0);
+  });
+
+  test('admits only one export when two clicks arrive during readiness', async ({ window, readScenarioState }, testInfo) => {
+    await openUsableEditor(window, testInfo, 'readiness-double-click.mp4');
+    await generateAppliedSubtitles(window);
+    await window.evaluate(() => {
+      window.projectEditingReady = new Promise(resolve => { window.__resolveExportReadiness = resolve; });
+      window.__exportBuildCount = 0;
+      const build = SRTRenderRecipe.buildRenderRecipe;
+      SRTRenderRecipe.buildRenderRecipe = function(graph, registry) {
+        window.__exportBuildCount += 1;
+        return build(graph, registry);
+      };
+      const button = document.querySelector('[data-testid="video-export-button"]');
+      button.dispatchEvent(new Event('click'));
+      button.dispatchEvent(new Event('click'));
+      window.__resolveExportReadiness();
+    });
+    await expect(window.getByTestId('video-export-status')).toHaveText('导出失败');
+    await expect(window.getByTestId('video-export-button')).toBeEnabled();
+    expect(await window.evaluate(() => window.__exportBuildCount)).toBe(1);
+    expect((await readScenarioState()).exportRequests).toHaveLength(1);
+    await expect(window.locator('#tabsBar')).not.toHaveAttribute('inert');
   });
 
   test('keeps a history-created undo action frozen when its card rerenders during export', async ({

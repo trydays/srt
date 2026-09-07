@@ -11,6 +11,7 @@
   var timelineTrack = document.getElementById('tlTrack');
   var currentJobId = null;
   var currentPhase = null;
+  var waitingForProject = false;
   var frozenControls = [];
   var frozenEditors = [];
   var tabsWereInert = false;
@@ -108,7 +109,7 @@
   timelineTrack.addEventListener('contextmenu', blockTimelineMutation, true);
 
   exportButton.addEventListener('click', async function() {
-    if (window.isExporting) return;
+    if (window.isExporting || waitingForProject) return;
     if (!window.currentProjectVideoPath) {
       showState(exportErrorMessage('VIDEO_PATH_UNAVAILABLE'));
       return;
@@ -122,18 +123,39 @@
       showState('请先应用字幕修改');
       return;
     }
-    var unsupported = window.timelineController.getUnsupportedExportItems();
-    if (unsupported.length) {
-      showState('暂不支持导出：' + unsupported.join('、'));
-      return;
-    }
     var recipe;
+    var projectId = getActiveProjectId();
+    var videoPath = window.currentProjectVideoPath;
+    waitingForProject = true;
+    exportButton.disabled = true;
+    showState('正在读取视频信息');
     try {
-      var segments = JSON.parse(JSON.stringify(window.subtitleController.getAppliedSegments()));
-      recipe = window.SRTRenderRecipe.buildSubtitleRecipe(segments);
+      await window.projectEditingReady;
+      if (window.projectEditingError) throw window.projectEditingError;
+      if (getActiveProjectId() !== projectId || window.currentProjectVideoPath !== videoPath) {
+        showState('项目已变化，请重新导出');
+        return;
+      }
+      if (window.timelineController.isRequestInFlight()) {
+        showState('当前编辑仍在处理中');
+        return;
+      }
+      if (window.subtitleController.hasPendingChanges()) {
+        window.subtitleController.openAfter(null);
+        showState('请先应用字幕修改');
+        return;
+      }
+      var snapshot = window.projectEditing.load(projectId);
+      recipe = window.SRTRenderRecipe.buildRenderRecipe(
+        snapshot.graph,
+        window.editCapabilityRegistry
+      );
     } catch (error) {
       showState(exportErrorMessage(error && error.code));
       return;
+    } finally {
+      waitingForProject = false;
+      exportButton.disabled = false;
     }
 
     currentJobId = window.crypto.randomUUID();
@@ -144,7 +166,7 @@
     try {
       var result = await window.srtAPI.startVideoExport({
         jobId: currentJobId,
-        videoPath: window.currentProjectVideoPath,
+        videoPath: videoPath,
         recipe: recipe
       });
       if (!result || result.jobId !== currentJobId) return;

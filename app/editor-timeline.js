@@ -19,124 +19,38 @@ track.addEventListener('mousedown',function(e){dragging=true;seekVideo(posToPct(
 document.addEventListener('mousemove',function(e){if(!dragging)return;seekVideo(posToPct(e.clientX))});
 document.addEventListener('mouseup',function(){dragging=false});
 
-/* ── Timeline drop: drag component → add marker ── */
-var timelineEffects = [];
-
-/* 创建单个 marker DOM 节点（纯函数，不操作 timelineEffects） */
-function createMarkerDOM(ef, idx) {
+/* 时间轴由已提交文档投影，拖入组件不产生编辑。 */
+var projectStateReady = false;
+function createMarkerDOM(item) {
   var pad=16, w=trackWidth()-pad*2;
-  var left = pad + (ef.time / getDur()) * w;
+  var left = pad + (item.range.start / getDur()) * w;
   var m = document.createElement('span');
   m.className = 'tl-marker';
   m.style.left = left+'px';
-  m.style.background = ef.color || 'var(--accent-tint)';
+  m.style.background = 'var(--accent-tint)';
   m.style.color = 'var(--text-strong)';
-  m.style.border = '1px solid '+(ef.color||'var(--accent)');
-  m.textContent = ef.name;
-  m.title = ef.name + ' @ ' + formatDur(ef.time) + ' — 右键删除';
-  m.addEventListener('contextmenu',function(e){e.preventDefault();var i=parseInt(this.dataset.idx);timelineEffects.splice(i,1);this.remove();reindexMarkers(i);});
-  m.dataset.idx = idx;
+  m.style.border = '1px solid var(--accent)';
+  m.textContent = item.label + ' · ' + item.summary;
+  m.title = item.label + ' @ ' + formatDur(item.range.start) + '–' + formatDur(item.range.end);
+  m.dataset.editId = item.editId;
+  m.dataset.transactionId = item.transactionId;
+  m.dataset.lane = item.lane;
   return m;
 }
 
-/* 增量追加（拖入时用） */
-function addMarker(ef) {
-  return track.appendChild(createMarkerDOM(ef, timelineEffects.length - 1));
-}
-
-function effectName(step) {
-  var params = step.params || {};
-  var base = step.capability === 'fade.in@1' ? '淡入' : '淡出';
-  if (typeof params.start === 'number' && typeof params.end === 'number') {
-    return base + ' ' + formatDur(params.start) + '–' + formatDur(params.end);
-  }
-  return base;
-}
-
-function applyEffectStep(step) {
-  if (!step || (step.capability !== 'fade.in@1' && step.capability !== 'fade.out@1')) {
-    return false;
-  }
-  var params = step.params || {};
-  var time = typeof params.start === 'number' ? params.start
-    : (videoDuration ? videoEl.currentTime : 0);
-  var effect = {
-    kind: 'instruction-effect',
-    capability: step.capability,
-    params: Object.assign({}, params),
-    name: effectName(step),
-    time: time,
-    color: 'var(--accent)'
-  };
-  var marker = createMarkerDOM(effect, timelineEffects.length);
-  marker.dataset.testid = step.capability === 'fade.in@1'
-    ? 'timeline-effect-fade-in' : 'timeline-effect-fade-out';
-  track.appendChild(marker);
-  timelineEffects.push(effect);
-  return true;
-}
-
-function applyInstructionSteps(steps) {
-  var appliedAny = false;
-  for (var i = 0; i < steps.length; i++) {
-    if (steps[i].capability === 'subtitle.generate@1') continue;
-    if (applyEffectStep(steps[i])) appliedAny = true;
-  }
-  return appliedAny;
-}
-
-/* 每次转换前冻结当前项目快照，作为本地 CLI 推导的编辑上下文 */
-function operationContextEntries() {
-  return timelineEffects.filter(function(effect) {
-    return effect && effect.kind === 'instruction-effect' && effect.capability;
-  }).map(function(effect) {
-    return { capability: effect.capability, params: effect.params || {} };
-  });
-}
-function subtitleSummaryEntries() {
-  var controller = window.subtitleController;
-  if (!controller || typeof controller.getAppliedSegments !== 'function') {
-    return { segments: [], total: 0 };
-  }
-  var all = controller.getAppliedSegments();
-  if (!Array.isArray(all) || !all.length) return { segments: [], total: 0 };
-  var MAX_SUBTITLE_SEGMENTS = 500;
-  var MAX_SUBTITLE_TEXT = 80;
-  var segments = all.slice(0, MAX_SUBTITLE_SEGMENTS).map(function(segment, index) {
-    var text = String(segment.text || '').replace(/\s+/g, ' ').trim();
-    if (text.length > MAX_SUBTITLE_TEXT) text = text.slice(0, MAX_SUBTITLE_TEXT) + '…';
-    return { index: index + 1, start: segment.start, end: segment.end, text: text };
-  });
-  return { segments: segments, total: all.length };
-}
 function currentProjectContext() {
-  if (!videoDuration || !Number.isFinite(videoDuration)) return null;
-  var subtitles = subtitleSummaryEntries();
-  return {
-    video: {
-      durationSeconds: videoDuration,
-      width: typeof videoEl.videoWidth === 'number' ? videoEl.videoWidth : null,
-      height: typeof videoEl.videoHeight === 'number' ? videoEl.videoHeight : null
-    },
-    playheadSeconds: Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0,
-    operations: operationContextEntries(),
-    subtitles: subtitles.segments,
-    subtitleTotal: subtitles.total
-  };
-}
-
-/* 删除后重排后续 marker 的 idx */
-function reindexMarkers(fromIdx) {
-  var markers = track.querySelectorAll('.tl-marker');
-  for (var i = fromIdx; i < markers.length; i++) markers[i].dataset.idx = i;
+  var context = window.projectEditing.aiContext(activeProjectId);
+  context.playheadSeconds = Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0;
+  return context;
 }
 
 /* 全量重建（ResizeObserver 用 — 宽度变化后位置需重算） */
 function renderMarkers(){
   var old = track.querySelectorAll('.tl-marker'); for(var i=0;i<old.length;i++)old[i].remove();
-  for(var i=0;i<timelineEffects.length;i++){
-    track.appendChild(createMarkerDOM(timelineEffects[i], i));
-  }
+  if (!projectStateReady) return;
+  window.projectEditing.timelineItems(activeProjectId).forEach(function(item) {
+    track.appendChild(createMarkerDOM(item));
+  });
 }
 
 /* ResizeObserver + rAF 防抖：拖拽 split pane 时最多 60fps 触发一次 */
@@ -158,12 +72,7 @@ track.addEventListener('drop',function(e){
   e.preventDefault(); track.classList.remove('drag-over-tl');
   var name = e.dataTransfer.getData('text/plain');
   if(!name)return;
-  var comp = null;
-  for(var i=0;i<COMPONENTS.length;i++){if(COMPONENTS[i].name===name){comp=COMPONENTS[i];break}}
-  var t = videoDuration ? videoEl.currentTime : posToPct(e.clientX) * getDur();
-  var ef = {name:name, time:t, color:comp?comp.color:null};
-  timelineEffects.push(ef);
-  addMarker(ef);
+  addMsg('ai', '「' + name + '」尚未接通。当前可通过对话生成整段视频字幕。');
 });
 
 /* ── Render mode ── */
@@ -209,6 +118,7 @@ function escapeConversationText(text) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function requestCardTitle(record) {
+  if (!record.text) return '已恢复的编辑记录';
   if (record.instructionStatus === 'clarifying') {
     return '等待补充信息';
   }
@@ -235,6 +145,7 @@ function isSuccessfulRequest(record) {
   return record.instructionStatus === 'success' && record.timelineStatus === 'success';
 }
 function requestCardSummary(record) {
+  if (!record.text) return '✓ 已恢复的编辑记录 · 字幕 ' + Number(record.resultCount || 0) + ' 条';
   var time = formatRequestTime(record.submittedAt);
   if (record.subtitleRequest === true) {
     return '✓ 字幕已生成 · ' + Number(record.resultCount || 0) + ' 条 · ' + time;
@@ -252,8 +163,8 @@ function renderRequestStatusCard(card, record) {
       + escapeConversationText(record.clarifyMessage) + '</div>' : '';
   var error = record.error
     ? '<div class="request-error">' + escapeConversationText(record.error) + '</div>' : '';
-  var canUndo = isSubtitle && window.subtitleController
-    && subtitleController.canUndo(record.id);
+  var canUndo = projectStateReady && window.projectEditing
+    && window.projectEditing.canUndo({ projectId: activeProjectId, transactionId: record.transactionId || record.id });
   var undo = canUndo
     ? '<button type="button" class="request-undo" data-undo-request="'
       + escapeConversationText(record.id)
@@ -265,20 +176,23 @@ function renderRequestStatusCard(card, record) {
   card.classList.toggle('is-collapsed', isCollapsed);
   card.innerHTML = summary + '<div class="request-status-details" data-testid="request-status-details"'
     + (isCollapsed ? ' hidden' : '') + '><div class="request-status-head"><span>' + requestCardTitle(record)
-    + '</span><span class="request-status-time">' + formatRequestTime(record.submittedAt)
-    + '</span></div>' + statusRowHTML('instruction-status', '转换编辑指令', record.instructionStatus)
+    + '</span><span class="request-status-time">' + (record.text ? formatRequestTime(record.submittedAt) : '')
+    + '</span></div>' + statusRowHTML('instruction-status', record.awaitingMetadata ? '正在读取视频信息' : '转换编辑指令', record.instructionStatus)
     + statusRowHTML(secondTestId, secondLabel, record.timelineStatus)
     + (isSubtitle && record.timelineStatus === 'success'
       ? '<div class="request-result">已生成 ' + Number(record.resultCount || 0) + ' 条字幕</div>' : '')
-    + clarify + error + undo + '</div>';
+    + clarify + error + undo + '</div>'
+    + (record.historyWarning ? '<div class="request-error">' + escapeConversationText(record.historyWarning) + '</div>' : '');
 }
 function appendRequestStatusCard(record) {
   if (chatEmpty) chatEmpty.style.display = 'none';
-  var message = document.createElement('div');
-  message.className = 'request-user-message';
-  message.dataset.testid = 'request-user-message';
-  message.textContent = record.text;
-  chatArea.appendChild(message);
+  if (record.text) {
+    var message = document.createElement('div');
+    message.className = 'request-user-message';
+    message.dataset.testid = 'request-user-message';
+    message.textContent = record.text;
+    chatArea.appendChild(message);
+  }
   var card = document.createElement('div');
   card.className = 'request-status-card';
   card.dataset.testid = 'request-status-card';
@@ -319,35 +233,13 @@ function updateRequestStatus(record, card, patch) {
     try {
       saveProjectConversation(activeProjectId, nextConversationRecords);
     } catch (error) {
-      if (record.instructionStatus !== 'failed' && record.timelineStatus !== 'failed') {
-        throw error;
-      }
+      record.historyWarning = '编辑结果已保留，但对话历史暂时未保存。';
+      if (isNewRecord) conversationRecords.push(record);
+      renderRequestStatusCard(card, record);
       return;
     }
     if (isNewRecord) conversationRecords.push(record);
   }
-}
-
-/* 判断输入是否为可执行命令 */
-function isCommand(text){
-  var prefixes=['ffmpeg','ffprobe','python','node','npm','npx','pip','winget','dir','ls','echo','where','nvidia-smi'];
-  var t=text.trim().toLowerCase();
-  for(var i=0;i<prefixes.length;i++){if(t.indexOf(prefixes[i])===0)return true}
-  return false;
-}
-
-/* ── generateBtn 路由 ── */
-function executeCommand(text) {
-  addMsg('ai','🔄 执行中…');
-  var statusMsg = chatArea.lastElementChild;
-  cliExec(text, 30000, function(r){
-    statusMsg.remove();
-    if(r.ok){
-      addMsg('ai','✅ 命令执行成功\n\n'+r.stdout+'\n\n💡 提示：修改后的视频请用上方播放器预览。');
-    } else {
-      addMsg('ai','❌ 命令失败 (exit code '+r.exitCode+')\n\n'+r.stderr+'\n\n💡 提示：请检查命令是否正确，或确认工具已安装。');
-    }
-  });
 }
 
 function subtitleErrorMessage(code) {
@@ -370,45 +262,32 @@ function instructionErrorMessage(code) {
   return '编辑指令转换失败，请重试。';
 }
 
-async function runSubtitleInstruction(record, card) {
-  record.subtitleRequest = true;
-  updateRequestStatus(record, card, {
-    instructionStatus: 'success', timelineStatus: 'generating', error: ''
+function projectErrorMessage(error) {
+  var code = error && error.code;
+  if (code === 'EDIT_REVISION_CONFLICT') return '项目已变化，请重新提交这次编辑。';
+  if (code === 'EDIT_PROJECT_NOT_READY' || code === 'EDIT_INVALID_MEDIA' || code === 'RECIPE_INVALID_MEDIA' || code === 'VIDEO_METADATA_UNAVAILABLE') return '视频信息尚未准备好，请重新导入视频后重试。';
+  if (code === 'EDIT_STORAGE_CORRUPT') return '项目保存的数据无法读取，请先保留现有数据再检查。';
+  if (code && code.indexOf('RECIPE_') === 0) return '当前能力尚未接通此编辑，请试试「生成整段视频字幕」。';
+  if (code && (code.indexOf('SUBTITLE_') === 0 || code === 'VIDEO_PATH_UNAVAILABLE')) return subtitleErrorMessage(code);
+  if (error && (error.name === 'QuotaExceededError' || error.name === 'SecurityError')) return '项目暂时无法保存，请检查可用存储后重试。';
+  return '这次编辑未完成，请重试。';
+}
+function refreshRequestCards() {
+  conversationRecords.forEach(function(record) {
+    var card = Array.from(chatArea.querySelectorAll('[data-request-id]')).find(function(element) { return element.dataset.requestId === record.id; });
+    if (card) renderRequestStatusCard(card, record);
   });
-  if (!window.currentProjectVideoPath) {
-    updateRequestStatus(record, card, {
-      timelineStatus: 'failed', error: subtitleErrorMessage('VIDEO_PATH_UNAVAILABLE')
-    });
-    return;
-  }
-  var result = await window.srtAPI.generateSubtitles({
-    videoPath: window.currentProjectVideoPath
-  });
-  if (!result.ok) {
-    updateRequestStatus(record, card, {
-      timelineStatus: 'failed', error: subtitleErrorMessage(result.errorCode)
-    });
-    return;
-  }
-  try {
-    updateRequestStatus(record, card, {
-      timelineStatus: 'success', resultCount: result.segments.length, error: ''
-    });
-    subtitleController.replace(record.id, result.segments);
-    subtitleController.openAfter(card);
-    for (var i = 0; i < conversationRecords.length; i++) {
-      var historicalCard = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
-      if (historicalCard) renderRequestStatusCard(historicalCard, conversationRecords[i]);
-    }
-  } catch (_) {
-    updateRequestStatus(record, card, {
-      timelineStatus: 'failed', error: '字幕暂时无法保存，请重试。'
-    });
-    return;
-  }
 }
 
 async function translateAndApply(text, record, card) {
+  record.awaitingMetadata = !projectStateReady || window.projectVideoLoading;
+  renderRequestStatusCard(card, record);
+  await window.projectEditingReady;
+  await window.currentProjectVideoReady;
+  record.awaitingMetadata = false;
+  renderRequestStatusCard(card, record);
+  if (window.projectEditingError) throw window.projectEditingError;
+  var loaded = window.projectEditing.load(activeProjectId);
   var context = currentProjectContext();
   var translated = await window.srtAPI.translateInstruction(text, record.turns, context);
   if (!translated.ok) {
@@ -422,7 +301,7 @@ async function translateAndApply(text, record, card) {
   if (!turn) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
-      error: '暂不支持这个编辑操作，试试「生成字幕」或「淡入」。'
+      error: '当前能力尚未接通此编辑，请试试「生成整段视频字幕」。'
     });
     return;
   }
@@ -436,27 +315,23 @@ async function translateAndApply(text, record, card) {
     pendingClarifyCard = card;
     return;
   }
-  record.instructionStatus = 'success';
-  var steps = turn.steps || [];
-  var hasSubtitle = steps.some(function (step) {
-    return step.capability === 'subtitle.generate@1';
-  });
-  var effectSteps = steps.filter(function (step) {
-    return step.capability !== 'subtitle.generate@1';
-  });
-  if (hasSubtitle) {
-    await runSubtitleInstruction(record, card);
-    applyInstructionSteps(effectSteps);
-    return;
-  }
-  record.subtitleRequest = false;
+  window.editCapabilityRegistry.validateRecipe(turn);
+  record.subtitleRequest = turn.steps[0].capability === 'subtitle.generate@1';
+  record.clarifyMessage = '';
   updateRequestStatus(record, card, {
-    instructionStatus: 'success', timelineStatus: 'applying', error: ''
+    instructionStatus: 'success', timelineStatus: record.subtitleRequest ? 'generating' : 'applying', error: ''
   });
-  var applied = applyInstructionSteps(effectSteps);
-  updateRequestStatus(record, card, applied
-    ? { timelineStatus: 'success', error: '' }
-    : { timelineStatus: 'failed', error: '编辑指令未能应用到时间轴。' });
+  var applied = await window.projectEditing.applyRecipe({ projectId: activeProjectId,
+    expectedRevision: loaded.document.revision, requestId: record.id, recipe: turn });
+  record.transactionId = applied.transactionId;
+  record.timelineStatus = 'success';
+  var subtitle = applied.document.edits.find(function(edit) { return edit.enabled && edit.type === 'subtitle.track@1'; });
+  updateRequestStatus(record, card, { timelineStatus: 'success', resultCount: subtitle ? subtitle.payload.segments.length : 0, error: '' });
+  window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
+  if (record.subtitleRequest && window.subtitleController) {
+    subtitleController.render(); subtitleController.openAfter(card);
+  }
+  refreshRequestCards();
 }
 
 /* ── generateBtn click handler ── */
@@ -465,7 +340,7 @@ function hydrateConversationHistory() {
     appendRequestStatusCard(conversationRecords[i]);
   }
   var latestSubtitleCard = latestValidSubtitleCard();
-  if (latestSubtitleCard && window.subtitleController) subtitleController.restoreAfter(latestSubtitleCard);
+  if (projectStateReady && latestSubtitleCard && window.subtitleController) subtitleController.restoreAfter(latestSubtitleCard);
 }
 function latestValidSubtitleCard() {
   for (var i = conversationRecords.length - 1; i >= 0; i--) {
@@ -477,27 +352,45 @@ function latestValidSubtitleCard() {
   return null;
 }
 hydrateConversationHistory();
+window.addEventListener('project-edit-state-changed', function() {
+  if (!projectStateReady) return;
+  renderMarkers(); refreshRequestCards();
+});
+window.projectEditingReady.then(function() {
+  projectStateReady = true;
+  var document = window.projectEditing.load(activeProjectId).document;
+  conversationRecords.forEach(function(record) {
+    var applied = document.edits.find(function(edit) { return edit.transactionId === (record.transactionId || record.id); });
+    if (!applied) return;
+    record.transactionId = applied.transactionId;
+    record.instructionStatus = 'success'; record.timelineStatus = 'success';
+    record.subtitleRequest = applied.type === 'subtitle.track@1';
+    record.resultCount = record.subtitleRequest ? applied.payload.segments.length : 0;
+    record.error = ''; record.clarifyMessage = ''; record.subtitleUndone = false;
+  });
+  document.edits.forEach(function(edit) {
+    var hasRecord = conversationRecords.some(function(record) { return (record.transactionId || record.id) === edit.transactionId; });
+    if (hasRecord || !window.projectEditing.canUndo({ projectId: activeProjectId, transactionId: edit.transactionId })) return;
+    var recovered = { id: edit.transactionId, transactionId: edit.transactionId, text: '', submittedAt: 0,
+      instructionStatus: 'success', timelineStatus: 'success', subtitleRequest: edit.type === 'subtitle.track@1',
+      resultCount: edit.type === 'subtitle.track@1' ? edit.payload.segments.length : 0 };
+    conversationRecords.push(recovered); appendRequestStatusCard(recovered);
+  });
+  renderMarkers(); refreshRequestCards();
+  var card = latestValidSubtitleCard();
+  if (card && window.subtitleController) subtitleController.restoreAfter(card);
+}).catch(function(error) { addMsg('ai', projectErrorMessage(error)); });
 
 generateBtn.addEventListener('click', async function() {
   var text = editorEl.textContent.trim();
   if (!text || generateBtn.disabled) return;
   var isClarifyFollowup = Boolean(pendingClarifyRecord && pendingClarifyCard);
-  if (!isClarifyFollowup && window.subtitleController && !await subtitleController.prepareForNextRequest()) {
+  if (window.subtitleController && !await subtitleController.prepareForNextRequest()) {
     setSubmitState();
     return;
   }
   editorEl.textContent = '';
   setSubmitState();
-
-  if (isCommand(text)) {
-    if (isClarifyFollowup) {
-      pendingClarifyRecord = null;
-      pendingClarifyCard = null;
-    }
-    addMsg('user', text);
-    executeCommand(text);
-    return;
-  }
 
   var record, card;
   if (isClarifyFollowup) {
@@ -506,6 +399,9 @@ generateBtn.addEventListener('click', async function() {
     pendingClarifyRecord = null;
     pendingClarifyCard = null;
     record.turns.push({ role: 'user', text: text });
+    record.clarifyMessage = '';
+    record.instructionStatus = 'converting';
+    renderRequestStatusCard(card, record);
     appendFollowupMessage(card, text);
   } else {
     record = createConversationRequest(text);
@@ -515,11 +411,16 @@ generateBtn.addEventListener('click', async function() {
   setSubmitState();
   try {
     await translateAndApply(text, record, card);
-  } catch (_) {
+  } catch (error) {
+    if (record.timelineStatus === 'success' && record.transactionId) {
+      record.historyWarning = '编辑已保存，但显示未能更新，请刷新页面。';
+      renderRequestStatusCard(card, record);
+      return;
+    }
     updateRequestStatus(record, card, {
       instructionStatus: record.instructionStatus === 'success' ? 'success' : 'failed',
       timelineStatus: record.instructionStatus === 'success' ? 'failed' : 'not_run',
-      error: '这次编辑未完成，请重试。'
+      error: projectErrorMessage(error)
     });
   } finally {
     requestInFlight = false;
@@ -544,8 +445,12 @@ chatArea.addEventListener('click', function(event) {
   var requestCard = button.closest('[data-request-id]');
   try {
     if (!subtitleController.confirmUndo()) return;
-    subtitleController.undo(requestId);
     var undoneRecord = conversationRecords.find(function(record) { return record.id === requestId; });
+    var loaded = window.projectEditing.load(activeProjectId);
+    var undone = window.projectEditing.undo({ projectId: activeProjectId, expectedRevision: loaded.document.revision,
+      transactionId: undoneRecord.transactionId || undoneRecord.id });
+    subtitleController.afterUndo(undone);
+    window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
     updateRequestStatus(undoneRecord, requestCard, { subtitleUndone: true });
     for (var i = 0; i < conversationRecords.length; i++) {
       var card = chatArea.querySelector('[data-request-id="' + conversationRecords[i].id + '"]');
@@ -555,13 +460,13 @@ chatArea.addEventListener('click', function(event) {
       var latestSubtitleCard = latestValidSubtitleCard();
       if (latestSubtitleCard) subtitleController.openAfter(latestSubtitleCard);
     }
-  } catch (_) {}
+  } catch (error) { addMsg('ai', projectErrorMessage(error)); }
 });
 editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();generateBtn.click()}});
 
 window.timelineController = {
   isRequestInFlight: function() { return requestInFlight; },
   getUnsupportedExportItems: function() {
-    return timelineEffects.map(function(effect) { return effect.name; });
+    return [];
   }
 };

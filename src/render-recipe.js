@@ -91,6 +91,26 @@
     });
   }
 
-  return { buildSubtitleRecipe: buildSubtitleRecipe, validateRenderRecipe: validateRenderRecipe,
-    SUBTITLE_STYLE: SUBTITLE_STYLE };
+  function buildRenderRecipe(graph, registry) {
+    if (!isPlainObject(graph) || !Array.isArray(graph.nodes)
+        || !registry || typeof registry.forNodeType !== 'function') {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    var steps = [];
+    graph.nodes.forEach(function(node) {
+      if (!isPlainObject(node) || typeof node.type !== 'string') {
+        throw codedError('EXPORT_INVALID_RECIPE');
+      }
+      if (node.type === 'source.video@1') return;
+      var registration = registry.forNodeType(node.type);
+      if (!registration || typeof registration.toExport !== 'function') {
+        throw codedError('EXPORT_UNSUPPORTED_OPERATION');
+      }
+      steps.push(registration.toExport(node));
+    });
+    return validateRenderRecipe({ version: 1, steps: steps });
+  }
+
+  return { buildSubtitleRecipe: buildSubtitleRecipe, buildRenderRecipe: buildRenderRecipe,
+    validateRenderRecipe: validateRenderRecipe, SUBTITLE_STYLE: SUBTITLE_STYLE };
 });
