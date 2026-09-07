@@ -316,9 +316,9 @@
     });
 
     function validateRecipe(recipe) {
-      if (!isPlainObject(recipe) || Object.keys(recipe).length !== 2
+      if (!isDataOnly(recipe) || !isPlainObject(recipe) || Object.keys(recipe).length !== 2
           || !hasOnlyKeys(recipe, ['kind', 'steps']) || recipe.kind !== 'instruction'
-          || !Array.isArray(recipe.steps) || recipe.steps.length < 1 || !isDataOnly(recipe)) {
+          || !Array.isArray(recipe.steps) || recipe.steps.length < 1) {
         throw codedError('RECIPE_INVALID');
       }
       recipe.steps.forEach(function(step) {

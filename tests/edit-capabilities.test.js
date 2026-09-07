@@ -140,6 +140,25 @@ test('validates and normalizes multiple data-only steps with per-step ranges', f
 
 test('rejects ranges, unknown parameters, executable fields and non-data values', function() {
   const registry = createCapabilityRegistry();
+  let kindGetterCalls = 0;
+  let stepsGetterCalls = 0;
+  const executableRecipe = {};
+  Object.defineProperties(executableRecipe, {
+    kind: {
+      enumerable: true,
+      get: function() { kindGetterCalls += 1; return 'instruction'; }
+    },
+    steps: {
+      enumerable: true,
+      get: function() { stepsGetterCalls += 1; return []; }
+    }
+  });
+  assert.throws(function() {
+    registry.validateRecipe(executableRecipe);
+  }, { code: 'RECIPE_INVALID' });
+  assert.equal(kindGetterCalls, 0);
+  assert.equal(stepsGetterCalls, 0);
+
   assert.throws(function() {
     registry.normalizeRecipe({
       kind: 'instruction',
