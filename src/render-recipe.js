@@ -6,6 +6,7 @@
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
+    referenceWidth: 800,
     referenceHeight: 450,
     bottomPercent: 7,
     maxWidthPercent: 84,
@@ -50,6 +51,9 @@
 
     var step = recipe.steps[0];
     if (!isPlainObject(step) || !hasOnlyKeys(step, ['capability', 'params'])) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    if (typeof step.capability !== 'string') {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
     if (step.capability !== 'subtitle.burn@1') {
