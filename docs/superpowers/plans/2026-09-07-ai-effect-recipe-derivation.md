@@ -35,7 +35,7 @@
 **Interfaces:**
 - Consumes: 无（当前模块已是唯一入口）。
 - Produces:
-  - `CAPABILITY_SCHEMAS`：数组，元素为 `{ id, summary, timing, params }`。
+  - `CAPABILITY_SCHEMAS`：数组，元素为 `{ id, description, timing, params }`。
   - `getCapabilitySchema(id)` → schema 对象或 `null`。
   - `buildPrompt(userText, history)` → string。
   - `parseInstruction(output)` → `{kind:'clarify',message}` 或 `{kind:'instruction',steps}`；非法时抛 `{code:'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT'}`。
@@ -195,25 +195,25 @@ Expected: FAIL（注册表仍是 3 个能力、无 `CAPABILITY_SCHEMAS`/`getCapa
 var CAPABILITY_SCHEMAS = Object.freeze([
   Object.freeze({
     id: 'subtitle.generate@1',
-    summary: '给视频（或指定时间区间）生成字幕',
+    description: '给视频（或指定时间区间）生成字幕',
     timing: true,
     params: Object.freeze({})
   }),
   Object.freeze({
     id: 'fade.in@1',
-    summary: '画面从黑场淡入（或指定时间区间淡入）',
+    description: '画面从黑场淡入（或指定时间区间淡入）',
     timing: true,
     params: Object.freeze({})
   }),
   Object.freeze({
     id: 'fade.out@1',
-    summary: '画面淡出到黑场（或指定时间区间淡出）',
+    description: '画面淡出到黑场（或指定时间区间淡出）',
     timing: true,
     params: Object.freeze({})
   }),
   Object.freeze({
     id: 'color.grade@1',
-    summary: '调整画面整体色调',
+    description: '调整画面整体色调',
     timing: true,
     params: Object.freeze({
       warmth: Object.freeze({
@@ -232,7 +232,7 @@ var CAPABILITY_SCHEMAS = Object.freeze([
   }),
   Object.freeze({
     id: 'texture.grain@1',
-    summary: '叠加胶片颗粒质感',
+    description: '叠加胶片颗粒质感',
     timing: true,
     params: Object.freeze({
       amount: Object.freeze({
@@ -243,7 +243,7 @@ var CAPABILITY_SCHEMAS = Object.freeze([
   }),
   Object.freeze({
     id: 'vignette@1',
-    summary: '为画面四周添加暗角',
+    description: '为画面四周添加暗角',
     timing: true,
     params: Object.freeze({
       strength: Object.freeze({
@@ -275,7 +275,7 @@ function capabilityLine(schema) {
   var ownParams = Object.keys(schema.params).map(function (key) {
     return describeParam(key, schema.params[key]);
   });
-  var text = '- ' + schema.id + '：' + schema.summary;
+  var text = '- ' + schema.id + '：' + schema.description;
   if (ownParams.length) text += '；参数：' + ownParams.join('，');
   if (schema.timing) text += '；可带 start/end 时间区间（秒）';
   return text;
