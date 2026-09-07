@@ -5,15 +5,18 @@ const { CAPABILITY_SCHEMAS, getCapabilitySchema, buildPrompt, parseInstruction }
 
 test('exports only the current registry prompt catalog', () => {
   assert.deepEqual(CAPABILITY_SCHEMAS, createCapabilityRegistry().promptDefinitions());
-  assert.deepEqual(CAPABILITY_SCHEMAS.map((definition) => definition.id), ['subtitle.generate@1']);
+  assert.deepEqual(CAPABILITY_SCHEMAS.map((definition) => definition.id), [
+    'subtitle.generate@1', 'video.color.adjust@1'
+  ]);
   assert.equal(getCapabilitySchema('subtitle.generate@1').range.allowed, false);
+  assert.equal(getCapabilitySchema('video.color.adjust@1').range.allowed, true);
   for (const id of ['fade.in@1', 'fade.out@1', 'color.grade@1', 'texture.grain@1', 'vignette@1']) {
     assert.equal(getCapabilitySchema(id), null);
   }
   assert.equal(getCapabilitySchema('__proto__'), null);
 });
 
-test('buildPrompt teaches decomposition without effect mappings or unavailable ids', () => {
+test('buildPrompt teaches typed color parameters, ranges and multi-step output without effect mappings', () => {
   const prompt = buildPrompt('做成冷色并在片头淡入');
   assert.match(prompt, /拆解/);
   assert.match(prompt, /subtitle\.generate@1/);
@@ -21,9 +24,16 @@ test('buildPrompt teaches decomposition without effect mappings or unavailable i
   assert.match(prompt, /当前能力未接通/);
   assert.match(prompt, /clarify/);
   assert.match(prompt, /替换.*字幕轨/);
+  assert.match(prompt, /video\.color\.adjust@1/);
+  for (const name of ['temperature', 'brightness', 'saturation', 'contrast']) {
+    assert.match(prompt, new RegExp(name + '.*type.*number.*minimum.*maximum.*default.*description'));
+  }
+  assert.match(prompt, /顶层 range\.start\/end/);
+  assert.match(prompt, /一个或多个步骤/);
   assert.doesNotMatch(prompt, /color\.grade|fade\.|texture\.grain|vignette/);
   assert.doesNotMatch(prompt, /冷色.*能力|淡入.*能力/);
-  assert.doesNotMatch(prompt, /start\/end|指定时间区间|撤销|叠加/);
+  assert.doesNotMatch(prompt, /撤销|叠加/);
+  assert.doesNotMatch(prompt, /冷色.*temperature|复古.*saturation|效果名.*参数/);
 });
 
 test('buildPrompt preserves conversation history', () => {
@@ -77,6 +87,18 @@ test('parseInstruction accepts only the full-video subtitle recipe', () => {
   assert.deepEqual(parseInstruction(JSON.stringify(recipe)), recipe);
 });
 
+test('parseInstruction accepts multiple color steps with optional top-level ranges', () => {
+  const recipe = {
+    kind: 'instruction',
+    steps: [
+      { capability: 'video.color.adjust@1', range: { start: 0, end: 2 },
+        params: { brightness: 0.2 } },
+      { capability: 'video.color.adjust@1', params: { saturation: 1.4, contrast: 1.1 } }
+    ]
+  };
+  assert.deepEqual(parseInstruction(JSON.stringify(recipe)), recipe);
+});
+
 for (const output of [
   'not json',
   '[]',
@@ -84,7 +106,10 @@ for (const output of [
   '{"kind":"clarify","message":"ok","extra":true}',
   '{"kind":"instruction","steps":[]}',
   '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{"start":0}}]}',
-  '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}},{"capability":"subtitle.generate@1","params":{}}]}',
+  '{"kind":"instruction","steps":[{"capability":"video.color.adjust@1","params":{}}]}',
+  '{"kind":"instruction","steps":[{"capability":"video.color.adjust@1","params":{"brightness":2}}]}',
+  '{"kind":"instruction","steps":[{"capability":"video.color.adjust@1","range":{"start":2,"end":2},"params":{"brightness":0.2}}]}',
+  '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","range":{"start":0,"end":2},"params":{}}]}',
   '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{}}]}',
   '{"kind":"instruction","steps":[{"capability":"color.grade@1","params":{"warmth":-1}}]}',
   '{"kind":"unknown"}'

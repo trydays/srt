@@ -36,10 +36,20 @@ function rangeText(range) {
 
 function capabilityLine(definition) {
   var line = '- ' + definition.id + '：' + definition.description;
-  var propertyNames = Object.keys(definition.params.properties || {});
-  if (propertyNames.length) line += '；参数：' + propertyNames.join('、');
+  var properties = definition.params.properties || {};
+  var propertyNames = Object.keys(properties);
+  if (propertyNames.length) {
+    line += '；参数：' + propertyNames.map(function(name) {
+      var property = properties[name];
+      return name + '（type: ' + property.type + ', minimum: ' + property.minimum
+        + ', maximum: ' + property.maximum + ', default: ' + property.default
+        + ', description: ' + property.description + '）';
+    }).join('；');
+  }
   if (definition.range && definition.range.allowed === false) {
     line += '；只作用于整段视频，不接受时间区间';
+  } else if (definition.range && definition.range.allowed === true) {
+    line += '；可以提供顶层 range.start/end 指定半开时间区间，省略时作用于整段视频';
   }
   return line;
 }
@@ -104,7 +114,8 @@ function buildPrompt(userText, history, context) {
   lines = lines.concat([
     '每次只输出一个 JSON 对象，只能是下面两种之一：',
     '1. 能力未接通或信息不足：{"kind":"clarify","message":"清楚说明当前不可用能力或追问内容"}',
-    '2. 可以执行：{"kind":"instruction","steps":[{"capability":"能力id","params":{}}]}',
+    '2. 可以执行：{"kind":"instruction","steps":[{"capability":"能力id","range":{"start":开始秒数,"end":结束秒数},"params":{}}]}',
+    'instruction 的 steps 是一个或多个步骤组成的数组；每一步只使用 capability、可选的顶层 range 和 params。',
     'instruction 必须严格符合能力目录；不要输出命令、Markdown、代码块或额外解释。'
   ]);
 

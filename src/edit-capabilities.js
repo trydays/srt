@@ -2,10 +2,13 @@
   var renderRecipe = typeof module === 'object' && module.exports
     ? require('./render-recipe')
     : root && root.SRTRenderRecipe;
-  var api = factory(renderRecipe);
+  var colorAdjustment = typeof module === 'object' && module.exports
+    ? require('./color-adjustment')
+    : root && root.SRTColorAdjustment;
+  var api = factory(renderRecipe, colorAdjustment);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
@@ -32,6 +35,34 @@
 
   function hasOnlyKeys(value, allowed) {
     return Object.keys(value).every(function(key) { return allowed.indexOf(key) !== -1; });
+  }
+
+  function isDataOnly(value, seen) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (!Array.isArray(value) && !isPlainObject(value)) return false;
+    if (Object.getOwnPropertySymbols(value).length) return false;
+    seen = seen || [];
+    if (seen.indexOf(value) !== -1) return false;
+    seen.push(value);
+    var names = Object.getOwnPropertyNames(value);
+    if (Array.isArray(value)) {
+      var keys = Object.keys(value);
+      if (keys.length !== value.length || keys.some(function(key, index) {
+        return key !== String(index);
+      })) {
+        seen.pop();
+        return false;
+      }
+      names = keys;
+    }
+    var valid = names.every(function(name) {
+      var descriptor = Object.getOwnPropertyDescriptor(value, name);
+      return descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        && descriptor.enumerable && isDataOnly(descriptor.value, seen);
+    });
+    seen.pop();
+    return valid;
   }
 
   function sameStyle(style) {
@@ -87,6 +118,7 @@
       editMode: 'replaceByType',
       editType: 'subtitle.track@1',
       nodeType: 'visual.subtitle@1',
+      graphStage: 'overlay',
 
       prepare: async function(_step, executionContext) {
         if (!executionContext || typeof executionContext.videoPath !== 'string'
@@ -172,12 +204,91 @@
     };
   }
 
+  function signed(value) {
+    return value > 0 ? '+' + value : String(value);
+  }
+
+  function colorSummary(params) {
+    return '色温 ' + signed(params.temperature) + '，亮度 ' + signed(params.brightness)
+      + '，饱和度 ' + params.saturation + '，对比度 ' + params.contrast;
+  }
+
+  function createColorRegistration() {
+    return {
+      definition: {
+        schemaVersion: 1,
+        id: 'video.color.adjust@1',
+        label: '画面调色',
+        description: '调整画面的色温、亮度、饱和度和对比度',
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          properties: colorAdjustment.PARAMETER_SCHEMA
+        },
+        range: { allowed: true, default: 'wholeTarget' }
+      },
+      editMode: 'append',
+      editType: 'video.color.adjustment@1',
+      nodeType: 'video.color@1',
+      graphStage: 'sourceEffect',
+
+      prepare: async function() { return {}; },
+
+      toEdit: function(_prepared, step) {
+        return {
+          type: 'video.color.adjustment@1',
+          range: clone(step.range),
+          payload: colorAdjustment.normalizeParams(step.params, true)
+        };
+      },
+
+      toGraph: function(edit, graphContext) {
+        return {
+          id: 'node-' + edit.id,
+          type: 'video.color@1',
+          range: clone(edit.range),
+          inputs: [{ port: 'base', nodeId: graphContext.videoHead }],
+          props: clone(edit.payload)
+        };
+      },
+
+      toTimeline: function(edit) {
+        return {
+          editId: edit.id,
+          transactionId: edit.transactionId,
+          lane: 'video-effect',
+          range: clone(edit.range),
+          label: '画面调色',
+          summary: colorSummary(edit.payload)
+        };
+      },
+
+      preview: function(graph, time) {
+        return graph.nodes.filter(function(node) {
+          return node.type === 'video.color@1'
+            && colorAdjustment.isActive(node.range, time);
+        }).map(function(node) {
+          return colorAdjustment.normalizeParams(node.props, false);
+        });
+      },
+
+      toExport: function(node) {
+        return {
+          capability: 'video.color.adjust@1',
+          range: clone(node.range),
+          params: colorAdjustment.normalizeParams(node.props, false)
+        };
+      }
+    };
+  }
+
   function completeRegistration(registration) {
     var definition = registration && registration.definition;
     return isPlainObject(registration) && isPlainObject(definition)
-      && registration.editMode === 'replaceByType'
+      && ['append', 'replaceByType'].indexOf(registration.editMode) !== -1
       && typeof registration.editType === 'string' && registration.editType
       && typeof registration.nodeType === 'string' && registration.nodeType
+      && ['sourceEffect', 'overlay'].indexOf(registration.graphStage) !== -1
       && definition.schemaVersion === 1 && typeof definition.id === 'string'
       && isPlainObject(definition.params) && definition.params.type === 'object'
       && definition.params.additionalProperties === false
@@ -190,7 +301,9 @@
   }
 
   function createCapabilityRegistry(registrations) {
-    var items = registrations === undefined ? [createSubtitleRegistration()] : registrations.slice();
+    var items = registrations === undefined
+      ? [createSubtitleRegistration(), createColorRegistration()]
+      : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);
     var byNodeType = Object.create(null);
@@ -205,25 +318,45 @@
     function validateRecipe(recipe) {
       if (!isPlainObject(recipe) || Object.keys(recipe).length !== 2
           || !hasOnlyKeys(recipe, ['kind', 'steps']) || recipe.kind !== 'instruction'
-          || !Array.isArray(recipe.steps) || recipe.steps.length !== 1) {
+          || !Array.isArray(recipe.steps) || recipe.steps.length < 1 || !isDataOnly(recipe)) {
         throw codedError('RECIPE_INVALID');
       }
-      var step = recipe.steps[0];
-      if (!isPlainObject(step) || Object.keys(step).length !== 2
-          || !hasOnlyKeys(step, ['capability', 'params'])) {
-        throw codedError('RECIPE_INVALID');
-      }
-      var registration = byId[step.capability];
-      if (!registration || !completeRegistration(registration)) {
-        throw codedError('RECIPE_UNSUPPORTED_CAPABILITY');
-      }
-      if (!isPlainObject(step.params)) throw codedError('RECIPE_INVALID_PARAM');
-      var properties = registration.definition.params.properties;
-      if (Object.keys(step.params).some(function(key) {
-        return !Object.prototype.hasOwnProperty.call(properties, key);
-      })) {
-        throw codedError('RECIPE_INVALID_PARAM');
-      }
+      recipe.steps.forEach(function(step) {
+        if (!isPlainObject(step) || Object.keys(step).length < 2 || Object.keys(step).length > 3
+            || !hasOnlyKeys(step, ['capability', 'range', 'params'])
+            || typeof step.capability !== 'string') {
+          throw codedError('RECIPE_INVALID');
+        }
+        var registration = byId[step.capability];
+        if (!registration || !completeRegistration(registration)) {
+          throw codedError('RECIPE_UNSUPPORTED_CAPABILITY');
+        }
+        if (!isPlainObject(step.params)) throw codedError('RECIPE_INVALID_PARAM');
+        var properties = registration.definition.params.properties;
+        var parameterNames = Object.keys(step.params);
+        if ((Object.keys(properties).length > 0 && parameterNames.length === 0)
+            || parameterNames.some(function(key) {
+              var schema = properties[key];
+              var value = step.params[key];
+              return !schema || schema.type !== 'number' || typeof value !== 'number'
+                || !Number.isFinite(value) || value < schema.minimum || value > schema.maximum;
+            })) {
+          throw codedError('RECIPE_INVALID_PARAM');
+        }
+        if (Object.prototype.hasOwnProperty.call(step, 'range')) {
+          if (registration.definition.range.allowed === false) {
+            throw codedError('RECIPE_INVALID_RANGE');
+          }
+          var range = step.range;
+          if (!isPlainObject(range) || Object.keys(range).length !== 2
+              || !hasOnlyKeys(range, ['start', 'end'])
+              || typeof range.start !== 'number' || !Number.isFinite(range.start)
+              || typeof range.end !== 'number' || !Number.isFinite(range.end)
+              || range.start < 0 || range.end <= range.start) {
+            throw codedError('RECIPE_INVALID_RANGE');
+          }
+        }
+      });
       return clone(recipe);
     }
 
@@ -239,20 +372,20 @@
       validateRecipe: validateRecipe,
       normalizeRecipe: function(recipe, mediaFacts) {
         var validated = validateRecipe(recipe);
-        var step = validated.steps[0];
-        var registration = byId[step.capability];
         var duration = mediaFacts && mediaFacts.duration;
         if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
           throw codedError('RECIPE_INVALID_MEDIA');
         }
         return {
           kind: 'instruction',
-          steps: [{
-            capability: registration.definition.id,
-            target: { kind: 'source', id: 'main-video' },
-            range: { start: 0, end: duration },
-            params: clone(step.params)
-          }]
+          steps: validated.steps.map(function(step) {
+            return {
+              capability: step.capability,
+              target: { kind: 'source', id: 'main-video' },
+              range: colorAdjustment.normalizeRange(step.range, duration),
+              params: clone(step.params)
+            };
+          })
         };
       }
     };
@@ -260,6 +393,7 @@
 
   return {
     createCapabilityRegistry: createCapabilityRegistry,
+    createColorRegistration: createColorRegistration,
     createSubtitleRegistration: createSubtitleRegistration,
     codedError: codedError,
     clone: clone,
