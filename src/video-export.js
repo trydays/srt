@@ -1,0 +1,237 @@
+const fs = require('node:fs/promises');
+const { constants } = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { validateRenderRecipe, SUBTITLE_STYLE } = require('./render-recipe');
+
+function codedError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function createVideoExportService(options) {
+  const getExportTools = options.getExportTools;
+  const spawnImpl = options.spawnImpl || spawn;
+  const fsApi = options.fsApi || fs;
+  let current = null;
+
+  function getState() {
+    return current ? { jobId: current.jobId, phase: current.phase } : { phase: 'idle' };
+  }
+
+  function runProcess(command, args, spawnOptions, onStdout) {
+    return new Promise((resolve, reject) => {
+      let child;
+      try {
+        child = spawnImpl(command, args, spawnOptions);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      current.child = child;
+      let stdout = '';
+      let stderr = '';
+      if (child.stdout) child.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        stdout += text;
+        if (onStdout) onStdout(text);
+      });
+      if (child.stderr) child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      child.once('error', reject);
+      child.once('close', (code, signal) => {
+        if (current && current.child === child) current.child = null;
+        resolve({ code, signal, stdout, stderr });
+      });
+    });
+  }
+
+  async function probeMedia(ffprobePath, mediaPath) {
+    const result = await runProcess(ffprobePath, [
+      '-v', 'error', '-show_format', '-show_streams', '-of', 'json', mediaPath
+    ], { shell: false });
+    if (result.code !== 0) throw codedError('EXPORT_INVALID_MEDIA');
+    let probe;
+    try {
+      probe = JSON.parse(result.stdout);
+    } catch (_) {
+      throw codedError('EXPORT_INVALID_MEDIA');
+    }
+    const streams = Array.isArray(probe.streams) ? probe.streams : [];
+    const video = streams.find((stream) => stream.codec_type === 'video');
+    const audio = streams.find((stream) => stream.codec_type === 'audio');
+    const duration = Number(probe.format && probe.format.duration || video && video.duration);
+    if (!video || !Number.isFinite(duration) || duration <= 0
+        || !Number.isFinite(Number(video.width)) || !Number.isFinite(Number(video.height))) {
+      throw codedError('EXPORT_INVALID_MEDIA');
+    }
+    const sideRotation = Array.isArray(video.side_data_list)
+      ? video.side_data_list.find((item) => Number.isFinite(Number(item.rotation)))
+      : null;
+    const rotation = Number(sideRotation && sideRotation.rotation || video.tags && video.tags.rotate || 0);
+    const rotated = Math.abs(rotation) % 180 === 90;
+    return {
+      duration,
+      hasAudio: Boolean(audio),
+      displayWidth: Number(rotated ? video.height : video.width),
+      displayHeight: Number(rotated ? video.width : video.height)
+    };
+  }
+
+  function assTime(seconds) {
+    const centiseconds = Math.max(0, Math.round(seconds * 100));
+    const hours = Math.floor(centiseconds / 360000);
+    const minutes = Math.floor(centiseconds / 6000) % 60;
+    const secs = Math.floor(centiseconds / 100) % 60;
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centiseconds % 100).padStart(2, '0')}`;
+  }
+
+  function buildAss(recipe, media) {
+    const fontSize = media.displayHeight * SUBTITLE_STYLE.fontSize / SUBTITLE_STYLE.referenceHeight;
+    const marginH = Math.round(media.displayWidth * (100 - SUBTITLE_STYLE.maxWidthPercent) / 200);
+    const marginV = Math.round(media.displayHeight * SUBTITLE_STYLE.bottomPercent / 100);
+    const dialogue = recipe.steps[0].params.segments.map((segment) => {
+      const text = segment.text
+        .replace(/\\/g, `\\\u2060`)
+        .replace(/{/g, '\\{')
+        .replace(/\r\n?|\n/g, '\\N');
+      return `Dialogue: 0,${assTime(segment.start)},${assTime(segment.end)},Default,,0,0,0,,${text}`;
+    });
+    return [
+      '[Script Info]',
+      'ScriptType: v4.00+',
+      `PlayResX: ${media.displayWidth}`,
+      `PlayResY: ${media.displayHeight}`,
+      'WrapStyle: 0',
+      '',
+      '[V4+ Styles]',
+      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+      `Style: Default,${SUBTITLE_STYLE.fontFamily},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H47000000,0,0,0,0,100,100,0,0,3,0,0,2,${marginH},${marginH},${marginV},1`,
+      '',
+      '[Events]',
+      'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+      ...dialogue,
+      ''
+    ].join('\n');
+  }
+
+  async function execute(job, onProgress) {
+    let taskDir;
+    try {
+      const recipe = validateRenderRecipe(job.recipe);
+      let sourcePath;
+      let sourceStat;
+      try {
+        sourcePath = await fsApi.realpath(job.videoPath);
+        sourceStat = await fsApi.stat(sourcePath);
+      } catch (_) {
+        throw codedError('EXPORT_INVALID_MEDIA');
+      }
+      if (!sourceStat.isFile()) throw codedError('EXPORT_INVALID_MEDIA');
+      if (path.resolve(job.videoPath) === path.resolve(job.outputPath)) {
+        throw codedError('EXPORT_SOURCE_OVERWRITE');
+      }
+      try {
+        const targetPath = await fsApi.realpath(job.outputPath);
+        if (targetPath === sourcePath) throw codedError('EXPORT_SOURCE_OVERWRITE');
+        throw codedError('EXPORT_TARGET_EXISTS');
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      if (current.cancelled) throw codedError('EXPORT_CANCELLED');
+      const tools = await getExportTools();
+      if (current.cancelled) throw codedError('EXPORT_CANCELLED');
+      const source = await probeMedia(tools.ffprobePath, sourcePath);
+      if (current.cancelled) throw codedError('EXPORT_CANCELLED');
+      if (recipe.steps[0].params.segments.some((segment) => segment.start >= source.duration
+          || segment.end > source.duration + 0.25)) {
+        throw codedError('EXPORT_INVALID_MEDIA');
+      }
+      taskDir = await fsApi.mkdtemp(path.join(os.tmpdir(), 'srt-video-export-'));
+      const assPath = path.join(taskDir, 'captions.ass');
+      const stagedPath = path.join(taskDir, 'staged.mp4');
+      await fsApi.writeFile(assPath, buildAss(recipe, source), 'utf8');
+      current.phase = 'rendering';
+      if (onProgress) onProgress({ jobId: job.jobId, phase: 'rendering', percent: 0 });
+      if (current.cancelled) throw codedError('EXPORT_CANCELLED');
+      const renderArgs = [
+        '-hide_banner', '-nostdin', '-n', '-i', sourcePath,
+        '-map', '0:v:0', '-map', '0:a:0?', '-vf', 'ass=captions.ass',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-pix_fmt', 'yuv420p', '-fps_mode', 'passthrough',
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+        '-progress', 'pipe:1', '-nostats', stagedPath
+      ];
+      let progressBuffer = '';
+      const rendered = await runProcess(tools.ffmpegPath, renderArgs,
+        { cwd: taskDir, shell: false }, (chunk) => {
+          progressBuffer += chunk;
+          const lines = progressBuffer.split(/\r?\n/);
+          progressBuffer = lines.pop();
+          for (const line of lines) {
+            const match = /^out_time_us=(\d+)$/.exec(line);
+            if (!match) continue;
+            const percent = Math.min(99, Math.max(0,
+              Math.floor(Number(match[1]) / (source.duration * 1000000) * 100)));
+            if (onProgress) onProgress({ jobId: job.jobId, phase: 'rendering', percent });
+          }
+        });
+      if (current.cancelled) throw codedError('EXPORT_CANCELLED');
+      if (rendered.code !== 0) throw codedError('EXPORT_RENDER_FAILED');
+      current.phase = 'finalizing';
+      if (onProgress) onProgress({ jobId: job.jobId, phase: 'finalizing', percent: 99 });
+      let output;
+      try {
+        output = await probeMedia(tools.ffprobePath, stagedPath);
+      } catch (_) {
+        throw codedError('EXPORT_RENDER_FAILED');
+      }
+      if (output.displayWidth !== source.displayWidth || output.displayHeight !== source.displayHeight
+          || Math.abs(output.duration - source.duration) > 0.25
+          || (source.hasAudio && !output.hasAudio)) {
+        throw codedError('EXPORT_RENDER_FAILED');
+      }
+      try {
+        await fsApi.copyFile(stagedPath, job.outputPath, constants.COPYFILE_EXCL);
+      } catch (error) {
+        if (error.code === 'EEXIST') throw codedError('EXPORT_TARGET_EXISTS');
+        throw codedError('EXPORT_WRITE_FAILED');
+      }
+      return { jobId: job.jobId, status: 'completed', outputPath: job.outputPath };
+    } catch (error) {
+      if (current && current.cancelled) {
+        return { jobId: job.jobId, status: 'cancelled' };
+      }
+      return { jobId: job.jobId, status: 'failed', errorCode: error.code || 'EXPORT_FAILED' };
+    } finally {
+      if (taskDir) await fsApi.rm(taskDir, { recursive: true, force: true });
+      current = null;
+    }
+  }
+
+  function start(job, onProgress) {
+    if (current) {
+      return Promise.resolve({ jobId: job.jobId, status: 'failed', errorCode: 'EXPORT_BUSY' });
+    }
+    current = { jobId: job.jobId, phase: 'preparing', child: null, cancelled: false };
+    if (onProgress) onProgress({ jobId: job.jobId, phase: 'preparing', percent: null });
+    const completion = execute(job, onProgress);
+    current.completion = completion;
+    return completion;
+  }
+
+  async function cancel(jobId) {
+    const active = current;
+    if (!active || active.jobId !== jobId) return;
+    if (active.phase !== 'finalizing') {
+      active.cancelled = true;
+      if (active.child) active.child.kill();
+    }
+    await active.completion;
+  }
+
+  return { start, cancel, getState };
+}
+
+module.exports = { createVideoExportService };
