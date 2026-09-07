@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld('srtAPI', {
   translateLocalCliEffect: (text) => ipcRenderer.invoke('local-cli:translate-effect', text),
   translateSubtitleOrFadeIn: (text) => ipcRenderer.invoke('local-cli:translate-subtitle-or-fade-in', text),
   generateSubtitles: (request) => ipcRenderer.invoke('subtitles:generate', request),
+  resolveVideoSource: (videoPath) => ipcRenderer.invoke('video:resolve-source', videoPath),
+  startVideoExport: (request) => ipcRenderer.invoke('video-export:start', request),
+  cancelVideoExport: (jobId) => ipcRenderer.invoke('video-export:cancel', jobId),
+  onVideoExportProgress: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('video-export:progress', listener);
+    return () => ipcRenderer.removeListener('video-export:progress', listener);
+  },
   describeInstall: (toolId) => ipcRenderer.invoke('installation:describe', toolId),
   installTool: (toolId, confirmationId) => ipcRenderer.invoke(
     'installation:execute',

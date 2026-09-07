@@ -62,6 +62,16 @@
 
     /* ── Workspace (right pane) ── */
     .workspace{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;background:var(--bg-app)}
+    .export-toolbar{position:relative;z-index:40;display:flex;justify-content:flex-end;flex:0 0 auto;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-panel)}
+    .export-button,.export-cancel{appearance:none;height:32px;padding:0 14px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);font:inherit;font-size:12px;font-weight:650;cursor:pointer}
+    .export-button{border-color:var(--accent);background:var(--accent);color:white}
+    .export-button:disabled,.export-cancel:disabled{opacity:.5;cursor:default}
+    .export-popover{position:absolute;top:50px;right:16px;width:min(340px,calc(100vw - 32px));padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);box-shadow:var(--shadow-lg)}
+    .export-popover[hidden]{display:none}
+    .export-status{font-size:13px;font-weight:650;color:var(--text-strong)}
+    .export-target{margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)}
+    .export-progress{margin-top:7px;font-family:var(--mono);font-size:12px;color:var(--accent)}
+    .export-cancel{margin-top:12px}
     .ws-scroll{flex:1;display:flex;flex-direction:column;align-items:center;gap:20px;padding:24px 24px 0;overflow-y:auto;min-height:0;scrollbar-width:thin}
 
     /* ── Video preview ── */
@@ -250,6 +260,15 @@
 
     <!-- Right: Workspace -->
     <main class="pane workspace" data-testid="editor-page">
+      <div class="export-toolbar">
+        <button class="export-button" type="button" data-testid="video-export-button">导出视频</button>
+        <section class="export-popover" data-testid="video-export-popover" aria-live="polite" hidden>
+          <div class="export-status" data-testid="video-export-status"></div>
+          <div class="export-target" data-testid="video-export-target" hidden></div>
+          <div class="export-progress" data-testid="video-export-progress" hidden></div>
+          <button class="export-cancel" type="button" data-testid="video-export-cancel">取消导出</button>
+        </section>
+      </div>
       <div class="ws-scroll">
         <div class="preview" id="previewArea" data-od-id="video-preview">
           <video id="previewVideo" playsinline></video>
@@ -289,8 +308,10 @@
   <script src="effects.js"></script>
   <script src="editor-core.js"></script>
   <script src="subtitle-state.js"></script>
+  <script src="../src/render-recipe.js"></script>
   <script src="editor-subtitles.js"></script>
   <script src="editor-timeline.js"></script>
+  <script src="editor-export.js"></script>
   <script>
     window.__PAGE = { id: 'editor' };
     renderTabs();

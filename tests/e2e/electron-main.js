@@ -41,7 +41,8 @@ const environmentModule = {
   installTool: (...args) => {
     state.installMethodCount += 1;
     return baseEnvironment.installTool(...args);
-  }
+  },
+  getExportTools: (...args) => baseEnvironment.getExportTools(...args)
 };
 const localCliStates = process.env.SRT_E2E_LOCAL_CLI === 'two'
   ? [{ id: 'codex', label: 'Codex CLI' }, { id: 'claude', label: 'Claude Code' }]
@@ -95,5 +96,38 @@ const subtitleService = {
     ] };
   }
 };
+let videoExportService;
+let showSaveDialog;
+if (!useProductionEnvironment) {
+  let exportStartCount = 0;
+  let pendingExport = null;
+  videoExportService = {
+    async start(request, onProgress) {
+      exportStartCount += 1;
+      state.exportRequests = (state.exportRequests || []).concat([request]);
+      onProgress({ jobId: request.jobId, phase: 'rendering', percent: 42 });
+      if (exportStartCount === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return { jobId: request.jobId, status: 'failed', errorCode: 'EXPORT_RENDER_FAILED' };
+      }
+      return new Promise((resolve) => {
+        pendingExport = { jobId: request.jobId, resolve };
+      });
+    },
+    async cancel(jobId) {
+      state.exportCancels = (state.exportCancels || []).concat([jobId]);
+      if (pendingExport && pendingExport.jobId === jobId) {
+        const current = pendingExport;
+        pendingExport = null;
+        current.resolve({ jobId, status: 'cancelled' });
+      }
+    }
+  };
+  showSaveDialog = async () => ({
+    canceled: false,
+    filePath: path.join(userDataDir, 'export.mp4')
+  });
+}
 app.__srtE2EState = state;
-startApplication({ environmentModule, localCliService, subtitleService });
+startApplication({ environmentModule, localCliService, subtitleService,
+  ...(useProductionEnvironment ? {} : { videoExportService, showSaveDialog }) });

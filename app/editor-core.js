@@ -106,28 +106,48 @@ document.addEventListener('mouseup', function() {
 /* ── Video ── */
 var videoEl=document.getElementById('previewVideo'),videoUrl=null,videoDuration=0;
 var activeProject = getProjectById(getActiveProjectId());
-window.currentProjectVideoPath = activeProject && activeProject.video
-  ? activeProject.video.path || null : null;
+var managedVideoLoad = 0;
+window.currentProjectVideoPath = null;
 var playBtn=document.getElementById('playBtn'),previewOverlay=document.getElementById('previewOverlay');
 var tlPlayBtn=document.getElementById('tlPlayBtn');
 function formatDur(s){var m=Math.floor(s/60),se=Math.floor(s%60);return(m<10?'0':'')+m+':'+(se<10?'0':'')+se}
 
-function showVideo(file){
-  if(videoUrl)URL.revokeObjectURL(videoUrl);
-  videoUrl=URL.createObjectURL(file);videoEl.src=videoUrl;
+function revealVideo(){
   var a=document.getElementById('previewArea');
   document.getElementById('previewPlaceholder').style.display='none';
   document.getElementById('previewUpload').style.display='none';
   a.classList.add('has-video');previewOverlay.style.display='flex';
+}
+function bindVideoMetadata(onLoaded){
   videoEl.onloadedmetadata=function(){
     videoDuration=videoEl.duration;
     document.getElementById('tlTotal').textContent=formatDur(videoDuration);
+    if(onLoaded)onLoaded();
   };
+}
+function showVideo(file){
+  if(videoUrl)URL.revokeObjectURL(videoUrl);
+  videoUrl=URL.createObjectURL(file);
+  bindVideoMetadata(null);videoEl.src=videoUrl;revealVideo();
 }
 
 /* Load video from IndexedDB (set by homepage upload) */
 /* Try loading video from IndexedDB (set by homepage upload) */
-(function(){
+(function loadProjectVideo(){
+  var projectVideoPath = activeProject && activeProject.video && activeProject.video.path;
+  if (window.srtAPI && window.srtAPI.resolveVideoSource) {
+    if (!projectVideoPath) return;
+    var loadId = ++managedVideoLoad;
+    window.srtAPI.resolveVideoSource(projectVideoPath).then(function(result) {
+      if (loadId !== managedVideoLoad || !result || !result.ok) return;
+      bindVideoMetadata(function() {
+        if (loadId === managedVideoLoad) window.currentProjectVideoPath = result.path;
+      });
+      videoEl.src = result.url;
+      revealVideo();
+    }).catch(function() {});
+    return;
+  }
   try {
     var req = indexedDB.open('srt_store', 1);
     req.onupgradeneeded = function(e){ e.target.result.createObjectStore('files'); };
@@ -169,6 +189,7 @@ videoEl.addEventListener('volumechange',function(){tlVolSlider.value=Math.round(
 /* Re-upload */
 document.getElementById('reupload').addEventListener('change',function(){
   var f=this.files[0];if(!f)return;
+  managedVideoLoad += 1;
   window.currentProjectVideoPath = null;
   var info={name:f.name,size:f.size,type:f.type,lastMod:f.lastModified};
   try{localStorage.setItem(STORAGE_KEYS.VIDEO,JSON.stringify(info))}catch(_){}

@@ -7,12 +7,26 @@ async function createVideoFixture(testInfo) {
   return file;
 }
 
+async function setUsableMetadata(window) {
+  await expect.poll(() => window.locator('#previewVideo').getAttribute('src')).toBeTruthy();
+  await window.evaluate(() => {
+    const video = document.getElementById('previewVideo');
+    Object.defineProperties(video, {
+      duration: { configurable: true, value: 4 },
+      videoWidth: { configurable: true, value: 640 },
+      videoHeight: { configurable: true, value: 360 }
+    });
+    video.dispatchEvent(new Event('loadedmetadata'));
+  });
+}
+
 async function openEditor(window, videoFixturePath) {
   await window.getByTestId('local-cli-codex').click();
   await window.getByTestId('continue').click();
   await window.getByTestId('video-input').setInputFiles(videoFixturePath);
   await window.getByTestId('start-editing').click();
   await expect(window.getByTestId('editor-page')).toBeVisible();
+  await setUsableMetadata(window);
 }
 
 async function seedExistingSubtitle(window) {
@@ -171,6 +185,7 @@ test.describe('auto subtitle conversation', () => {
     }, originalFirstSegmentId);
     await expect(documentEditor).toContainText('草稿已保存 · 尚未应用');
     await window.reload();
+    await setUsableMetadata(window);
     const restoredCard = window.getByTestId('request-status-card').last();
     await expect(window.getByTestId('subtitle-document-toggle')).toHaveText('编辑字幕 · 2 段');
     await expect(window.getByTestId('subtitle-document-surface')).toBeHidden();
@@ -354,6 +369,7 @@ test.describe('auto subtitle conversation', () => {
     await expect.poll(() => window.evaluate(() => subtitleController.canUndo('seed-request'))).toBe(true);
 
     await window.reload();
+    await setUsableMetadata(window);
     const persistedFailureCard = window.getByTestId('request-status-card').last();
     await expect(persistedFailureCard.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'failed');
     await expect(persistedFailureCard).toContainText('字幕暂时无法保存，请重试。');

@@ -219,6 +219,11 @@ window.subtitleController = {
   hasPendingChanges: function() {
     var info = documentState(); return info.dirty || info.hasDraft;
   },
+  getAppliedSegments: function() {
+    return currentSubtitleState().segments.map(function(segment) {
+      return { id: segment.id, start: segment.start, end: segment.end, text: segment.text };
+    });
+  },
   confirmUndo: function() {
     if (!this.hasPendingChanges()) return true;
     return window.confirm('撤销本次字幕会丢弃当前草稿，是否继续？');

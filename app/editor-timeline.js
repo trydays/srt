@@ -511,3 +511,10 @@ chatArea.addEventListener('click', function(event) {
   } catch (_) {}
 });
 editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();generateBtn.click()}});
+
+window.timelineController = {
+  isRequestInFlight: function() { return requestInFlight; },
+  getUnsupportedExportItems: function() {
+    return timelineEffects.map(function(effect) { return effect.name; });
+  }
+};

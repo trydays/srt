@@ -5,11 +5,13 @@ const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const { exec } = require('child_process');
 const { loadConfig } = require('./config-loader');
 const { createProductionEnvironment } = require('./src/environment/node-adapter');
 const { createLocalCliService } = require('./src/local-cli');
 const { createSubtitleService } = require('./src/subtitles');
+const { createVideoExportService } = require('./src/video-export');
 
 let mainWindow = null;
 
@@ -225,7 +227,19 @@ function publicFailure(error, fallback) {
   return { ok: false, errorCode: error && error.code ? error.code : fallback };
 }
 
-function startApplication({ environmentModule, localCliService, subtitleService } = {}) {
+const PUBLIC_EXPORT_CODES = new Set([
+  'VIDEO_PATH_UNAVAILABLE', 'EXPORT_BUSY', 'EXPORT_UNSUPPORTED_OPERATION',
+  'EXPORT_RUNTIME_NOT_READY', 'EXPORT_INVALID_RECIPE',
+  'EXPORT_TARGET_EXISTS', 'EXPORT_SOURCE_OVERWRITE', 'EXPORT_INVALID_MEDIA',
+  'EXPORT_WRITE_FAILED', 'EXPORT_RENDER_FAILED'
+]);
+
+function publicExportCode(error, fallback) {
+  return error && PUBLIC_EXPORT_CODES.has(error.code) ? error.code : fallback;
+}
+
+function startApplication({ environmentModule, localCliService, subtitleService,
+  videoExportService, showSaveDialog } = {}) {
   const userDataDir = app.getPath('userData');
   const bundledRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'tools')
@@ -240,6 +254,12 @@ function startApplication({ environmentModule, localCliService, subtitleService 
     userDataDir,
     transcriberPath: path.join(bundledRoot, 'transcribe-subtitles.py')
   });
+  const activeVideoExportService = videoExportService || createVideoExportService({
+    getExportTools: () => activeEnvironment.getExportTools()
+  });
+  const activeShowSaveDialog = showSaveDialog
+    || ((browserWindow, options) => dialog.showSaveDialog(browserWindow, options));
+  let activeExport = null;
 
   ipcMain.handle('environment:detect', () => activeEnvironment.detectEnvironment());
   ipcMain.handle('installation:describe', (_event, toolId) => activeEnvironment.describeInstall(toolId));
@@ -266,9 +286,91 @@ function startApplication({ environmentModule, localCliService, subtitleService 
       return publicFailure(error, 'SUBTITLE_TRANSCRIPTION_FAILED');
     }
   });
+  ipcMain.handle('video:resolve-source', async (_event, videoPath) => {
+    try {
+      const resolvedPath = await fs.promises.realpath(videoPath);
+      const stat = await fs.promises.stat(resolvedPath);
+      if (!stat.isFile()) throw new Error('not a file');
+      return { ok: true, path: resolvedPath, url: pathToFileURL(resolvedPath).href };
+    } catch (_) {
+      return { ok: false, errorCode: 'VIDEO_PATH_UNAVAILABLE' };
+    }
+  });
+  ipcMain.handle('video-export:start', async (event, request) => {
+    const { jobId, videoPath, recipe } = request || {};
+    const sender = event.sender;
+    if (activeExport) {
+      return { jobId, status: 'failed', errorCode: 'EXPORT_BUSY' };
+    }
+    const slot = activeExport = {
+      jobId, sender, phase: 'dialog', cancelled: false, completion: null
+    };
+    try {
+      const senderWindow = BrowserWindow.fromWebContents(sender);
+      const saveOptions = {
+        title: '导出视频',
+        defaultPath: path.join(
+          path.dirname(videoPath), path.parse(videoPath).name + '-已编辑.mp4'
+        ),
+        filters: [{ name: 'MP4 视频', extensions: ['mp4'] }]
+      };
+      const choice = await activeShowSaveDialog(senderWindow, saveOptions);
+      if (choice.canceled || slot.cancelled || sender.isDestroyed()) {
+        return { jobId, status: 'cancelled' };
+      }
+      const outputPath = /\.mp4$/i.test(choice.filePath)
+        ? choice.filePath : choice.filePath + '.mp4';
+      sender.send('video-export:progress', {
+        jobId, phase: 'preparing', percent: null, outputPath
+      });
+      slot.phase = 'service';
+      slot.completion = activeVideoExportService.start(
+        { jobId, videoPath, outputPath, recipe },
+        function(progress) {
+          if (progress && progress.phase) slot.phase = progress.phase;
+          if (activeExport === slot && !sender.isDestroyed()) {
+            sender.send('video-export:progress', progress);
+          }
+        }
+      );
+      return await slot.completion;
+    } catch (error) {
+      return {
+        jobId,
+        status: 'failed',
+        errorCode: publicExportCode(error, 'EXPORT_WRITE_FAILED')
+      };
+    } finally {
+      if (activeExport === slot) activeExport = null;
+    }
+  });
+  ipcMain.handle('video-export:cancel', async (_event, jobId) => {
+    const slot = activeExport;
+    if (!slot || slot.jobId !== jobId) return;
+    if (slot.phase === 'dialog') {
+      slot.cancelled = true;
+      return;
+    }
+    if (slot.phase !== 'finalizing') await activeVideoExportService.cancel(jobId);
+    if (slot.completion) await slot.completion;
+  });
 
   app.whenReady().then(async () => {
     createWindow();
+    mainWindow.on('close', function(event) {
+      const slot = activeExport;
+      if (!slot || slot.sender !== mainWindow.webContents || slot.closing) return;
+      event.preventDefault();
+      slot.closing = true;
+      const closingWindow = mainWindow;
+      Promise.resolve().then(async function() {
+        if (slot.phase === 'dialog') slot.cancelled = true;
+        else if (slot.phase !== 'finalizing') await activeVideoExportService.cancel(slot.jobId);
+        if (slot.completion) await slot.completion;
+      }).finally(function() {
+        if (!closingWindow.isDestroyed()) closingWindow.destroy();
+      });
+    });
   });
 
   app.on('window-all-closed', () => {

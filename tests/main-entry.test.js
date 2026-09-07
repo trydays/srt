@@ -30,6 +30,22 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.equal(preloadSource.includes('writeFile'), false);
 });
 
+test('preload exposes only the narrow video export bridge', () => {
+  assert.match(preloadSource,
+    /resolveVideoSource:\s*\(videoPath\)\s*=>\s*ipcRenderer\.invoke\('video:resolve-source', videoPath\)/);
+  assert.match(preloadSource,
+    /startVideoExport:\s*\(request\)\s*=>\s*ipcRenderer\.invoke\('video-export:start', request\)/);
+  assert.match(preloadSource,
+    /cancelVideoExport:\s*\(jobId\)\s*=>\s*ipcRenderer\.invoke\('video-export:cancel', jobId\)/);
+  assert.match(preloadSource, /onVideoExportProgress:\s*\(callback\)\s*=>\s*\{/);
+  assert.match(preloadSource,
+    /return\s*\(\)\s*=>\s*ipcRenderer\.removeListener\('video-export:progress', listener\)/);
+  assert.equal(/startVideoExport:\s*\([^)]*,/.test(preloadSource), false);
+  assert.equal(preloadSource.includes('outputPath'), false);
+  assert.equal(preloadSource.includes('ffmpegPath'), false);
+  assert.equal(preloadSource.includes('ffprobePath'), false);
+});
+
 function observeAutomaticStart(scenario) {
   const script = `
     const { EventEmitter } = require('node:events');
