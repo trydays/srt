@@ -31,7 +31,7 @@ var projectEditingReady = new Promise(function(resolve, reject) {
     try {
       var legacy = legacyState();
       if (!legacy) return;
-      var edit = snapshot.document.edits[0];
+      var edit = snapshot.document.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
       if (edit && snapshot.document.revision === 0 && edit.id === 'legacy-subtitles-' + (legacy.segments[0] || {}).id) {
         subtitleDraftStore.migrate(projectId, edit.id, 0, legacy.draft, edit.payload.segments);
       }

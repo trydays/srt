@@ -83,6 +83,17 @@ const localCliService = {
         { capability: 'fade.out@1', params: { start: 18, end: 20 } }
       ] };
     }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'color-transactions') {
+      if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
+      const color = { capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
+        params: { temperature: -0.6, brightness: 0.2, contrast: 1.3 } };
+      if (/叠加/.test(text)) return { kind: 'instruction', steps: [color,
+        { capability: 'video.color.adjust@1', range: { start: 2, end: 4 },
+          params: { temperature: 0.4, saturation: 0.7 } }
+      ] };
+      return { kind: 'instruction', steps: /字幕/.test(text)
+        ? [color, { capability: 'subtitle.generate@1', params: {} }] : [color] };
+    }
     if (/字幕/.test(text)) {
       return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
     }

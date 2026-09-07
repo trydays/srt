@@ -27,6 +27,7 @@ function createMarkerDOM(item) {
   var m = document.createElement('span');
   m.className = 'tl-marker';
   m.style.left = left+'px';
+  m.style.width = ((item.range.end - item.range.start) / getDur()) * w + 'px';
   m.style.background = 'var(--accent-tint)';
   m.style.color = 'var(--text-strong)';
   m.style.border = '1px solid var(--accent)';
@@ -48,8 +49,12 @@ function currentProjectContext() {
 function renderMarkers(){
   var old = track.querySelectorAll('.tl-marker'); for(var i=0;i<old.length;i++)old[i].remove();
   if (!projectStateReady) return;
-  window.projectEditing.timelineItems(activeProjectId).forEach(function(item) {
-    track.appendChild(createMarkerDOM(item));
+  var items = window.projectEditing.timelineItems(activeProjectId);
+  track.style.height = Math.max(80, 28 + items.length * 26) + 'px';
+  items.forEach(function(item, index) {
+    var marker = createMarkerDOM(item);
+    marker.style.top = (28 + index * 26) + 'px';
+    track.appendChild(marker);
   });
 }
 
@@ -129,7 +134,7 @@ function requestCardTitle(record) {
   if (record.instructionStatus === 'failed' || record.timelineStatus === 'failed') {
     return '这次编辑未完成';
   }
-  if (record.subtitleRequest === true && record.timelineStatus === 'success') {
+  if (record.subtitleRequest === true && record.resultItemCount === 1 && record.timelineStatus === 'success') {
     return '字幕已生成';
   }
   return '这次编辑已完成';
@@ -145,6 +150,10 @@ function isSuccessfulRequest(record) {
   return record.instructionStatus === 'success' && record.timelineStatus === 'success';
 }
 function requestCardSummary(record) {
+  if (record.resultSummary && !(record.subtitleRequest && record.resultItemCount === 1)) {
+    return '✓ ' + (record.text ? '这次编辑已完成' : '已恢复的编辑记录') + ' · ' + record.resultSummary
+      + (record.text ? ' · ' + formatRequestTime(record.submittedAt) : '');
+  }
   if (!record.text) return '✓ 已恢复的编辑记录 · 字幕 ' + Number(record.resultCount || 0) + ' 条';
   var time = formatRequestTime(record.submittedAt);
   if (record.subtitleRequest === true) {
@@ -169,10 +178,10 @@ function renderRequestStatusCard(card, record) {
     ? '<button type="button" class="request-undo" data-undo-request="'
       + escapeConversationText(record.id)
       + '" data-testid="subtitle-undo"' + (window.isExporting ? ' disabled' : '')
-      + '>撤销本次字幕</button>' : '';
+      + '>撤销本次编辑</button>' : '';
   var summary = isSuccessfulRequest(record)
     ? '<button type="button" class="request-status-summary" data-request-details-toggle'
-      + ' data-testid="request-status-summary">' + requestCardSummary(record) + '</button>' : '';
+      + ' data-testid="request-status-summary">' + escapeConversationText(requestCardSummary(record)) + '</button>' : '';
   card.classList.toggle('is-collapsed', isCollapsed);
   card.innerHTML = summary + '<div class="request-status-details" data-testid="request-status-details"'
     + (isCollapsed ? ' hidden' : '') + '><div class="request-status-head"><span>' + requestCardTitle(record)
@@ -279,6 +288,14 @@ function refreshRequestCards() {
   });
 }
 
+function transactionResult(document, transactionId) {
+  var edits = document.edits.filter(function(edit) { return edit.enabled && edit.transactionId === transactionId; });
+  var subtitle = edits.find(function(edit) { return edit.type === 'subtitle.track@1'; });
+  var items = window.projectEditing.timelineItems(activeProjectId).filter(function(item) { return item.transactionId === transactionId; });
+  return { subtitleRequest: !!subtitle, resultCount: subtitle ? subtitle.payload.segments.length : 0,
+    resultItemCount: items.length, resultSummary: items.map(function(item) { return item.label + ' · ' + item.summary; }).join('；') };
+}
+
 async function translateAndApply(text, record, card) {
   record.awaitingMetadata = !projectStateReady || window.projectVideoLoading;
   renderRequestStatusCard(card, record);
@@ -316,7 +333,7 @@ async function translateAndApply(text, record, card) {
     return;
   }
   window.editCapabilityRegistry.validateRecipe(turn);
-  record.subtitleRequest = turn.steps[0].capability === 'subtitle.generate@1';
+  record.subtitleRequest = turn.steps.some(function(step) { return step.capability === 'subtitle.generate@1'; });
   record.clarifyMessage = '';
   updateRequestStatus(record, card, {
     instructionStatus: 'success', timelineStatus: record.subtitleRequest ? 'generating' : 'applying', error: ''
@@ -325,8 +342,8 @@ async function translateAndApply(text, record, card) {
     expectedRevision: loaded.document.revision, requestId: record.id, recipe: turn });
   record.transactionId = applied.transactionId;
   record.timelineStatus = 'success';
-  var subtitle = applied.document.edits.find(function(edit) { return edit.enabled && edit.type === 'subtitle.track@1'; });
-  updateRequestStatus(record, card, { timelineStatus: 'success', resultCount: subtitle ? subtitle.payload.segments.length : 0, error: '' });
+  updateRequestStatus(record, card, Object.assign({ timelineStatus: 'success', error: '' },
+    transactionResult(applied.document, applied.transactionId)));
   window.dispatchEvent(new CustomEvent('project-edit-state-changed'));
   if (record.subtitleRequest && window.subtitleController) {
     subtitleController.render(); subtitleController.openAfter(card);
@@ -364,16 +381,14 @@ window.projectEditingReady.then(function() {
     if (!applied) return;
     record.transactionId = applied.transactionId;
     record.instructionStatus = 'success'; record.timelineStatus = 'success';
-    record.subtitleRequest = applied.type === 'subtitle.track@1';
-    record.resultCount = record.subtitleRequest ? applied.payload.segments.length : 0;
+    Object.assign(record, transactionResult(document, applied.transactionId));
     record.error = ''; record.clarifyMessage = ''; record.subtitleUndone = false;
   });
   document.edits.forEach(function(edit) {
     var hasRecord = conversationRecords.some(function(record) { return (record.transactionId || record.id) === edit.transactionId; });
     if (hasRecord || !window.projectEditing.canUndo({ projectId: activeProjectId, transactionId: edit.transactionId })) return;
-    var recovered = { id: edit.transactionId, transactionId: edit.transactionId, text: '', submittedAt: 0,
-      instructionStatus: 'success', timelineStatus: 'success', subtitleRequest: edit.type === 'subtitle.track@1',
-      resultCount: edit.type === 'subtitle.track@1' ? edit.payload.segments.length : 0 };
+    var recovered = Object.assign({ id: edit.transactionId, transactionId: edit.transactionId, text: '', submittedAt: 0,
+      instructionStatus: 'success', timelineStatus: 'success' }, transactionResult(document, edit.transactionId));
     conversationRecords.push(recovered); appendRequestStatusCard(recovered);
   });
   renderMarkers(); refreshRequestCards();

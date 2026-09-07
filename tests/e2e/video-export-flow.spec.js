@@ -11,6 +11,36 @@ test.afterEach(async () => {
   fixtureDirectories.clear();
 });
 
+test.describe('color graph export projection', () => {
+  test.use({ localCliMode: 'two', localCliEffectResult: 'color-transactions' });
+
+  test('exports the same mixed transaction and revision used by the preview', async ({ window, readScenarioState }, testInfo) => {
+    await openUsableEditor(window, testInfo, 'color-and-subtitles.mp4');
+    await window.locator('.input-editor').fill('调冷并生成字幕');
+    await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await window.evaluate(() => {
+      const video = document.getElementById('previewVideo');
+      Object.defineProperty(video, 'currentTime', { configurable: true, value: 2 });
+      video.dispatchEvent(new Event('timeupdate'));
+      const build = SRTRenderRecipe.buildRenderRecipe;
+      SRTRenderRecipe.buildRenderRecipe = function(graph, registry) {
+        window.__exportGraph = graph;
+        return build(graph, registry);
+      };
+    });
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', /previewColorFilter/);
+    await window.getByTestId('video-export-button').click();
+    await expect(window.getByTestId('video-export-status')).toHaveText('导出失败');
+    const snapshot = await window.evaluate(() => projectEditing.load(getActiveProjectId()));
+    expect(await window.evaluate(() => window.__exportGraph)).toEqual(snapshot.graph);
+    const request = (await readScenarioState()).exportRequests.at(-1);
+    expect(request.recipe.steps.map(step => step.capability)).toEqual(['video.color.adjust@1', 'subtitle.burn@1']);
+    expect(request.recipe.steps[0].range).toEqual({ start: 1, end: 3 });
+    expect(request.recipe.steps[0].params).toEqual({ temperature: -0.6, brightness: 0.2, saturation: 1, contrast: 1.3 });
+  });
+});
+
 async function createVideoFixture(testInfo, name) {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-export-e2e-'));
   fixtureDirectories.add(directory);

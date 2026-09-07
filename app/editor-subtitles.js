@@ -237,7 +237,7 @@ videoEl.addEventListener('timeupdate', renderCurrentSubtitle);
 videoEl.addEventListener('loadedmetadata', renderAllSubtitles);
 window.subtitleController = {
   afterUndo: function(result) {
-    var edit = result.document.edits[0];
+    var edit = result.document.edits.find(function(item) { return item.enabled && item.type === 'subtitle.track@1'; });
     if (edit) {
       try { subtitleDraftStore.rebase(getActiveProjectId(), edit.id, result.document.revision, edit.payload.segments); }
       catch (_) { subtitleDraftWarning = '字幕已撤销；之前的草稿尚未恢复'; }
@@ -276,7 +276,7 @@ window.subtitleController = {
   },
   confirmUndo: function() {
     if (!this.hasPendingChanges()) return true;
-    return window.confirm('撤销本次字幕会丢弃当前草稿，是否继续？');
+    return window.confirm('撤销本次编辑会丢弃当前字幕草稿，是否继续？');
   }
 };
 renderAllSubtitles();

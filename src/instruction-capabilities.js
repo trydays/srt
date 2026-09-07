@@ -86,7 +86,31 @@ function projectContextLines(context) {
     lines = lines.concat(editLines);
   }
 
-  var subtitles = Array.isArray(context.subtitles) ? context.subtitles : [];
+  var operations = Array.isArray(context.operations) ? context.operations : [];
+  var operationLines = [];
+  operations.forEach(function(operation) {
+    if (!isPlainObject(operation)) return;
+    var definition = getCapabilitySchema(operation.capability);
+    if (!definition) return;
+    var properties = definition.params.properties || {};
+    var supplied = isPlainObject(operation.params) ? operation.params : {};
+    var params = {};
+    Object.keys(properties).forEach(function(name) {
+      var schema = properties[name], value = supplied[name];
+      if (schema.type === 'number' && finiteNumber(value)
+          && (schema.minimum === undefined || value >= schema.minimum)
+          && (schema.maximum === undefined || value <= schema.maximum)) params[name] = value;
+    });
+    var renderedRange = rangeText(operation.range);
+    operationLines.push('- ' + (operationLines.length + 1) + '. ' + definition.id
+      + (renderedRange ? '，范围 ' + renderedRange : '') + '，参数 ' + JSON.stringify(params));
+  });
+  if (operationLines.length) {
+    lines.push('已应用操作（按顺序）：');
+    lines = lines.concat(operationLines);
+  }
+
+  var subtitles = Array.isArray(context.subtitles) ? context.subtitles.slice(0, 500) : [];
   if (subtitles.length) {
     var total = finiteNumber(context.subtitleTotal) ? context.subtitleTotal : subtitles.length;
     lines.push('字幕轨（共 ' + total + ' 段'
@@ -94,7 +118,7 @@ function projectContextLines(context) {
     subtitles.forEach(function(segment, index) {
       if (!isPlainObject(segment)) return;
       lines.push('- 第' + (index + 1) + '段 [' + segment.start + '–' + segment.end
-        + ' 秒]：' + String(segment.text || ''));
+        + ' 秒]：' + String(segment.text || '').slice(0, 80));
     });
   }
   return lines.length ? lines : null;

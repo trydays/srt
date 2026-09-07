@@ -109,3 +109,127 @@ test.describe('unified project editing', () => {
     await expect(window.getByTestId('subtitle-block').first()).toHaveText('刷新后仍能继续编辑');
   });
 });
+
+async function submit(window, text) {
+  await window.locator('.input-editor').fill(text);
+  await window.locator('#generateBtn').click();
+  await expect(window.getByTestId('request-status-card').last()).toHaveClass(/is-collapsed/);
+}
+
+async function seek(window, seconds, event = 'timeupdate') {
+  await window.evaluate(({ seconds, event }) => {
+    const video = document.getElementById('previewVideo');
+    Object.defineProperty(video, 'currentTime', { configurable: true, value: seconds });
+    video.dispatchEvent(new Event(event));
+  }, { seconds, event });
+}
+
+test.describe('graph-derived color transactions', () => {
+  test.use({ localCliMode: 'two', localCliEffectResult: 'color-transactions' });
+
+  test('projects ranged color into preview and timeline across reload, context and undo', async ({ window, readScenarioState }, testInfo) => {
+    await openEditor(window, testInfo);
+    await metadata(window);
+    await submit(window, '把 1–3 秒调冷、提亮并提高对比度');
+    const marker = window.locator('.tl-marker');
+    await expect(marker).toHaveCount(1);
+    const bounds = await marker.evaluate(element => ({ left: parseFloat(element.style.left),
+      width: parseFloat(element.style.width), track: document.getElementById('tlTrack').getBoundingClientRect().width }));
+    expect(bounds.left).toBeCloseTo(16 + (bounds.track - 32) / 4, 1);
+    expect(bounds.width).toBeCloseTo((bounds.track - 32) / 2, 1);
+    await seek(window, 0.5);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
+    await seek(window, 2, 'seeked');
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', /previewColorFilter/);
+    await expect(window.locator('[data-color-temperature]')).toHaveAttribute('values', '0.88 0 0 0 0 0 1 0 0 0 0 0 1.12 0 0 0 0 0 1 0');
+    await expect(window.locator('[data-color-saturation]')).toHaveAttribute('values', '1');
+    expect(Number(await window.locator('[data-color-tone] feFuncR').getAttribute('slope'))).toBe(1.3);
+    expect(Number(await window.locator('[data-color-tone] feFuncR').getAttribute('intercept'))).toBeCloseTo(-0.1);
+    await expect(window.locator('#previewSubtitle')).toHaveCSS('filter', 'none');
+    await seek(window, 3);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
+    const saved = await window.evaluate(() => projectEditing.load(getActiveProjectId()));
+    await window.reload();
+    await metadata(window);
+    await expect(marker).toHaveCount(1);
+    await seek(window, 2);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', /previewColorFilter/);
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()))).toEqual(saved);
+    await window.locator('.input-editor').fill('下一步');
+    await window.locator('#generateBtn').click();
+    await expect(window.getByTestId('request-clarify')).toBeVisible();
+    const context = (await readScenarioState()).translationCalls.at(-1).context;
+    expect(context.revision).toBe(saved.document.revision);
+    expect(context.operations).toEqual([{ capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
+      params: { temperature: -0.6, brightness: 0.2, saturation: 1, contrast: 1.3 } }]);
+    await window.getByTestId('request-status-summary').first().click();
+    await window.getByRole('button', { name: '撤销本次编辑', exact: true }).click();
+    await expect(marker).toHaveCount(0);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
+    await expect(window.locator('[data-subtitle-document]')).toBeHidden();
+  });
+
+  test('presents color-first mixed steps as one transaction and restores it on reload and subtitle undo', async ({ window }, testInfo) => {
+    await openEditor(window, testInfo);
+    await metadata(window);
+    await submit(window, '把 1–3 秒调冷并生成字幕');
+    await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+    await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await expect(window.getByTestId('request-status-summary')).toContainText('画面调色');
+    await expect(window.getByTestId('request-status-summary')).toContainText('字幕');
+    await expect(window.locator('.tl-marker')).toHaveCount(2);
+    const markerRows = await window.locator('.tl-marker').evaluateAll(elements => elements.map(el => {
+      const rect = el.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    }));
+    expect(markerRows[0].bottom).toBeLessThanOrEqual(markerRows[1].top);
+    await expect(window.locator('.tl-marker[data-lane="subtitle"]')).toHaveJSProperty('offsetWidth',
+      Math.round(await window.locator('#tlTrack').evaluate(el => el.getBoundingClientRect().width - 32)));
+    await seek(window, 2);
+    await expect(window.locator('#previewSubtitle')).toBeVisible();
+    await expect(window.locator('#previewSubtitle')).toHaveCSS('filter', 'none');
+    const baseline = await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.edits);
+    await window.reload();
+    await metadata(window);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+    await expect(window.getByTestId('subtitle-status')).toHaveAttribute('data-state', 'success');
+    await window.getByTestId('subtitle-document-toggle').click();
+    await window.getByTestId('subtitle-document-segment').first().fill('恢复前字幕');
+    await window.getByTestId('subtitle-document-save').click();
+    await submit(window, '再次调色并生成字幕');
+    await window.getByTestId('request-status-summary').last().click();
+    await window.getByRole('button', { name: '撤销本次编辑', exact: true }).click();
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.edits)).toEqual(baseline);
+    await expect(window.getByTestId('subtitle-document-segment').first()).toHaveText('恢复前字幕');
+    await expect(window.locator('.tl-marker')).toHaveCount(2);
+  });
+
+  test('undo removes both steps of one mixed transaction', async ({ window }, testInfo) => {
+    await openEditor(window, testInfo);
+    await metadata(window);
+    await submit(window, '调色并生成字幕');
+    await seek(window, 2);
+    await window.getByTestId('request-status-summary').click();
+    await expect(window.getByRole('button', { name: '撤销本次编辑', exact: true })).toHaveCount(1);
+    await window.getByRole('button', { name: '撤销本次编辑', exact: true }).click();
+    await expect(window.locator('.tl-marker')).toHaveCount(0);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
+    await expect(window.locator('[data-subtitle-document]')).toBeHidden();
+    expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()).document.edits)).toEqual([]);
+  });
+
+  test('composes every active color operation in graph order', async ({ window }, testInfo) => {
+    await openEditor(window, testInfo);
+    await metadata(window);
+    await submit(window, '叠加两次调色');
+    await seek(window, 2.5);
+    await expect(window.locator('[data-color-temperature]')).toHaveCount(2);
+    const gains = await window.locator('[data-color-temperature]').evaluateAll(elements => elements.map(el => Number(el.getAttribute('values').split(' ')[0])));
+    expect(gains).toEqual([0.88, 1.08]);
+    await seek(window, 3);
+    await expect(window.locator('[data-color-temperature]')).toHaveCount(1);
+    await expect(window.locator('[data-color-saturation]')).toHaveAttribute('values', '0.7');
+    await seek(window, 4);
+    await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
+  });
+});

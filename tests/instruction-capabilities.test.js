@@ -76,6 +76,30 @@ test('buildPrompt omits malformed or absent project context', () => {
   assert.doesNotMatch(prompt, /当前 revision|已应用编辑|对话历史/);
 });
 
+test('buildPrompt serializes ordered applied operations using only declared scalar parameters', () => {
+  const prompt = buildPrompt('继续调整', [], {
+    operations: [
+      { capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
+        params: { temperature: -0.6, brightness: 0.2, saturation: 1, contrast: 1.3,
+          videoPath: '/secret/input.mp4', unexpected: '不允许的参数' } },
+      { capability: 'subtitle.generate@1', range: { start: 0, end: 4 },
+        params: { segments: [{ text: '不得展开正文' }], style: { font: '不得展开样式' } } },
+      { capability: 'video.color.adjust@1', range: { start: 2, end: 4 },
+        params: { temperature: '/secret/value.mp4', brightness: 0.1 } },
+      { capability: 'unknown@1', params: { secret: '未知操作' } }
+    ],
+    subtitles: Array.from({ length: 501 }, (_, i) => ({ start: i, end: i + 1,
+      text: '字'.repeat(80) + '不应溢出' })),
+    subtitleTotal: 501
+  });
+  const context = prompt.split('当前编辑上下文：')[1];
+  assert.match(context, /video\.color\.adjust@1.*\[1–3 秒\].*"temperature":-0.6.*"brightness":0.2.*"saturation":1.*"contrast":1.3/);
+  assert.match(context, /subtitle\.generate@1.*\[0–4 秒\].*\{\}/);
+  assert.ok(context.indexOf('[1–3 秒]') < context.indexOf('[0–4 秒]'));
+  assert.doesNotMatch(context, /secret|不允许|不得展开|unknown@1|未知操作|不应溢出|第501段/);
+  assert.match(context, /第500段/);
+});
+
 test('parseInstruction parses and trims a clarify turn', () => {
   assert.deepEqual(parseInstruction('{"kind":"clarify","message":"  当前能力未接通，请改为生成字幕。  "}'), {
     kind: 'clarify', message: '当前能力未接通，请改为生成字幕。'

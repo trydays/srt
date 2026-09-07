@@ -111,8 +111,8 @@
     .tl-playhead::before{content:'';position:absolute;top:-2px;left:50%;transform:translateX(-50%);width:14px;height:14px;background:var(--accent);border-radius:50%;border:2px solid var(--bg-panel);box-shadow:var(--shadow-sm)}
     .tl-time{display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);font-family:var(--mono);padding:0 16px}
     /* Timeline markers */
-    .tl-marker{position:absolute;top:60%;transform:translate(-50%,-50%);z-index:3;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:var(--shadow-xs);transition:transform 120ms var(--ease-out)}
-    .tl-marker:hover{transform:translate(-50%,-50%) scale(1.1);z-index:4}
+    .tl-marker{position:absolute;top:60%;transform:translateY(-50%);box-sizing:border-box;overflow:hidden;z-index:3;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:var(--shadow-xs)}
+    .tl-marker:hover{z-index:4}
     .tl-track.drag-over-tl{background:color-mix(in srgb,var(--accent-tint) 20%,var(--bg-panel));border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
     .subtitle-section{width:100%;max-width:800px;display:grid;grid-template-columns:42px minmax(0,1fr);gap:6px 8px;
       align-items:center}
@@ -272,6 +272,9 @@
       <div class="ws-scroll">
         <div class="preview" id="previewArea" data-od-id="video-preview">
           <video id="previewVideo" playsinline></video>
+          <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+            <defs><filter id="previewColorFilter" color-interpolation-filters="sRGB"></filter></defs>
+          </svg>
           <div class="preview-subtitle" id="previewSubtitle" data-testid="preview-subtitle" hidden></div>
           <div class="preview__overlay" id="previewOverlay" style="display:none">
             <div class="preview__icon" id="playBtn">▶</div>
@@ -313,6 +316,7 @@
   <script src="../src/project-editing.js"></script>
   <script src="subtitle-draft-state.js"></script>
   <script src="editor-project-editing.js"></script>
+  <script src="editor-color-preview.js"></script>
   <script src="editor-subtitles.js"></script>
   <script src="editor-timeline.js"></script>
   <script src="editor-export.js"></script>
