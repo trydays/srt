@@ -21,8 +21,12 @@
       var matrices = window.SRTColorAdjustment.buildPreviewMatrices(params);
       primitive('feColorMatrix', { 'data-color-temperature': '', type: 'matrix',
         values: matrices.temperature.join(' ') }, filter);
+      primitive('feColorMatrix', { 'data-color-encode': '', type: 'matrix',
+        values: matrices.rgbToYuv.join(' ') }, filter);
       primitive('feColorMatrix', { 'data-color-tone': '', type: 'matrix',
-        values: matrices.tone.join(' ') }, filter);
+        values: matrices.planes.join(' ') }, filter);
+      primitive('feColorMatrix', { 'data-color-decode': '', type: 'matrix',
+        values: matrices.yuvToRgb.join(' ') }, filter);
     });
     if (colors.length) video.style.filter = 'url(#previewColorFilter)';
   }

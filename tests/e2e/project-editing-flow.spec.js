@@ -204,9 +204,12 @@ test.describe('graph-derived color transactions', () => {
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', /previewColorFilter/);
     await expect(window.locator('[data-color-temperature]')).toHaveAttribute('values', '0.88 0 0 0 0 0 1 0 0 0 0 0 1.12 0 0 0 0 0 1 0');
     const tone = (await window.locator('[data-color-tone]').getAttribute('values')).split(' ').map(Number);
-    expect(tone[0] - tone[5]).toBeCloseTo(1); // Chroma/saturation is independent of contrast.
-    expect(tone[0] + tone[1] + tone[2]).toBeCloseTo(1.3);
-    expect(tone[4]).toBeCloseTo((-0.3 * 112 + 0.05 * 255) / 219);
+    expect(tone[0]).toBeCloseTo(1.3); // Y contrast is independent of U/V saturation.
+    expect(tone[6]).toBeCloseTo(1);
+    expect(tone[12]).toBeCloseTo(1);
+    expect(tone[4]).toBeCloseTo(-0.3 * 128 / 255 + 0.05);
+    await expect(window.locator('[data-color-encode]')).toHaveCount(1);
+    await expect(window.locator('[data-color-decode]')).toHaveCount(1);
     await expect(window.locator('#previewSubtitle')).toHaveCSS('filter', 'none');
     await seek(window, 3);
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
@@ -288,10 +291,15 @@ test.describe('graph-derived color transactions', () => {
     await expect(window.locator('[data-color-temperature]')).toHaveCount(2);
     const gains = await window.locator('[data-color-temperature]').evaluateAll(elements => elements.map(el => Number(el.getAttribute('values').split(' ')[0])));
     expect(gains).toEqual([0.88, 1.08]);
+    const stages = await window.locator('#previewColorFilter > *').evaluateAll(elements =>
+      elements.map(el => el.getAttributeNames().find(name => name.startsWith('data-color-'))));
+    expect(stages).toEqual(['data-color-temperature', 'data-color-encode', 'data-color-tone', 'data-color-decode',
+      'data-color-temperature', 'data-color-encode', 'data-color-tone', 'data-color-decode']);
     await seek(window, 3);
     await expect(window.locator('[data-color-temperature]')).toHaveCount(1);
     const tone = (await window.locator('[data-color-tone]').getAttribute('values')).split(' ').map(Number);
-    expect(tone[0] - tone[5]).toBeCloseTo(0.7);
+    expect(tone[6]).toBeCloseTo(0.7);
+    expect(tone[12]).toBeCloseTo(0.7);
     await seek(window, 4);
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
   });

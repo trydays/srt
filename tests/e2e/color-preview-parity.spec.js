@@ -112,7 +112,9 @@ test.describe('actual color preview pixels', () => {
     const original = await png(source);
     const service = createVideoExportService({ getExportTools: async () => ({ ffmpegPath, ffprobePath }) });
     const cases = [{ temperature: 0, brightness: 0, saturation: 1, contrast: 0 },
-      { temperature: 0, brightness: 0.15, saturation: 0.7, contrast: 0.6 }];
+      { temperature: 0, brightness: 0.15, saturation: 0.7, contrast: 0.6 },
+      { temperature: 0, brightness: -1, saturation: 1, contrast: 2 },
+      { temperature: 0, brightness: 0, saturation: 2, contrast: 0 }];
     const evidence = [];
     for (const [i, params] of cases.entries()) {
       await apply(window, params);

@@ -75,11 +75,22 @@ test('preview matrices preserve identity and separate luma contrast from chroma 
   const identity = [1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0];
   const neutral = buildPreviewMatrices({});
   assert.deepEqual(neutral.temperature, identity);
-  assert.deepEqual(neutral.tone, identity);
-  assert.ok(Object.isFrozen(neutral) && Object.isFrozen(neutral.tone) && Object.isFrozen(neutral.temperature));
-  const { tone } = buildPreviewMatrices({ contrast: 0, saturation: 1 });
-  function channel(row, rgb) { return tone[row*5] * rgb[0] + tone[row*5+1] * rgb[1] + tone[row*5+2] * rgb[2] + tone[row*5+4]; }
-  // Before output gamut clipping, contrast may change luma but not R-G chroma.
-  assert.ok(Math.abs(channel(0, [0.6,0.2,0.1]) - channel(1, [0.6,0.2,0.1]) - 0.4) < 1e-10);
+  assert.deepEqual(neutral.planes, identity);
+  assert.ok(Object.isFrozen(neutral) && Object.values(neutral).every(Object.isFrozen));
+  function render(params, rgb) {
+    for (const matrix of Object.values(buildPreviewMatrices(params))) {
+      rgb = [0,1,2].map(row => Math.max(0, Math.min(1, matrix[row*5] * rgb[0]
+        + matrix[row*5+1] * rgb[1] + matrix[row*5+2] * rgb[2] + matrix[row*5+4])));
+    }
+    return rgb;
+  }
+  const input = [0.6,0.2,0.1];
+  render({}, input).forEach((value, i) => assert.ok(Math.abs(value - input[i]) < 1e-10));
+  const flat = render({ contrast: 0, saturation: 1 }, input);
+  assert.ok(Math.abs(flat[0] - flat[1] - 0.4) < 1e-10);
+  // Encoded Y clips to zero before RGB reconstruction, preserving red chroma.
+  const clipped = render({ contrast: 2, brightness: -1 }, [254/255,0,0]);
+  assert.ok(clipped[0] * 255 > 155 && clipped[0] * 255 < 165);
+  assert.equal(clipped[1], 0);
   assert.throws(() => buildPreviewMatrices({ contrast: 3 }), { code: 'RECIPE_INVALID_PARAM' });
 });
