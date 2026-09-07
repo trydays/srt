@@ -9,7 +9,7 @@
     "build": "CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_CACHE=./.electron-cache electron-builder",
     "test": "node --test \"tests/*.test.js\"",
     "test:unit": "node --test \"tests/*.test.js\"",
-    "test:e2e": "playwright test tests/e2e/environment-flow.spec.js tests/e2e/local-cli-flow.spec.js tests/e2e/local-cli-effect-flow.spec.js tests/e2e/conversation-sidebar-flow.spec.js tests/e2e/home-workbench-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js tests/e2e/project-editing-flow.spec.js tests/e2e/video-export-flow.spec.js tests/e2e/color-edit-flow.spec.js",
+    "test:e2e": "playwright test tests/e2e/environment-flow.spec.js tests/e2e/local-cli-flow.spec.js tests/e2e/local-cli-effect-flow.spec.js tests/e2e/conversation-sidebar-flow.spec.js tests/e2e/home-workbench-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js tests/e2e/project-editing-flow.spec.js tests/e2e/video-export-flow.spec.js tests/e2e/color-edit-flow.spec.js tests/e2e/color-preview-parity.spec.js",
     "test:e2e:real-mac": "SRT_REAL_MAC_SMOKE=1 playwright test tests/e2e/real-mac-smoke.spec.js"
   },
   "license": "MIT",

@@ -203,9 +203,10 @@ test.describe('graph-derived color transactions', () => {
     await seek(window, 2, 'seeked');
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', /previewColorFilter/);
     await expect(window.locator('[data-color-temperature]')).toHaveAttribute('values', '0.88 0 0 0 0 0 1 0 0 0 0 0 1.12 0 0 0 0 0 1 0');
-    await expect(window.locator('[data-color-saturation]')).toHaveAttribute('values', '1');
-    expect(Number(await window.locator('[data-color-tone] feFuncR').getAttribute('slope'))).toBe(1.3);
-    expect(Number(await window.locator('[data-color-tone] feFuncR').getAttribute('intercept'))).toBeCloseTo(-0.1);
+    const tone = (await window.locator('[data-color-tone]').getAttribute('values')).split(' ').map(Number);
+    expect(tone[0] - tone[5]).toBeCloseTo(1); // Chroma/saturation is independent of contrast.
+    expect(tone[0] + tone[1] + tone[2]).toBeCloseTo(1.3);
+    expect(tone[4]).toBeCloseTo((-0.3 * 112 + 0.05 * 255) / 219);
     await expect(window.locator('#previewSubtitle')).toHaveCSS('filter', 'none');
     await seek(window, 3);
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
@@ -289,7 +290,8 @@ test.describe('graph-derived color transactions', () => {
     expect(gains).toEqual([0.88, 1.08]);
     await seek(window, 3);
     await expect(window.locator('[data-color-temperature]')).toHaveCount(1);
-    await expect(window.locator('[data-color-saturation]')).toHaveAttribute('values', '0.7');
+    const tone = (await window.locator('[data-color-tone]').getAttribute('values')).split(' ').map(Number);
+    expect(tone[0] - tone[5]).toBeCloseTo(0.7);
     await seek(window, 4);
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
   });

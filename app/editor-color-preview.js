@@ -18,15 +18,11 @@
     var graph = window.projectEditing.load(getActiveProjectId()).graph;
     var colors = window.editCapabilityRegistry.get('video.color.adjust@1').preview(graph, video.currentTime);
     colors.forEach(function(params) {
-      var red = 1 + 0.2 * params.temperature, blue = 1 - 0.2 * params.temperature;
+      var matrices = window.SRTColorAdjustment.buildPreviewMatrices(params);
       primitive('feColorMatrix', { 'data-color-temperature': '', type: 'matrix',
-        values: [red, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, blue, 0, 0, 0, 0, 0, 1, 0].join(' ') }, filter);
-      primitive('feColorMatrix', { 'data-color-saturation': '', type: 'saturate', values: params.saturation }, filter);
-      var tone = primitive('feComponentTransfer', { 'data-color-tone': '' }, filter);
-      ['feFuncR', 'feFuncG', 'feFuncB'].forEach(function(channel) {
-        primitive(channel, { type: 'linear', slope: params.contrast,
-          intercept: 0.25 * params.brightness + 0.5 * (1 - params.contrast) }, tone);
-      });
+        values: matrices.temperature.join(' ') }, filter);
+      primitive('feColorMatrix', { 'data-color-tone': '', type: 'matrix',
+        values: matrices.tone.join(' ') }, filter);
     });
     if (colors.length) video.style.filter = 'url(#previewColorFilter)';
   }

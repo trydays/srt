@@ -77,10 +77,35 @@
       && time >= range.start && time < range.end;
   }
 
+  function buildPreviewMatrices(params) {
+    var value = normalizeParams(params, false);
+    var temperature = [1 + 0.2 * value.temperature, 0, 0, 0, 0,
+      0, 1, 0, 0, 0, 0, 0, 1 - 0.2 * value.temperature, 0, 0, 0, 0, 0, 1, 0];
+    // The fixed FFmpeg eq pipeline adjusts limited-range BT.601 Y separately
+    // from U/V: Y = 16 + 219*luma, contrast pivots around code value 128,
+    // brightness adds 255*(0.25*b), and saturation scales chroma about neutral.
+    // Combining the RGB<->YUV matrices avoids extra browser rounding/clipping:
+    // RGB' = saturation*RGB + (contrast-saturation)*luma + offset.
+    // Browser preview remains an 8-bit approximation of the encoded export.
+    var luma = [0.299, 0.587, 0.114];
+    var difference = value.contrast - value.saturation;
+    var offset = (1 - value.contrast) * 112 / 219 + 0.25 * value.brightness * 255 / 219;
+    var tone = [];
+    for (var row = 0; row < 3; row++) {
+      for (var column = 0; column < 3; column++) {
+        tone.push(difference * luma[column] + (row === column ? value.saturation : 0));
+      }
+      tone.push(0, offset);
+    }
+    tone.push(0, 0, 0, 1, 0);
+    return Object.freeze({ temperature: Object.freeze(temperature), tone: Object.freeze(tone) });
+  }
+
   return {
     PARAMETER_SCHEMA: PARAMETER_SCHEMA,
     normalizeParams: normalizeParams,
     normalizeRange: normalizeRange,
-    isActive: isActive
+    isActive: isActive,
+    buildPreviewMatrices: buildPreviewMatrices
   };
 });

@@ -8,7 +8,8 @@ const {
   PARAMETER_SCHEMA,
   normalizeParams,
   normalizeRange,
-  isActive
+  isActive,
+  buildPreviewMatrices
 } = require('../src/color-adjustment');
 
 test('normalizes explicit color parameters with neutral defaults', function() {
@@ -68,4 +69,17 @@ test('exposes the immutable four-parameter schema in a browser', function() {
   const context = { window: {} };
   vm.runInNewContext(source, context);
   assert.equal(context.window.SRTColorAdjustment.PARAMETER_SCHEMA.brightness.maximum, 1);
+});
+
+test('preview matrices preserve identity and separate luma contrast from chroma saturation', function() {
+  const identity = [1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0];
+  const neutral = buildPreviewMatrices({});
+  assert.deepEqual(neutral.temperature, identity);
+  assert.deepEqual(neutral.tone, identity);
+  assert.ok(Object.isFrozen(neutral) && Object.isFrozen(neutral.tone) && Object.isFrozen(neutral.temperature));
+  const { tone } = buildPreviewMatrices({ contrast: 0, saturation: 1 });
+  function channel(row, rgb) { return tone[row*5] * rgb[0] + tone[row*5+1] * rgb[1] + tone[row*5+2] * rgb[2] + tone[row*5+4]; }
+  // Before output gamut clipping, contrast may change luma but not R-G chroma.
+  assert.ok(Math.abs(channel(0, [0.6,0.2,0.1]) - channel(1, [0.6,0.2,0.1]) - 0.4) < 1e-10);
+  assert.throws(() => buildPreviewMatrices({ contrast: 3 }), { code: 'RECIPE_INVALID_PARAM' });
 });
