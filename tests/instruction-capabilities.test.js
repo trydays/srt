@@ -81,6 +81,31 @@ test('buildPrompt omits project context when none is provided', () => {
   assert.doesNotMatch(prompt, /能根据上面编辑上下文确定的时间与参数/);
 });
 
+test('buildPrompt lists applied edit operations and the subtitle track when present', () => {
+  const prompt = buildPrompt('再叠一层胶片颗粒', [], {
+    video: { durationSeconds: 75, width: 1280, height: 720 },
+    playheadSeconds: 12,
+    operations: [
+      { capability: 'color.grade@1', params: { warmth: 0.3, start: 12, end: 18 } },
+      { capability: 'fade.out@1', params: { start: 70, end: 75 } }
+    ],
+    subtitles: [{ index: 1, start: 2, end: 5, text: '大家好' }],
+    subtitleTotal: 1
+  });
+  assert.match(prompt, /已执行编辑命令（按执行顺序）/);
+  assert.match(prompt, /1\. color\.grade@1，参数 \{warmth:0\.3, start:12, end:18\}/);
+  assert.match(prompt, /2\. fade\.out@1，参数 \{start:70, end:75\}/);
+  assert.match(prompt, /字幕轨（共 1 段）/);
+  assert.match(prompt, /第1段 \[2–5 秒\]：大家好/);
+  assert.match(prompt, /同区间同能力先判断是叠加、替换还是撤销/);
+});
+
+test('buildPrompt omits operation and subtitle sections when absent', () => {
+  const prompt = buildPrompt('加字幕', [], { video: { durationSeconds: 75 }, playheadSeconds: 0 });
+  assert.doesNotMatch(prompt, /已执行编辑命令/);
+  assert.doesNotMatch(prompt, /字幕轨/);
+});
+
 test('parseInstruction parses a clarify turn and trims its message', () => {
   assert.deepEqual(parseInstruction('{"kind":"clarify","message":"你想要什么氛围？"}'), {
     kind: 'clarify', message: '你想要什么氛围？'

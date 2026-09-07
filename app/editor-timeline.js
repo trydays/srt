@@ -60,7 +60,14 @@ function applyEffectStep(step) {
   var params = step.params || {};
   var time = typeof params.start === 'number' ? params.start
     : (videoDuration ? videoEl.currentTime : 0);
-  var effect = { name: effectName(step), time: time, color: 'var(--accent)' };
+  var effect = {
+    kind: 'instruction-effect',
+    capability: step.capability,
+    params: Object.assign({}, params),
+    name: effectName(step),
+    time: time,
+    color: 'var(--accent)'
+  };
   var marker = createMarkerDOM(effect, timelineEffects.length);
   marker.dataset.testid = step.capability === 'fade.in@1'
     ? 'timeline-effect-fade-in' : 'timeline-effect-fade-out';
@@ -79,15 +86,42 @@ function applyInstructionSteps(steps) {
 }
 
 /* 每次转换前冻结当前项目快照，作为本地 CLI 推导的编辑上下文 */
+function operationContextEntries() {
+  return timelineEffects.filter(function(effect) {
+    return effect && effect.kind === 'instruction-effect' && effect.capability;
+  }).map(function(effect) {
+    return { capability: effect.capability, params: effect.params || {} };
+  });
+}
+function subtitleSummaryEntries() {
+  var controller = window.subtitleController;
+  if (!controller || typeof controller.getAppliedSegments !== 'function') {
+    return { segments: [], total: 0 };
+  }
+  var all = controller.getAppliedSegments();
+  if (!Array.isArray(all) || !all.length) return { segments: [], total: 0 };
+  var MAX_SUBTITLE_SEGMENTS = 500;
+  var MAX_SUBTITLE_TEXT = 80;
+  var segments = all.slice(0, MAX_SUBTITLE_SEGMENTS).map(function(segment, index) {
+    var text = String(segment.text || '').replace(/\s+/g, ' ').trim();
+    if (text.length > MAX_SUBTITLE_TEXT) text = text.slice(0, MAX_SUBTITLE_TEXT) + '…';
+    return { index: index + 1, start: segment.start, end: segment.end, text: text };
+  });
+  return { segments: segments, total: all.length };
+}
 function currentProjectContext() {
   if (!videoDuration || !Number.isFinite(videoDuration)) return null;
+  var subtitles = subtitleSummaryEntries();
   return {
     video: {
       durationSeconds: videoDuration,
       width: typeof videoEl.videoWidth === 'number' ? videoEl.videoWidth : null,
       height: typeof videoEl.videoHeight === 'number' ? videoEl.videoHeight : null
     },
-    playheadSeconds: Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0
+    playheadSeconds: Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0,
+    operations: operationContextEntries(),
+    subtitles: subtitles.segments,
+    subtitleTotal: subtitles.total
   };
 }
 

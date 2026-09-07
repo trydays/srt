@@ -111,6 +111,32 @@ function projectContextLines(context) {
   if (typeof context.playheadSeconds === 'number' && Number.isFinite(context.playheadSeconds)) {
     lines.push('播放头位置：' + context.playheadSeconds + ' 秒');
   }
+
+  var operations = Array.isArray(context.operations) ? context.operations : [];
+  if (operations.length) {
+    lines.push('已执行编辑命令（按执行顺序）：');
+    operations.forEach(function (operation, index) {
+      if (!operation || typeof operation.capability !== 'string') return;
+      var params = isPlainObject(operation.params) ? operation.params : {};
+      var values = Object.keys(params).map(function (key) {
+        return key + ':' + params[key];
+      });
+      lines.push('- ' + (index + 1) + '. ' + operation.capability + '，参数 ' + (values.length ? '{' + values.join(', ') + '}' : '{}'));
+    });
+  }
+
+  var subtitles = Array.isArray(context.subtitles) ? context.subtitles : [];
+  if (subtitles.length) {
+    var total = typeof context.subtitleTotal === 'number' ? context.subtitleTotal : subtitles.length;
+    lines.push('字幕轨（共 ' + total + ' 段' + (total > subtitles.length ? '，仅列出前 ' + subtitles.length + ' 段' : '') + '）：');
+    subtitles.forEach(function (segment) {
+      if (!segment) return;
+      var start = typeof segment.start === 'number' ? segment.start : 0;
+      var end = typeof segment.end === 'number' ? segment.end : 0;
+      lines.push('- 第' + segment.index + '段 [' + start + '–' + end + ' 秒]：' + String(segment.text || ''));
+    });
+  }
+
   return lines.length ? lines : null;
 }
 
@@ -140,10 +166,15 @@ function buildPrompt(userText, history, context) {
   ]);
 
   var contextLines = projectContextLines(context);
+  var hasOperationContext = Array.isArray(context && context.operations) && context.operations.length > 0;
+  var hasSubtitleContext = Array.isArray(context && context.subtitles) && context.subtitles.length > 0;
   if (contextLines) {
     lines.push('当前编辑上下文：');
     lines = lines.concat(contextLines);
     lines.push('- 能根据上面编辑上下文确定的时间与参数就直接推导；只有上下文确实无法确定时才输出 clarify 追问。');
+    if (hasOperationContext || hasSubtitleContext) {
+      lines.push('- 新的编辑命令会叠加在“已执行编辑命令”与当前字幕轨之上；同区间同能力先判断是叠加、替换还是撤销，无法确定才追问。');
+    }
   }
 
   if (Array.isArray(history) && history.length) {

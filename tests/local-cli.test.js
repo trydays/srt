@@ -223,12 +223,18 @@ test('forwards video project context into the generated prompt', async () => {
   await service.select('codex');
   await service.translateInstruction('片尾淡出', [], {
     video: { durationSeconds: 75, width: 1280, height: 720 },
-    playheadSeconds: 12
+    playheadSeconds: 12,
+    operations: [{ capability: 'fade.out@1', params: { start: 70, end: 75 } }],
+    subtitles: [{ index: 1, start: 2, end: 5, text: '大家好' }],
+    subtitleTotal: 1
   });
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /视频总时长：75 秒/);
   assert.match(calls[0].args[1], /视频分辨率：1280x720/);
   assert.match(calls[0].args[1], /播放头位置：12 秒/);
+  assert.match(calls[0].args[1], /1\. fade\.out@1，参数 \{start:70, end:75\}/);
+  assert.match(calls[0].args[1], /字幕轨（共 1 段）/);
+  assert.match(calls[0].args[1], /第1段 \[2–5 秒\]：大家好/);
 });
 
 test('reports a killed CLI translation as a timeout', async () => {
