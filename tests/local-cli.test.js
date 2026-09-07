@@ -156,6 +156,33 @@ test('translates a fade request into fade.in instruction', async () => {
   });
 });
 
+test('passes through an AI-derived multi-primitive recipe in order', async () => {
+  const fsApi = fakeFs(['/bin/codex']);
+  const { run } = fakeTranslator(JSON.stringify({
+    kind: 'instruction',
+    steps: [
+      { capability: 'color.grade@1', params: { warmth: 0.18, saturation: 0.8, contrast: 1.1, start: 12, end: 18 } },
+      { capability: 'texture.grain@1', params: { amount: 0.22, start: 12, end: 18 } },
+      { capability: 'vignette@1', params: { strength: 0.35, start: 12, end: 18 } },
+      { capability: 'fade.out@1', params: { start: 18, end: 20 } }
+    ]
+  }));
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+    fsApi, run: async () => ({ exitCode: 0 }), translate: run
+  });
+  await service.select('codex');
+  assert.deepEqual(await service.translateInstruction('把 12 到 18 秒做成复古胶片感，片尾淡出'), {
+    kind: 'instruction',
+    steps: [
+      { capability: 'color.grade@1', params: { warmth: 0.18, saturation: 0.8, contrast: 1.1, start: 12, end: 18 } },
+      { capability: 'texture.grain@1', params: { amount: 0.22, start: 12, end: 18 } },
+      { capability: 'vignette@1', params: { strength: 0.35, start: 12, end: 18 } },
+      { capability: 'fade.out@1', params: { start: 18, end: 20 } }
+    ]
+  });
+});
+
 test('returns a clarify turn when the CLI asks a follow-up', async () => {
   const fsApi = fakeFs(['/bin/codex']);
   const { run } = fakeTranslator('{"kind":"clarify","message":"你想要字幕还是淡入？"}');
