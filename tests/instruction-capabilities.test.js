@@ -2,17 +2,21 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { INSTRUCTION_CAPABILITIES, buildPrompt, parseInstruction } = require('../src/instruction-capabilities');
 
-test('registry declares only subtitle.generate and fade.in', () => {
-  assert.deepEqual(Object.keys(INSTRUCTION_CAPABILITIES).sort(), ['fade.in@1', 'subtitle.generate@1']);
+test('registry declares the three bottom-level capabilities', () => {
+  assert.deepEqual(Object.keys(INSTRUCTION_CAPABILITIES).sort(),
+    ['fade.in@1', 'fade.out@1', 'subtitle.generate@1']);
 });
 
-test('buildPrompt lists every capability and the two output kinds', () => {
-  const prompt = buildPrompt('给视频加字幕');
+test('buildPrompt lists every capability, time ranges, and the two output kinds', () => {
+  const prompt = buildPrompt('从 12 到 18 秒加字幕，片头淡入');
   assert.match(prompt, /subtitle\.generate@1/);
   assert.match(prompt, /fade\.in@1/);
-  assert.match(prompt, /给视频加字幕/);
+  assert.match(prompt, /fade\.out@1/);
+  assert.match(prompt, /start/);
+  assert.match(prompt, /end/);
   assert.match(prompt, /clarify/);
-  assert.match(prompt, /instruction/);
+  assert.match(prompt, /steps/);
+  assert.match(prompt, /从 12 到 18 秒加字幕，片头淡入/);
 });
 
 test('buildPrompt includes conversation history when provided', () => {
@@ -40,19 +44,34 @@ test('parseInstruction parses a clarify turn and trims its message', () => {
   });
 });
 
-test('parseInstruction parses an instruction turn with params', () => {
-  assert.deepEqual(parseInstruction('{"kind":"instruction","capability":"subtitle.generate@1","params":{}}'), {
-    kind: 'instruction', capability: 'subtitle.generate@1', params: {}
+test('parseInstruction parses a multi-step instruction with time ranges', () => {
+  assert.deepEqual(parseInstruction(JSON.stringify({
+    kind: 'instruction',
+    steps: [
+      { capability: 'subtitle.generate@1', params: { start: 12, end: 18 } },
+      { capability: 'fade.in@1', params: {} }
+    ]
+  })), {
+    kind: 'instruction',
+    steps: [
+      { capability: 'subtitle.generate@1', params: { start: 12, end: 18 } },
+      { capability: 'fade.in@1', params: {} }
+    ]
   });
 });
 
-test('parseInstruction defaults params to an empty object when missing or non-object', () => {
-  assert.deepEqual(parseInstruction('{"kind":"instruction","capability":"fade.in@1"}'), {
-    kind: 'instruction', capability: 'fade.in@1', params: {}
-  });
-  assert.deepEqual(parseInstruction('{"kind":"instruction","capability":"fade.in@1","params":[]}'), {
-    kind: 'instruction', capability: 'fade.in@1', params: {}
-  });
+test('parseInstruction accepts a single-step instruction', () => {
+  assert.deepEqual(
+    parseInstruction('{"kind":"instruction","steps":[{"capability":"fade.out@1","params":{}}]}'),
+    { kind: 'instruction', steps: [{ capability: 'fade.out@1', params: {} }] }
+  );
+});
+
+test('parseInstruction rejects a start greater than or equal to end', () => {
+  assert.throws(
+    () => parseInstruction('{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{"start":5,"end":5}}]}'),
+    { code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT' }
+  );
 });
 
 for (const output of [
@@ -61,11 +80,14 @@ for (const output of [
   '{"kind":"clarify","message":""}',
   '{"kind":"clarify","message":"   "}',
   '{"kind":"clarify"}',
-  '{"kind":"instruction","capability":"trim@1"}',
-  '{"kind":"instruction","capability":123}',
+  '{"kind":"instruction","steps":[]}',
+  '{"kind":"instruction","steps":[{"capability":"trim@1","params":{}}]}',
+  '{"kind":"instruction","steps":[{"capability":123,"params":{}}]}',
+  '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{"speed":2}}]}',
+  '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{"start":-1}}]}',
+  '{"kind":"instruction","steps":[{"capability":"fade.in@1","params":{"end":"later"}}]}',
   '{"kind":"unknown"}',
-  '{"capability":"fade.in@1","params":{}}',
-  '{"capability":null}'
+  '{"capability":"fade.in@1","params":{}}'
 ]) {
   test(`parseInstruction rejects invalid output: ${output}`, () => {
     assert.throws(() => parseInstruction(output), { code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT' });
