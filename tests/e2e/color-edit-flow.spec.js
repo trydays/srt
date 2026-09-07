@@ -34,8 +34,9 @@ test.describe('complete color and subtitle transaction', () => {
   test('commits once, previews by range, reloads, exports and restores the prior business state with one undo', async ({
     window, readScenarioState
   }, testInfo) => {
-    const source = testInfo.outputPath('color-transaction.mp4');
-    await fs.writeFile(source, 'deterministic metadata fixture');
+    const fixturePath = testInfo.outputPath('color-transaction.mp4');
+    await fs.writeFile(fixturePath, 'deterministic metadata fixture');
+    const source = await fs.realpath(fixturePath);
     await window.getByTestId('local-cli-codex').click();
     await window.getByTestId('continue').click();
     await window.getByTestId('video-input').setInputFiles(source);
