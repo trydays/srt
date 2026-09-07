@@ -20,6 +20,8 @@ test('exposes only registrations with every executable adapter', function() {
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
   }), ['subtitle.generate@1']);
+  assert.equal(createCapabilityRegistry().promptDefinitions()[0].description,
+    '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨');
   assert.equal(createCapabilityRegistry().get('subtitle.generate@1').definition.range.allowed, false);
 
   adapters.forEach(function(adapter) {
@@ -34,6 +36,12 @@ test('exposes only registrations with every executable adapter', function() {
     })
   });
   assert.deepEqual(createCapabilityRegistry([invalidSchema]).promptDefinitions(), []);
+
+  ['editMode', 'editType', 'nodeType'].forEach(function(field) {
+    const unroutable = Object.assign({}, complete);
+    delete unroutable[field];
+    assert.deepEqual(createCapabilityRegistry([unroutable]).promptDefinitions(), []);
+  });
 });
 
 test('normalizes the one whole-video subtitle instruction into a new safe recipe', function() {
@@ -154,6 +162,16 @@ test('maps subtitle failures and validates payload timing with one millisecond t
   }, { code: 'SUBTITLE_INVALID_OUTPUT' });
 });
 
+test('rejects an unavailable video path before calling subtitle IPC', async function() {
+  const registration = createSubtitleRegistration();
+  let calls = 0;
+  await assert.rejects(registration.prepare({}, {
+    videoPath: '   ',
+    generateSubtitles: async function() { calls += 1; return { ok: true, segments: [] }; }
+  }), { code: 'VIDEO_PATH_UNAVAILABLE' });
+  assert.equal(calls, 0);
+});
+
 test('previews from graph nodes and emits the existing declarative burn step', function() {
   const registration = createSubtitleRegistration();
   const node = {
@@ -172,6 +190,8 @@ test('previews from graph nodes and emits the existing declarative burn step', f
     capability: 'subtitle.burn@1', params: { segments: node.props.segments }
   });
   assert.equal(createCapabilityRegistry().forEditType('subtitle.track@1').definition.id,
+    'subtitle.generate@1');
+  assert.equal(createCapabilityRegistry().forNodeType('visual.subtitle@1').definition.id,
     'subtitle.generate@1');
 });
 

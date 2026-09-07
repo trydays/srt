@@ -80,14 +80,19 @@
         schemaVersion: 1,
         id: 'subtitle.generate@1',
         label: '生成字幕',
-        description: '为整段视频生成可编辑字幕',
+        description: '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨',
         params: { type: 'object', additionalProperties: false, properties: {} },
         range: { allowed: false, default: 'wholeTarget' }
       },
       editMode: 'replaceByType',
       editType: 'subtitle.track@1',
+      nodeType: 'visual.subtitle@1',
 
       prepare: async function(_step, executionContext) {
+        if (!executionContext || typeof executionContext.videoPath !== 'string'
+            || !executionContext.videoPath.trim()) {
+          throw codedError('VIDEO_PATH_UNAVAILABLE');
+        }
         if (!executionContext || typeof executionContext.generateSubtitles !== 'function') {
           throw codedError('SUBTITLE_RUNTIME_NOT_READY');
         }
@@ -170,6 +175,9 @@
   function completeRegistration(registration) {
     var definition = registration && registration.definition;
     return isPlainObject(registration) && isPlainObject(definition)
+      && registration.editMode === 'replaceByType'
+      && typeof registration.editType === 'string' && registration.editType
+      && typeof registration.nodeType === 'string' && registration.nodeType
       && definition.schemaVersion === 1 && typeof definition.id === 'string'
       && isPlainObject(definition.params) && definition.params.type === 'object'
       && definition.params.additionalProperties === false
@@ -185,11 +193,13 @@
     var items = registrations === undefined ? [createSubtitleRegistration()] : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);
+    var byNodeType = Object.create(null);
     items.forEach(function(registration) {
       var id = registration && registration.definition && registration.definition.id;
       if (typeof id !== 'string' || byId[id]) throw codedError('CAPABILITY_REGISTRATION_INVALID');
       byId[id] = registration;
       if (typeof registration.editType === 'string') byEditType[registration.editType] = registration;
+      if (typeof registration.nodeType === 'string') byNodeType[registration.nodeType] = registration;
     });
 
     function validateRecipe(recipe) {
@@ -220,6 +230,7 @@
     return {
       get: function(id) { return byId[id] || null; },
       forEditType: function(type) { return byEditType[type] || null; },
+      forNodeType: function(type) { return byNodeType[type] || null; },
       promptDefinitions: function() {
         return items.filter(completeRegistration).map(function(registration) {
           return clone(registration.definition);
