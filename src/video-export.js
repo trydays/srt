@@ -21,28 +21,39 @@ function createVideoExportService(options) {
     return current ? { jobId: current.jobId, phase: current.phase } : { phase: 'idle' };
   }
 
+  function sendProgress(onProgress, event) {
+    if (!onProgress) return;
+    try {
+      const pending = onProgress(event);
+      if (pending && typeof pending.then === 'function') {
+        Promise.resolve(pending).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
   function runProcess(command, args, spawnOptions, onStdout) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let child;
       try {
         child = spawnImpl(command, args, spawnOptions);
       } catch (error) {
-        reject(error);
+        resolve({ code: null, signal: null, stdout: '', stderr: '', error });
         return;
       }
       current.child = child;
       let stdout = '';
       let stderr = '';
+      let processError = null;
       if (child.stdout) child.stdout.on('data', (chunk) => {
         const text = chunk.toString();
         stdout += text;
         if (onStdout) onStdout(text);
       });
       if (child.stderr) child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-      child.once('error', reject);
+      child.once('error', (error) => { processError = error; });
       child.once('close', (code, signal) => {
         if (current && current.child === child) current.child = null;
-        resolve({ code, signal, stdout, stderr });
+        resolve({ code, signal, stdout, stderr, error: processError });
       });
     });
   }
@@ -51,7 +62,7 @@ function createVideoExportService(options) {
     const result = await runProcess(ffprobePath, [
       '-v', 'error', '-show_format', '-show_streams', '-of', 'json', mediaPath
     ], { shell: false });
-    if (result.code !== 0) throw codedError('EXPORT_INVALID_MEDIA');
+    if (result.error || result.code !== 0) throw codedError('EXPORT_INVALID_MEDIA');
     let probe;
     try {
       probe = JSON.parse(result.stdout);
@@ -87,10 +98,20 @@ function createVideoExportService(options) {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centiseconds % 100).padStart(2, '0')}`;
   }
 
+  function assColor(hexColor, opacity) {
+    const red = hexColor.slice(1, 3);
+    const green = hexColor.slice(3, 5);
+    const blue = hexColor.slice(5, 7);
+    const alpha = Math.round((1 - opacity) * 255).toString(16).padStart(2, '0');
+    return `&H${alpha}${blue}${green}${red}`.toUpperCase();
+  }
+
   function buildAss(recipe, media) {
     const fontSize = media.displayHeight * SUBTITLE_STYLE.fontSize / SUBTITLE_STYLE.referenceHeight;
     const marginH = Math.round(media.displayWidth * (100 - SUBTITLE_STYLE.maxWidthPercent) / 200);
     const marginV = Math.round(media.displayHeight * SUBTITLE_STYLE.bottomPercent / 100);
+    const textColor = assColor(SUBTITLE_STYLE.textColor, 1);
+    const boxColor = assColor(SUBTITLE_STYLE.backgroundColor, SUBTITLE_STYLE.backgroundOpacity);
     const dialogue = recipe.steps[0].params.segments.map((segment) => {
       const text = segment.text
         .replace(/\\/g, `\\\u2060`)
@@ -107,7 +128,7 @@ function createVideoExportService(options) {
       '',
       '[V4+ Styles]',
       'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-      `Style: Default,${SUBTITLE_STYLE.fontFamily},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H47000000,0,0,0,0,100,100,0,0,3,0,0,2,${marginH},${marginH},${marginV},1`,
+      `Style: Default,${SUBTITLE_STYLE.fontFamily},${fontSize},${textColor},${textColor},${boxColor},${boxColor},0,0,0,0,100,100,0,0,3,1,0,2,${marginH},${marginH},${marginV},1`,
       '',
       '[Events]',
       'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -118,6 +139,7 @@ function createVideoExportService(options) {
 
   async function execute(job, onProgress) {
     let taskDir;
+    let terminal;
     try {
       const recipe = validateRenderRecipe(job.recipe);
       let sourcePath;
@@ -145,7 +167,7 @@ function createVideoExportService(options) {
       const source = await probeMedia(tools.ffprobePath, sourcePath);
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       if (recipe.steps[0].params.segments.some((segment) => segment.start >= source.duration
-          || segment.end > source.duration + 0.25)) {
+          || segment.end > source.duration + 0.001)) {
         throw codedError('EXPORT_INVALID_MEDIA');
       }
       taskDir = await fsApi.mkdtemp(path.join(os.tmpdir(), 'srt-video-export-'));
@@ -153,7 +175,7 @@ function createVideoExportService(options) {
       const stagedPath = path.join(taskDir, 'staged.mp4');
       await fsApi.writeFile(assPath, buildAss(recipe, source), 'utf8');
       current.phase = 'rendering';
-      if (onProgress) onProgress({ jobId: job.jobId, phase: 'rendering', percent: 0 });
+      sendProgress(onProgress, { jobId: job.jobId, phase: 'rendering', percent: 0 });
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       const renderArgs = [
         '-hide_banner', '-nostdin', '-n', '-i', sourcePath,
@@ -174,13 +196,13 @@ function createVideoExportService(options) {
             if (!match) continue;
             const percent = Math.min(99, Math.max(0,
               Math.floor(Number(match[1]) / (source.duration * 1000000) * 100)));
-            if (onProgress) onProgress({ jobId: job.jobId, phase: 'rendering', percent });
+            sendProgress(onProgress, { jobId: job.jobId, phase: 'rendering', percent });
           }
         });
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
-      if (rendered.code !== 0) throw codedError('EXPORT_RENDER_FAILED');
+      if (rendered.error || rendered.code !== 0) throw codedError('EXPORT_RENDER_FAILED');
       current.phase = 'finalizing';
-      if (onProgress) onProgress({ jobId: job.jobId, phase: 'finalizing', percent: 99 });
+      sendProgress(onProgress, { jobId: job.jobId, phase: 'finalizing', percent: 99 });
       let output;
       try {
         output = await probeMedia(tools.ffprobePath, stagedPath);
@@ -198,16 +220,26 @@ function createVideoExportService(options) {
         if (error.code === 'EEXIST') throw codedError('EXPORT_TARGET_EXISTS');
         throw codedError('EXPORT_WRITE_FAILED');
       }
-      return { jobId: job.jobId, status: 'completed', outputPath: job.outputPath };
+      terminal = { jobId: job.jobId, status: 'completed', outputPath: job.outputPath };
     } catch (error) {
       if (current && current.cancelled) {
-        return { jobId: job.jobId, status: 'cancelled' };
+        terminal = { jobId: job.jobId, status: 'cancelled' };
+      } else {
+        terminal = { jobId: job.jobId, status: 'failed', errorCode: error.code || 'EXPORT_FAILED' };
       }
-      return { jobId: job.jobId, status: 'failed', errorCode: error.code || 'EXPORT_FAILED' };
-    } finally {
+    }
+    let cleanupFailed = false;
+    try {
       if (taskDir) await fsApi.rm(taskDir, { recursive: true, force: true });
+    } catch (_) {
+      cleanupFailed = true;
+    } finally {
       current = null;
     }
+    if (cleanupFailed) {
+      return { jobId: job.jobId, status: 'failed', errorCode: 'EXPORT_WRITE_FAILED' };
+    }
+    return terminal;
   }
 
   function start(job, onProgress) {
@@ -215,9 +247,9 @@ function createVideoExportService(options) {
       return Promise.resolve({ jobId: job.jobId, status: 'failed', errorCode: 'EXPORT_BUSY' });
     }
     current = { jobId: job.jobId, phase: 'preparing', child: null, cancelled: false };
-    if (onProgress) onProgress({ jobId: job.jobId, phase: 'preparing', percent: null });
-    const completion = execute(job, onProgress);
+    const completion = Promise.resolve().then(() => execute(job, onProgress));
     current.completion = completion;
+    sendProgress(onProgress, { jobId: job.jobId, phase: 'preparing', percent: null });
     return completion;
   }
 

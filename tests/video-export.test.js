@@ -47,10 +47,11 @@ async function createFakePaths(t, outputContents) {
   return { directory, sourcePath, outputPath };
 }
 
-function createFakeService(spawnImpl) {
+function createFakeService(spawnImpl, overrides = {}) {
   return createVideoExportService({
     getExportTools: async () => ({ ffmpegPath: 'ffmpeg', ffprobePath: 'ffprobe' }),
-    spawnImpl
+    spawnImpl,
+    ...overrides
   });
 }
 
@@ -243,4 +244,215 @@ test('returns a render failure after non-zero close and removes its task directo
   });
   await assert.rejects(fs.stat(taskDir), { code: 'ENOENT' });
   await assert.rejects(fs.stat(paths.outputPath), { code: 'ENOENT' });
+});
+
+test('resolves invalid and unsupported recipes as failed terminals', async (t) => {
+  const paths = await createFakePaths(t);
+  const service = createFakeService(() => {
+    throw new Error('invalid recipes must not start tools');
+  });
+  let invalidCompletion;
+
+  assert.doesNotThrow(() => {
+    invalidCompletion = service.start({
+      jobId: 'invalid', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+      recipe: null
+    }, () => {});
+  });
+  assert.deepEqual(await invalidCompletion, {
+    jobId: 'invalid', status: 'failed', errorCode: 'EXPORT_INVALID_RECIPE'
+  });
+  const unsupported = await service.start({
+    jobId: 'unsupported', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+    recipe: {
+      version: 1,
+      steps: [{
+        capability: 'subtitle.burn@2',
+        params: { segments: [{ id: 's1', start: 0, end: 1, text: '字幕' }] }
+      }]
+    }
+  }, () => {});
+  assert.deepEqual(unsupported, {
+    jobId: 'unsupported', status: 'failed', errorCode: 'EXPORT_UNSUPPORTED_OPERATION'
+  });
+});
+
+test('preparing callback can synchronously cancel and waits for completion', async (t) => {
+  const paths = await createFakePaths(t);
+  let releaseRealpath;
+  const realpathGate = new Promise((resolve) => { releaseRealpath = resolve; });
+  const fsApi = {
+    ...fs,
+    realpath: async (target) => {
+      await realpathGate;
+      return fs.realpath(target);
+    }
+  };
+  const service = createFakeService(() => {
+    throw new Error('cancelled preparation must not start tools');
+  }, { fsApi });
+  let cancellation;
+  let cancelSettled = false;
+  const completion = service.start({
+    jobId: 'cancel-preparing', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+    recipe: oneCaption()
+  }, (event) => {
+    if (event.phase === 'preparing') {
+      cancellation = service.cancel(event.jobId).then(() => { cancelSettled = true; });
+    }
+  });
+
+  let pendingAssertion;
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(cancelSettled, false);
+  } catch (error) {
+    pendingAssertion = error;
+  } finally {
+    releaseRealpath();
+  }
+  assert.deepEqual(await completion, { jobId: 'cancel-preparing', status: 'cancelled' });
+  await cancellation;
+  if (pendingAssertion) throw pendingAssertion;
+});
+
+test('ignores progress callback errors without leaving the service busy', async (t) => {
+  const paths = await createFakePaths(t);
+  let call = 0;
+  const service = createFakeService((_command, args) => {
+    call += 1;
+    if (call === 1 || call === 3) return fakeChild({ stdoutChunks: [PROBE_JSON] });
+    return fakeChild({ beforeClose: () => fs.writeFile(args.at(-1), 'rendered') });
+  });
+  let completion;
+
+  assert.doesNotThrow(() => {
+    completion = service.start({
+      jobId: 'throwing-progress', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+      recipe: oneCaption()
+    }, () => { throw new Error('receiver disappeared'); });
+  });
+  assert.deepEqual(await completion, {
+    jobId: 'throwing-progress', status: 'completed', outputPath: paths.outputPath
+  });
+  assert.deepEqual(service.getState(), { phase: 'idle' });
+});
+
+test('waits for close after a child error and maps it to render failure', async (t) => {
+  const paths = await createFakePaths(t);
+  let renderChild;
+  let taskDir;
+  let markRenderStarted;
+  const renderStarted = new Promise((resolve) => { markRenderStarted = resolve; });
+  const service = createFakeService((_command, args, options) => {
+    if (!args.includes('-progress')) return fakeChild({ stdoutChunks: [PROBE_JSON] });
+    taskDir = options.cwd;
+    renderChild = fakeChild({ autoClose: false });
+    markRenderStarted();
+    return renderChild;
+  });
+  let completionSettled = false;
+  const completion = service.start({
+    jobId: 'child-error', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+    recipe: oneCaption()
+  }, () => {}).then((result) => {
+    completionSettled = true;
+    return result;
+  });
+  await renderStarted;
+  const spawnError = new Error('spawn failed');
+  spawnError.code = 'ENOENT';
+  renderChild.emit('error', spawnError);
+
+  let pendingAssertion;
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(completionSettled, false);
+    await fs.stat(taskDir);
+  } catch (error) {
+    pendingAssertion = error;
+  } finally {
+    await renderChild.finish(-2);
+  }
+  assert.deepEqual(await completion, {
+    jobId: 'child-error', status: 'failed', errorCode: 'EXPORT_RENDER_FAILED'
+  });
+  if (pendingAssertion) throw pendingAssertion;
+  await assert.rejects(fs.stat(taskDir), { code: 'ENOENT' });
+});
+
+test('releases current and returns write failure when task cleanup fails', async (t) => {
+  const paths = await createFakePaths(t);
+  const fsApi = {
+    ...fs,
+    rm: async (...args) => {
+      await fs.rm(...args);
+      const error = new Error('cleanup denied');
+      error.code = 'EACCES';
+      throw error;
+    }
+  };
+  let call = 0;
+  const service = createFakeService((_command, args) => {
+    call += 1;
+    if (call === 1 || call === 3) return fakeChild({ stdoutChunks: [PROBE_JSON] });
+    return fakeChild({ beforeClose: () => fs.writeFile(args.at(-1), 'rendered') });
+  }, { fsApi });
+
+  const result = await service.start({
+    jobId: 'cleanup-error', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+    recipe: oneCaption()
+  }, () => {});
+
+  assert.deepEqual(result, {
+    jobId: 'cleanup-error', status: 'failed', errorCode: 'EXPORT_WRITE_FAILED'
+  });
+  assert.deepEqual(service.getState(), { phase: 'idle' });
+});
+
+test('uses a translucent black ASS box with a non-zero outline', async (t) => {
+  const paths = await createFakePaths(t);
+  let assContents;
+  let call = 0;
+  const service = createFakeService((_command, args, options) => {
+    call += 1;
+    if (call === 1 || call === 3) return fakeChild({ stdoutChunks: [PROBE_JSON] });
+    return fakeChild({ beforeClose: async () => {
+      assContents = await fs.readFile(path.join(options.cwd, 'captions.ass'), 'utf8');
+      await fs.writeFile(args.at(-1), 'rendered');
+    } });
+  });
+
+  const result = await service.start({
+    jobId: 'box-style', videoPath: paths.sourcePath, outputPath: paths.outputPath,
+    recipe: oneCaption()
+  }, () => {});
+
+  assert.equal(result.status, 'completed');
+  const styleLine = assContents.split('\n').find((line) => line.startsWith('Style: Default'));
+  const fields = styleLine.slice('Style: '.length).split(',');
+  assert.equal(fields[5], '&H47000000');
+  assert.equal(fields[15], '3');
+  assert.equal(fields[16], '1');
+});
+
+test('rejects subtitle timing beyond a millisecond rounding tolerance', async (t) => {
+  const paths = await createFakePaths(t);
+  let spawnCalls = 0;
+  const service = createFakeService(() => {
+    spawnCalls += 1;
+    return fakeChild({ stdoutChunks: [PROBE_JSON] });
+  });
+  const recipe = buildSubtitleRecipe([
+    { id: 's1', start: 0.5, end: 4.01, text: '字幕' }
+  ]);
+
+  const result = await service.start({
+    jobId: 'timing', videoPath: paths.sourcePath, outputPath: paths.outputPath, recipe
+  }, () => {});
+
+  assert.deepEqual(result, {
+    jobId: 'timing', status: 'failed', errorCode: 'EXPORT_INVALID_MEDIA'
+  });
+  assert.equal(spawnCalls, 1);
 });
