@@ -203,7 +203,7 @@ test('video export normalizes fulfilled service failure codes to the public allo
     });
   `;
   assert.deepEqual(runMainProbe(script, 'EXPORT_CODES'), [
-    'EXPORT_FAILED', 'EXPORT_RENDER_FAILED'
+    'EXPORT_WRITE_FAILED', 'EXPORT_RENDER_FAILED'
   ]);
 });
 

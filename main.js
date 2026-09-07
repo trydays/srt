@@ -337,7 +337,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       const result = await slot.completion;
       if (result && result.status === 'failed') {
         return Object.assign({}, result, {
-          errorCode: publicExportCode({ code: result.errorCode }, 'EXPORT_FAILED')
+          errorCode: publicExportCode({ code: result.errorCode }, 'EXPORT_WRITE_FAILED')
         });
       }
       return result;

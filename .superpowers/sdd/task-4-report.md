@@ -91,14 +91,14 @@
 1. `openAfter(null)` 现在仅展开现有字幕文稿；已有 `candidateTexts` 时不再从持久化状态重建，因此未保存候选不会被覆盖。字幕保存、应用、输入、粘贴和键盘写入同时直接服从页面级 `window.isExporting`。
 2. 历史卡允许在导出中继续展开查看，但其重渲染出的新撤销按钮会保持禁用；撤销处理本身也检查 `window.isExporting`，导出终态后恢复当前 DOM 中的撤销入口。未引入 MutationObserver 或通用锁。
 3. 导出感知的 close handler 由每次 `createWindow` 创建窗口时安装，覆盖首次 ready 窗口和 macOS activate 重建窗口。
-4. 服务 fulfilled 的 `failed` terminal 也经过 `publicExportCode`；未知 `EACCES` 收敛为 `EXPORT_FAILED`，允许的 `EXPORT_RENDER_FAILED` 原样保留。
+4. 服务 fulfilled 的 `failed` terminal 也经过 `publicExportCode`；未知 `EACCES` 收敛为 `EXPORT_WRITE_FAILED`，允许的 `EXPORT_RENDER_FAILED` 原样保留。
 
 ### RED 证据
 
 - 命令：`node --test tests/main-entry.test.js`
   - 结果：7 pass / 2 fail。
   - 重建窗口 close listener 实际为 `[1,0]`，期望 `[1,1]`。
-  - fulfilled 服务错误码实际为 `EACCES`，期望 `EXPORT_FAILED`；允许码对照项仍为 `EXPORT_RENDER_FAILED`。
+  - fulfilled 服务错误码实际为 `EACCES`，期望 `EXPORT_WRITE_FAILED`；允许码对照项仍为 `EXPORT_RENDER_FAILED`。
 - 命令：`npx playwright test tests/e2e/video-export-flow.spec.js --grep 'unsaved subtitle candidate|history-created undo'`
   - 结果：2 fail。
   - 未保存候选期望“尚未保存也尚未应用”，实际被重置为“大家好”。
