@@ -1,482 +1,605 @@
 # 字幕真实渲染与 MP4 导出 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 用户将当前项目已应用的字幕烧入真实 MP4，并能在编辑器中选择位置、查看进度、取消和确认结果。
+**Goal:** 用户把当前项目已应用的字幕真正烧入 MP4，并能选择保存位置、查看真实进度、取消和确认结果。
 
-**Architecture:** 保留现有字幕状态，导出时生成 RenderRecipe v1 快照。独立导出模块负责 ASS、FFprobe、FFmpeg 与落盘，主进程负责原生另存为，页面负责交互。环境检测与导出共用同一个工具解析方法。
+**Architecture:** 现有字幕状态仍是唯一数据源；导出时生成只含 subtitle.burn@1 的不可变快照。独立模块使用周期 0 已验证的 FFmpeg/FFprobe 渲染，主进程负责原生另存为，页面只负责一次性快照和最小交互。
 
-**Tech Stack:** 现有 Electron 33、原生 JavaScript/CommonJS、node:test、Playwright、FFmpeg/libass 与 FFprobe。不新增 React、Remotion 或流程框架。
+**Tech Stack:** Electron 33、原生 JavaScript/CommonJS、node:test、Playwright、FFmpeg/libass、FFprobe。不新增依赖。
 
-**Design:** 仓库 docs/superpowers/specs/2026-09-06-subtitle-video-export-design.md。
+**Design:** docs/superpowers/specs/2026-09-06-subtitle-video-export-design.md
 
-**Baseline:** main @ 55266f4；实际开工时再次检查 Git 状态。
+**Baseline:** feature/subtitle-export-cycle0 @ 06abc0c
 
-**Status:** 计划文档已编制；下面所有实施与验收项均未执行。当前任务只授权文档。
+**Status:** 周期 0 已完成并关闭；周期 1–3 尚未实施。当前只授权文档同步，不授权功能实施、合并或推送。
 
-**Working directory:** /Users/mac/Documents/项目/SRTP。
+**Working directory:** /Users/mac/Documents/Codex/SRTP-worktrees/subtitle-export-cycle0
 
 ## Global Constraints
 
-- 当前只交付字幕这一项真实能力；配方 capability 唯一标识为 subtitle.burn@1。
-- 导出读取已应用 segments，不读取 draft；新生成字幕沿用已有自动应用行为。
-- 原生另存为默认源目录与“原文件名-已编辑.mp4”；只创建新文件，不覆盖源文件或已有目标。
-- MP4/H.264/AAC/yuv420p 固定；不新增用户编码设置、不自动改变画面尺寸。
-- 预览、识别与导出绑定同一实际加载的视频路径；字幕使用同一文字、布局和样式参数。
-- 导出时保留播放和历史查看，冻结写操作、项目导航及重新上传；所有终态释放锁。
-- 任意 AI 配方、效果库建设、组件统计、存储迁移、Windows 真机和正式打包均排除。
-- 30 + 120 + 120 + 60 = 330 分钟主动开发与验证硬上限；依赖等待单列，超过闸门停止报告。
-- 支撑性工作累计不超过 75 分钟；达到 150 分钟应已有真实字幕 MP4。
-- 实际实现发现超过预算时报告；不通过缩减已冻结验收或换名归类支撑工作掩盖超时。
-- 文件和接口名称以本计划为准；先验证对外行为，再实现通过该行为所需的最小代码。
-- 局部修复目前的视频路径错配计入 T4；不借此重构全体项目存储。
-- 已存在的 .superpowers/brainstorm/ 是用户设计预览，禁止加入本次 Git 提交或删除。
+- 只实现 subtitle.burn@1；必须恰好一个字幕步骤和至少一段字幕，空配方不做普通转码。
+- 只读已应用 segments；draft 和编辑区候选文字不能进入输出。
+- 固定 MP4/H.264/AAC/yuv420p；不增加格式、编码器、画质、GPU 或多效果设置。
+- 只创建新文件；源文件和已有目标绝不覆盖。
+- 当前 Mac 固定使用已实测的 Heiti SC；不下载或管理字体。
+- 预览、识别和导出绑定同一项目实际加载路径；不迁移 IndexedDB，不建设资产库。
+- 页面只维护一个 isExporting；不建设通用锁、事件总线、任务中心、队列、恢复或自动重试。
+- 不做持续 Resize 字幕排版、精确换行/像素一致、HDR、复杂多流、Windows 真机或正式打包。
+- 总口径 30（已完成）+ 90 + 90 + 40 = 250 分钟；剩余主动开发与验证最多 220 分钟。
+- 周期 0 的 30 分钟全部保守计为支撑；剩余支撑最多 32 分钟，分配为周期 1/2/3 各 14/10/8 分钟。
+- 前一周期未用的支撑额度可后移，不可提前透支。周期 0 可靠的超时总投入从剩余主动额度 220 分钟等额扣减，其中属于支撑的部分同时从剩余支撑 32 分钟等额扣减。
+- 直接实现冻结行为及直接证明该行为的聚焦测试属于产品实现/验证；环境诊断、工具修理、测试夹具适配和无关失败定位属于支撑；只有无人工作、无需监看的纯等待单列外部等待。
+- 支撑项超过自身估时两倍、检查点没有可见成果或周期预算耗尽时，立即停止报告。
+- 新工作只有直接阻断冻结验收、避免现实安全/法律/数据损失，或用户知情批准时才可加入。
+- 每周期通过后只提交明确文件；下一周期仍须用户授权。不得自动合并或推送。
+- .superpowers/brainstorm/ 不加入提交、不删除。
 
-## 周期与任务映射
+## 周期冻结
 
-| 周期 | 任务 | 分钟 | 独立可验收成果 |
-|---|---|---:|---|
-| 0 能力闸门 | T1 | 30 | 实际工具就绪状态与中文字幕短样片；失败则阻断 |
-| 1 渲染核心 | T2 + T3 | 25 + 95 | 模块根据字幕配方输出可播放 MP4 |
-| 2 编辑器接入 | T4 + T5 | 45 + 75 | 真正可用的原生导出与进度、取消 |
-| 3 整链验收 | T6 | 60 | 真实 Mac 工作流、回归与研发记录 |
+| 周期 | 唯一目的 | 可见成果 | 明确不做 | 上限 | 立即结束 |
+|---|---|---|---|---:|---|
+| 0 能力闸门 | 证明当前 Mac 能烧录中文字幕 | 检测页状态和一秒有声样片 | 不重开环境建设 | 30 分钟，已完成 | 保持关闭 |
+| 1 渲染核心 | 已应用字幕快照生成真实 MP4 | 外部播放器可打开的真实 MP4 | 不做普通转码、注册器、第二效果或 UI | 90 分钟 | 开工 45 分钟先有 MP4；进度、取消和源保护通过即停 |
+| 2 编辑器接入 | 从现有编辑器调用周期 1 能力 | 原生另存为、真实进度和取消 | 不做持续 Resize、通用锁、任务中心或改版 | 90 分钟 | 开工 45 分钟能发起真实导出；源一致和入口恢复通过即停 |
+| 3 整链验收 | 证明自然语言字幕到导出的整链 | 最终视频、聚焦回归和研发记录 | 不重复人工矩阵、不修无关失败、不扩平台 | 40 分钟 | 开工 20 分钟先跑真实整链；冻结验收通过即停 |
 
-各任务开工时记录开始时间、主动投入、依赖等待。每完成一个周期，报告“内部实现”和“用户可见成果”。达到退出条件立即进入下一项，不为额外完善停留。
+每周期开始和结束记录产品实现、支撑工作、外部等待、剩余主动额度和剩余支撑额度五个实际整数分钟值；没有发生的项目记 0。
 
-## 文件职责映射
+## 文件与接口边界
 
-以下路径均相对上述仓库根目录；当前文件存在情况已只读核对。
+周期 0 已完成的 src/environment/index.js、app/env-check.js 及其测试不再修改；后续只调用 getExportTools()。
 
-| 文件 | 动作与职责 |
-|---|---|
-| src/render-recipe.js | 新建；快照构建、唯一字幕能力校验、固定样式常量；CommonJS/浏览器共享 |
-| src/video-export.js | 新建；唯一渲染模块，小接口封装视频探测、ASS、进度、取消与落盘 |
-| app/editor-export.js | 新建；前置检查、任务锁、字幕排版快照、右上角导出交互 |
-| src/environment/index.js | 修改；实际能力探测、getExportTools、subtitleExport 模式、兼容安装计划 |
-| app/env-check.js | 修改；在现有模式区域显示字幕导出能力与原因 |
-| main.js / preload.js | 修改；源文件解析、原生另存为、受限导出接口、进度、正常关闭 |
-| app/editor-core.js | 修改；桌面播放器绑定本项目实际源，处理加载失败与重传锁 |
-| app/editor-subtitles.js | 修改；只读快照、排版与样式共用、字幕写操作锁 |
-| app/editor-timeline.js | 修改；当前不支持项读取、发送/拖放/删除/撤销锁 |
-| app/shared.js | 修改；项目标签导航/关闭操作遵守导出锁 |
-| app/剪辑.html | 修改；右上角入口与浮层、加载新脚本；保留现有颜色 |
-| tests/render-recipe.test.js | 新建；快照独立、草稿不混入、非法能力/数据 |
-| tests/video-export.test.js | 新建；模块行为与显式启用的真实 FFmpeg 冒烟 |
-| tests/e2e/video-export-flow.spec.js | 新建；成功、阻断、取消、源项目一致的 UI 行为 |
-| tests/environment.test.js / tests/environment-install.test.js | 修改；能力探测和安装方案的实际行为 |
-| tests/e2e/scenario-dependencies.js / tests/e2e/environment-flow.spec.js | 修改；模拟能力与检测页断言 |
-| tests/e2e/electron-main.js / tests/e2e/electron.fixture.js | 修改；可注入导出结果和原生对话框结果 |
-| tests/main-entry.test.js / package.json | 修改；新增桥接回归和 E2E 脚本入口 |
-| docs/DEVELOPMENT_LOG.md / docs/PROJECT_STATUS.md | 仅在实现验收后更新实际状态 |
+| 周期 | 文件 | 职责 |
+|---|---|---|
+| 1 | src/render-recipe.js | 新建；唯一字幕快照和固定样式 |
+| 1 | src/video-export.js | 新建；媒体探测、ASS、渲染、进度、取消、验证和排他保存 |
+| 1 | tests/render-recipe.test.js、tests/video-export.test.js | 新建；窄校验、真实 MP4 闸门和必要模块行为 |
+| 2 | main.js、preload.js | 修改；源解析、原生另存为、窄 IPC、正常关闭 |
+| 2 | app/editor-core.js | 修改；桌面预览绑定当前项目规范化路径 |
+| 2 | app/editor-subtitles.js | 修改；增加已应用字幕深拷贝读取口 |
+| 2 | app/editor-timeline.js | 修改；增加请求中和当前未支持项读取口 |
+| 2 | app/editor-export.js、app/剪辑.html | 新建控制器并增加右上角入口、浮层和现有色彩样式 |
+| 2 | tests/main-entry.test.js、tests/e2e/electron-main.js | 修改；窄桥接和固定假导出结果 |
+| 2 | tests/e2e/video-export-flow.spec.js | 新建；一条组合流程 |
+| 2 | tests/e2e/auto-subtitles-flow.spec.js | 仅在无效媒体夹具阻断 loadedmetadata 时最小适配 |
+| 3 | docs/DEVELOPMENT_LOG.md、docs/PROJECT_STATUS.md | 完整证据只写前者；后者只写等级、成果、限制和链接 |
 
-不修改 src/local-cli.js、src/subtitles.js、Whisper 模型、app/effects.js 和组件目录来增加功能。src/environment/node-adapter.js 的短探测 runner 继续复用，不扩展成通用长任务平台。
+不修改 src/local-cli.js、src/subtitles.js、app/effects.js、app/shared.js、package.json、Whisper 模型或组件目录。
 
-## 接口契约
+冻结接口：
 
-以下类型只是 JavaScript 数据约定，不引入 TypeScript 编译链。
+~~~text
+buildSubtitleRecipe(segments)
+validateRenderRecipe(recipe)
+SUBTITLE_STYLE
 
-```js
-// RenderRecipe
-const exampleRecipe = {
-  version: 1,
-  steps: [{
-    capability: 'subtitle.burn@1',
-    params: {
-      segments: [{
-        id: 's1',
-        start: 0.2,
-        end: 1.4,
-        text: '大家好',
-        lines: ['大家好']
-      }]
-    }
-  }]
-};
+createVideoExportService({ getExportTools, spawnImpl?, fsApi? })
+service.start({ jobId, videoPath, outputPath, recipe }, onProgress)
+service.cancel(jobId)
+service.getState()
 
-// 单一固定样式；不建立样式注册系统。
-const SUBTITLE_STYLE = {
-  referenceHeight: 450,
-  fontSize: 16,
-  fontFamily: 'Heiti SC',
-  bottomRatio: 0.07,
-  maxWidthRatio: 0.84,
-  color: '#ffffff',
-  backgroundOpacity: 0.72,
-  paddingX: 10,
-  paddingY: 6
-};
+// outputPath 只可由主进程在另存为结束后加入 preparing 进度
+{ jobId, phase: 'preparing' | 'rendering' | 'finalizing', percent, outputPath? }
+{ jobId, status: 'completed', outputPath }
+{ jobId, status: 'cancelled' }
+{ jobId, status: 'failed', errorCode }
 
-// 环境输出；主进程控制值，不接受页面或 AI 覆盖。
-const tools = {
-  ffmpegPath: '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg',
-  ffprobePath: '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe'
-};
+srtAPI.resolveVideoSource(videoPath)
+srtAPI.startVideoExport({ jobId, videoPath, recipe })
+srtAPI.cancelVideoExport(jobId)
+srtAPI.onVideoExportProgress(callback)
+~~~
 
-// 每次 UI 点击生成唯一 jobId；StartResult 的所有终态带相同 ID。
-const progress = { jobId: 'job-1', phase: 'rendering', percent: 42 };
-const completed = {
-  jobId: 'job-1',
-  status: 'completed',
-  outputPath: '/videos/sample-已编辑.mp4'
-};
-const failed = {
-  jobId: 'job-1',
-  status: 'failed',
-  errorCode: 'EXPORT_RUNTIME_NOT_READY'
-};
-const cancelled = { jobId: 'job-1', status: 'cancelled' };
-```
+## 已关闭：周期 0
 
-配方合法性规则：顶层与 step 不允许额外执行字段；version 必须为 1；steps 为数组且最多一个字幕 step；空 steps 合法；segments 非空、ID 唯一、时间有限且 0 <= start < end、text 非空。lines 可省略；有值时必须为非空字符串数组且拼接等于原始 text。构建器保留文字，不 trim 掉实际内容，校验空白文字时使用 trim。未知能力报 EXPORT_UNSUPPORTED_OPERATION；其他结构错误报 EXPORT_INVALID_RECIPE。
+- [x] 应用选择 /opt/homebrew/opt/ffmpeg-full/bin/ffmpeg 及同目录 ffprobe。
+- [x] ass、libx264、AAC、MP4、ffprobe 已实测；Heiti SC 中文字幕 + AAC 样片可播放。
+- [x] environment/install 42/42、聚焦 E2E 7/7、npm test 134/134 通过。
+- [x] 代码与证据已提交于 3d11ccd、63afc59、11dc10d、77a59cd。
 
-进度 phase 只有 preparing、rendering、finalizing；空闲状态为 { jobId:null, phase:'idle' }。completed/cancelled/failed 是终态，不与进度混用。准备阶段 percent 为 null，rendering 为 0–99，finalizing 为 99；成功落盘后 UI 自行显示 100%。
+不得重跑安装、扩充候选扫描、补环境框架或重做周期 0 证据。
 
 ---
 
-### Task 1：确认字幕导出能力并展示真实状态（30 分钟）
+### Task 2：最薄字幕快照（周期 1，15 分钟）
 
-**唯一目的：** 最终选定的 FFmpeg/FFprobe 确实能够输出中文字幕 MP4。
+**Files:**
+- Create: src/render-recipe.js
+- Create: tests/render-recipe.test.js
 
-**Files:** src/environment/index.js、app/env-check.js、上述 environment 单元/安装/E2E 测试与场景数据。短样片放独立临时目录，不提交视频二进制。
+**Interfaces:** 读取已应用 segments；产出 buildSubtitleRecipe、validateRenderRecipe、SUBTITLE_STYLE。
 
-**Consumes:** 现有 dependencies.run、getBundledTools、安装确认和模式显示逻辑。
+**不做与退出:** 不做空配方、注册器、第二效果或存储迁移。计划内步骤均为直接实现/验证，意外支撑预留最多 4 分钟并从本任务总额内扣；聚焦测试通过即结束。
 
-**Produces:** environment.getExportTools() -> Promise<{ffmpegPath,ffprobePath}>；report.modes.subtitleExport -> {status,reason,blockers}。
+- [ ] **Step 1（3 分钟）: 写 RED**
 
-- [ ] 先记录环境基准。只读运行最终候选工具的版本、filters、encoders、muxers 和 ffprobe 版本，保留必要输出。已知普通 Homebrew FFmpeg 缺 libass，不能重复只测版本然后宣布就绪。
-- [ ] 加入行为测试：程序已安装但缺 ass/subtitles 时 tools.ffmpeg 仍表示已安装，而 modes.subtitleExport 为 limited；模式不 ready 时 getExportTools 拒绝。再加入同一工具路径可用、ffprobe 缺失与探测失败场景。
-- [ ] 使用下面的实际断言扩充现有 macFixture，测试指令和错误码保持一致：
+tests/render-recipe.test.js 只写三项：
 
-```js
-test('installed FFmpeg is not necessarily ready for subtitle export', async () => {
-  const fixture = macFixture({
-    versions: { ffmpeg: '9.0.1' },
-    commandResults: {
-      'ffmpeg -hide_banner -filters': 'Filters:\n ... scale V->V',
-      'ffmpeg -hide_banner -encoders': ' V..... libx264\n A..... aac',
-      'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
-      'ffprobe -version': 'ffprobe version 9.0.1'
-    }
-  });
-  const environment = createEnvironmentModule(fixture);
-  const report = await environment.detectEnvironment();
-  assert.equal(report.tools.ffmpeg.installed, true);
-  assert.equal(report.modes.subtitleExport.status, 'limited');
-  assert.equal(report.modes.subtitleExport.reason, 'subtitle_filter_missing');
-  await assert.rejects(environment.getExportTools(), {
-    code: 'EXPORT_RUNTIME_NOT_READY'
-  });
-  assert.equal(report.canContinue, true);
-});
-```
-
-- [ ] 运行 node --test tests/environment.test.js，先确认新增断言因功能未实现失败。
-- [ ] 在现有环境模块内集中实现工具选择和 probeExportTools()。darwin 候选仅增加两个 Homebrew ffmpeg-full 标准目录，随后为既有 FFmpeg；ffprobe 取同安装目录或既有系统组合。探测 filters 中实际执行器所用的完整名称 ass、encoders 中 libx264/aac、muxers 中 mp4，并确认 ffprobe 可运行。只有 subtitles 而没有 ass 也按当前能力缺失处理，避免检测通过而固定 ass 命令失败。
-- [ ] detectEnvironment 和 getExportTools 使用同一个 probeExportTools。检测成功的执行路径原样返回；导出 start 仍验证当前可用状态，不复用陈旧的 UI 报告。禁止页面传入可执行文件路径。
-- [ ] 在现有模式定义加入 { id:'subtitleExport', label:'字幕导出', description:'将字幕烧录到 MP4' }，原因分别显示滤镜缺失、编码能力缺失、ffprobe 缺失、探测失败。继续进入首页行为不变。
-- [ ] macOS 的 FFmpeg 安装计划指向 ffmpeg-full；说明增加依赖与位置，通过既有确认执行。候选包为 keg-only 时直接使用其绝对路径，禁止 force-link、替换系统 ffmpeg 或自动换安装渠道。
-- [ ] 获得实施及安装授权后，用确认过的工具生成一秒中文有声样片，外部播放器检查文字与声音。仅出现 filters 名字还不能算这个闸门通过。
-- [ ] 运行 node --test tests/environment.test.js tests/environment-install.test.js，及 npx playwright test tests/e2e/environment-flow.spec.js。结果属于检测行为测试，与样片证据分别记录。
-- [ ] 闸门通过则单独提交本任务文件，提交说明 feat: detect hard-subtitle export capability。若到 30 分钟仍无可用样片或需新安装渠道，停止后续任务并报告工具、失败阶段与已用时间。
-
-**不做：** 新下载器、自动修复、编译 FFmpeg、供应商扫描、Windows 真机验收。
-
-### Task 2：创建最薄字幕配方（25 分钟）
-
-**Files:** 新建 src/render-recipe.js、tests/render-recipe.test.js。
-
-**Consumes:** 已应用 subtitle-state segments（秒）。
-
-**Produces:** buildSubtitleRecipe(segments)、validateRenderRecipe(recipe)、SUBTITLE_STYLE；CommonJS 导出及 window.SRTRenderRecipe。
-
-- [ ] 将以下测试保存到新测试文件。运行 node --test tests/render-recipe.test.js，预期因模块缺失失败。
-
-```js
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const {
-  buildSubtitleRecipe,
-  validateRenderRecipe
-} = require('../src/render-recipe');
-
-test('builds an independent snapshot using applied segments', () => {
-  const applied = [{ id:'s1', start:0.2, end:1.4, text:'大家好' }];
+~~~js
+test('builds an independent applied-subtitle snapshot', () => {
+  const applied = [{ id: 's1', start: 0.2, end: 1.4, text: '大家好' }];
   const recipe = buildSubtitleRecipe(applied);
-  assert.equal(recipe.steps[0].capability, 'subtitle.burn@1');
-  assert.deepEqual(recipe.steps[0].params.segments, applied);
-  applied[0].text = '后来的修改';
+  applied[0].text = '后来的草稿';
   assert.equal(recipe.steps[0].params.segments[0].text, '大家好');
 });
-
-test('allows empty project edits but rejects an unknown capability', () => {
-  assert.deepEqual(validateRenderRecipe({ version:1, steps:[] }),
-    { version:1, steps:[] });
+test('rejects empty and unknown recipes', () => {
+  assert.throws(() => validateRenderRecipe({ version: 1, steps: [] }),
+    { code: 'EXPORT_INVALID_RECIPE' });
+  assert.throws(() => buildSubtitleRecipe([]), { code: 'EXPORT_INVALID_RECIPE' });
   assert.throws(() => validateRenderRecipe({
-    version:1,
-    steps:[{ capability:'unknown@1', params:{} }]
-  }), { code:'EXPORT_UNSUPPORTED_OPERATION' });
+    version: 1,
+    steps: [{
+      capability: 'subtitle.burn@2',
+      params: { segments: [{ id: 's1', start: 0, end: 1, text: '原文' }] }
+    }]
+  }), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
 });
-
-test('rejects invalid timing and executable fields', () => {
-  const recipe = buildSubtitleRecipe([
-    { id:'s1', start:0, end:1, text:'原文' }
-  ]);
-  recipe.steps[0].params.segments[0].end = 0;
-  assert.throws(() => validateRenderRecipe(recipe),
-    { code:'EXPORT_INVALID_RECIPE' });
-  assert.throws(() => validateRenderRecipe({
-    version:1, steps:[], command:'unexpected'
-  }), { code:'EXPORT_INVALID_RECIPE' });
+test('rejects invalid timing, blank text and executable fields', () => {
+  assert.throws(() => buildSubtitleRecipe([
+    { id: 's1', start: 1, end: 1, text: '原文' }
+  ]), { code: 'EXPORT_INVALID_RECIPE' });
+  assert.throws(() => buildSubtitleRecipe([
+    { id: 's1', start: 0, end: 1, text: '   ' }
+  ]), { code: 'EXPORT_INVALID_RECIPE' });
+  for (const field of ['command', 'args', 'script']) {
+    const step = {
+      capability: 'subtitle.burn@1',
+      params: { segments: [{ id: 's1', start: 0, end: 1, text: '原文' }] },
+      [field]: 'not allowed'
+    };
+    assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
 });
-```
+~~~
 
-- [ ] 实现严格的数据构建与校验，执行本计划“接口契约”的字段、时间、ID 和文字约定。通过克隆返回新对象，不向现有字幕 store 写入任何值。
-- [ ] 使用一个静态的 subtitle.burn@1 处理入口，不引入注册 API、动态加载、通用滤镜图或第二个能力。错误只需 code，不新建错误类层级。
-- [ ] 按冻结值导出 SUBTITLE_STYLE。使用同一文件的 UMD 包装，Node 和浏览器不复制校验逻辑。
-- [ ] 增补两项有实际作用的断言：lines 拼接不等于 text 时拒绝；输入对象修改不改变校验后的快照。
-- [ ] 运行 node --test tests/render-recipe.test.js tests/subtitle-state.test.js，确认通过。
-- [ ] 单独提交两文件，提交说明 feat: add subtitle render recipe snapshot。
+文件顶部直接 require node:test、node:assert/strict 和 ../src/render-recipe。
 
-**退出：** 可构建/校验实际字幕快照，已有字幕存储未迁移。没有为了“可扩展”添加第二个效果。
+- [ ] **Step 2（2 分钟）: 运行 RED**
 
-### Task 3：字幕配方生成真实 MP4（95 分钟）
+Run: node --test tests/render-recipe.test.js
 
-**Files:** 新建 src/video-export.js、tests/video-export.test.js。
+Expected: FAIL，原因是模块尚不存在。
 
-**Consumes:** T1 getExportTools、T2 validateRenderRecipe/SUBTITLE_STYLE、源文件、新目标路径。
+- [ ] **Step 3（5 分钟）: 实现窄校验**
 
-**Produces:** createVideoExportService，含 start(request,onProgress)、cancel(jobId)、getState()，终态与进度使用上文契约。
+src/render-recipe.js 使用现有 UMD 风格同时导出 CommonJS 和 window.SRTRenderRecipe。validateRenderRecipe 只接受：
 
-- [ ] 先建立模块行为测试夹具：spawnImpl 记录 program/args/options，并用 EventEmitter、PassThrough 模拟 stdout/stderr/close；临时文件使用 node:fs.mkdtemp。覆盖参数数组、shell:false、进度、取消等待 close、错误后的文件清理。不得复用 tests/e2e 的假 MP4 冒充真实可播放视频。
-- [ ] 失败和取消测试都断言 start 只产生一个终态、已有目标/源未变化，以及 getState().phase 恢复 idle；错误码使用下方映射。
-- [ ] 运行 node --test tests/video-export.test.js，确认新增模块测试先失败。
-- [ ] 实现任务互斥与一次终态处理。start 在任何 await 前占用当前任务，最终 finally 释放。cancel 标记对应 jobId，停止当前子进程并等待 close；preparing 阶段同样可取消。
-- [ ] 执行媒体探测，读取首个主视频与音频、时长、编码尺寸、旋转元数据和帧节奏；按旋转后的显示尺寸生成 ASS/验证输出，不能把手机旋转视频的原始编码宽高当作画面宽高。拒绝无视频、不可读文件及不能保留显示尺寸的输入。检查字幕实际时间范围。运行固定参数如下，动态路径只能作为数组元素：
+~~~js
+{
+  version: 1,
+  steps: [{
+    capability: 'subtitle.burn@1',
+    params: { segments: [{ id, start, end, text }] }
+  }]
+}
+~~~
 
-```js
-const probeArgs = [
-  '-v', 'error', '-show_format', '-show_streams',
-  '-of', 'json', videoPath
-];
+要求 steps.length === 1、segments 非空、ID 唯一、时间有限且 0 <= start < end、text.trim() 非空。顶层、step、params 和 segment 仅允许上述字段。返回全新对象；SUBTITLE_STYLE 严格复制设计第 4 节的 Heiti SC、16/450、7%、84%、白字和 0.72 黑底参数。
 
+- [ ] **Step 4（3 分钟）: 运行 GREEN**
+
+Run: node --test tests/render-recipe.test.js tests/subtitle-state.test.js
+
+Expected: 全部 PASS；subtitle-state 无改动。
+
+- [ ] **Step 5（2 分钟）: 检查边界**
+
+Run: git diff --check
+
+Expected: 只有本任务两文件，且不存在空配方分支、注册表或新存储。
+
+### Task 3：先产出真实 MP4，再补进度和取消（周期 1，75 分钟）
+
+**Files:**
+- Create: src/video-export.js
+- Create: tests/video-export.test.js
+- Modify only for a direct Task 2 contract defect: src/render-recipe.js、tests/render-recipe.test.js
+
+**Interfaces:** 消费 getExportTools、validateRenderRecipe、SUBTITLE_STYLE；产出 createVideoExportService 的 start/cancel/getState。
+
+**不做与退出:** 不做普通转码、第二效果、UI、多流策略或媒体修复。计划内步骤均为直接实现/验证；周期 1 意外支撑（含 Task 2）合计最多 14 分钟且仍受 90 分钟总额约束。开工后 45 分钟没有真实 MP4 立即停止，冻结行为通过后停止。
+
+- [ ] **Step 1（3 分钟）: 写唯一真实输入 helper**
+
+在 tests/video-export.test.js 加 `createRealInput(t, ffmpegPath)`：每次用 `fs.mkdtemp(path.join(os.tmpdir(), 'srt-cycle1-'))` 创建独占目录，以 `execFile` 和下列参数生成四秒 640×360 H.264 + AAC 输入；使用 `-n`，不得覆盖任何已有文件。`SRT_KEEP_REAL_EXPORT=1` 时保留并打印目录，否则 `t.after` 只删除本次目录。
+
+~~~js
+[
+  '-n', '-f', 'lavfi', '-i', 'color=c=0x243044:s=640x360:r=25',
+  '-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=48000',
+  '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+  '-c:a', 'aac', sourcePath
+]
+~~~
+
+- [ ] **Step 2（2 分钟）: 写真实导出 RED**
+
+在 tests/video-export.test.js 写一个 SRT_REAL_EXPORT 开关测试：从 `SRT_FFMPEG_PATH`、`SRT_FFPROBE_PATH` 取得周期 0 工具，调用 helper 和 start，字幕为“周期一真实字幕”，只断言 completed、输出非空、H.264、AAC、约四秒，并打印 `REAL_EXPORT_OUTPUT=<绝对路径>`。第 45 分钟闸门不提前要求进度；进度由 Step 9–13 完成。
+
+- [ ] **Step 3（2 分钟）: 运行 RED**
+
+Run: `SRT_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe node --test tests/video-export.test.js`
+
+Expected: FAIL，原因是 src/video-export.js 尚不存在。
+
+- [ ] **Step 4（3 分钟）: 建立服务边界**
+
+创建 src/video-export.js；start 在第一个 await 前占用唯一 current，先校验 recipe、realpath/stat，并在 spawn 前拒绝源/目标相同及已有目标。
+
+- [ ] **Step 5（5 分钟）: 探测输入**
+
+使用 getExportTools 的同套路径和参数 ['-v','error','-show_format','-show_streams','-of','json',videoPath]。只读取首个视频、首个音频、时长、宽高和旋转；无视频或字幕明显越界返回 EXPORT_INVALID_MEDIA。
+
+- [ ] **Step 6（5 分钟）: 写 ASS**
+
+在任务临时目录写 UTF-8 captions.ass。PlayRes 按旋转后的显示尺寸；Fontsize=`显示高度 × 16 / 450`，左右 Margin 各为显示宽度 8%（内容宽 84%），MarginV 为显示高度 7%；Heiti SC、白字、0.72 黑底、Alignment=2。左花括号前加反斜线；用户原始反斜线后插 U+2060；文本换行转为 `\N`，其余自动折行交给 libass，不做浏览器排版引擎。
+
+- [ ] **Step 7（5 分钟）: 渲染、验证并排他保存**
+
+~~~js
 const renderArgs = [
-  '-hide_banner', '-nostdin', '-n',
-  '-i', videoPath,
-  '-map', '0:v:0', '-map', '0:a:0?',
-  '-vf', 'ass=captions.ass',
+  '-hide_banner', '-nostdin', '-n', '-i', videoPath,
+  '-map', '0:v:0', '-map', '0:a:0?', '-vf', 'ass=captions.ass',
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
   '-pix_fmt', 'yuv420p', '-fps_mode', 'passthrough',
-  '-c:a', 'aac', '-b:a', '192k',
-  '-movflags', '+faststart',
-  '-progress', 'pipe:1', '-nostats',
-  stagedOutputPath
+  '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+  '-progress', 'pipe:1', '-nostats', stagedPath
 ];
-// 空 steps 时不传 -vf。cwd 为任务专属 ASS 目录。
-// 不设置 -r、-s 或 scale 来改变原输入；必要限制通过明确错误表达。
-```
+spawnImpl(ffmpegPath, renderArgs, { cwd: taskDir, shell: false });
+~~~
 
-- [ ] 在任务私有目录生成 UTF-8 captions.ass。PlayRes 使用实际输出画面尺寸，样式使用统一参数；时间以秒转 ASS 百分秒；lines 用显式换行输出。使用经实测可保留反斜线/花括号的纯文本处理方式，不允许用户文本改变样式。
-- [ ] 同时保留一条中文长句和包含反斜线、花括号的测试字幕，真实解码检查字符；不凭命令 exit=0 判断字幕显示正确。
-- [ ] 监听 progress 行并处理跨 chunk 的半行，out_time_us / 1000000 / duration 计算 0–99。进程 close=0 后进入 finalizing；不要根据 progress=end 提前成功。
-- [ ] FFprobe 验证临时视频可读、视频流/音频与时长符合要求。文件提交用 COPYFILE_EXCL；遇 EEXIST 保留已有目标并提示换名。复制失败只清除当前操作新建的目标；不得删掉本来就有的文件。
-- [ ] 清理仅限本任务临时目录与临时 MP4，检查源与目标的规范化路径；源和已有目标只读。取消结果待子进程终止、清理完成才返回；finalizing 开始后不接受新取消。
-- [ ] 使用以下真实测试作为现有测试文件中的显式开关场景。准备有效测试视频和已验证工具路径后启用；跳过不算成功证据。
+close=0 后 ffprobe staged.mp4：可读、有视频、有源音频时保留音频、时长基本一致、旋转后的显示尺寸与输入一致；再以 COPYFILE_EXCL 保存。finally 只删本任务临时目录。
 
-```js
-test('real FFmpeg produces an MP4 from a subtitle recipe', {
-  skip: process.env.SRT_REAL_EXPORT !== '1'
-}, async (t) => {
-  const fs = require('node:fs/promises');
-  const path = require('node:path');
-  const os = require('node:os');
-  const { createVideoExportService } = require('../src/video-export');
-  const { buildSubtitleRecipe } = require('../src/render-recipe');
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'srt-export-real-'));
-  t.after(() => fs.rm(root, { recursive:true, force:true }));
-  const videoPath = process.env.SRT_EXPORT_SAMPLE;
-  const outputPath = path.join(root, '中文字幕.mp4');
-  assert.ok(videoPath, 'SRT_EXPORT_SAMPLE must be a real local video');
-  assert.ok(process.env.SRT_FFMPEG_PATH);
-  assert.ok(process.env.SRT_FFPROBE_PATH);
-  const service = createVideoExportService({
-    getExportTools: async () => ({
-      ffmpegPath:process.env.SRT_FFMPEG_PATH,
-      ffprobePath:process.env.SRT_FFPROBE_PATH
-    })
-  });
-  const result = await service.start({
-    jobId:'real-1', videoPath, outputPath,
-    recipe:buildSubtitleRecipe([
-      { id:'s1', start:0, end:1, text:'真实字幕验收' }
-    ])
-  }, () => {});
-  assert.equal(result.status, 'completed');
-  assert.ok((await fs.stat(outputPath)).size > 0);
-  assert.equal(service.getState().phase, 'idle');
-});
-```
+- [ ] **Step 8（5 分钟）: 执行周期第 45 分钟可见闸门**
 
-- [ ] 运行普通模块测试；在选定短样片上显式运行真实场景并另保留一份人工检查 MP4（测试临时目录清理后不能再用作人工证据）。使用 FFprobe 和外部播放器核对中文字幕、音频、尺寸、时长。
-- [ ] 单独提交两文件，提交说明 feat: render subtitle recipes to MP4。
+Run: `SRT_REAL_EXPORT=1 SRT_KEEP_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe node --test tests/video-export.test.js`
 
-**退出：** T3 渲染模块已生成真实字幕 MP4；累计目标时间 150 分钟。取消、失败和源保护可检验。到此仍无视频则停止报告。
+Expected: PASS，并打印唯一 `REAL_EXPORT_OUTPUT`；外部播放器打开该路径可见“周期一真实字幕”。失败即停止。
 
-### Task 4：桌面桥接与视频源一致（45 分钟）
+- [ ] **Step 9（5 分钟）: 写五个聚焦行为测试**
 
-**Files:** main.js、preload.js、app/editor-core.js、tests/main-entry.test.js、tests/e2e/electron-main.js、tests/e2e/electron.fixture.js；本任务的源一致场景加入新 video-export-flow.spec.js。
+只增加：已有目标不变；progress 跨 chunk 且未结束最多 99；cancel 等待 close/清理；反斜线和花括号不形成样式指令；一次非零 close 返回 failed 并清理本任务文件。最小 EventEmitter + PassThrough 留在本测试文件，不建公共夹具。
 
-**Consumes:** T3 导出模块、现有项目 video.path。
+- [ ] **Step 10（5 分钟）: 实现真实进度**
 
-**Produces:** 本计划定义的四个 srtAPI 入口和主进程生命周期处理。
+preparing 为 null；rendering 按 out_time_us / duration 计算 0–99；close=0 后进入 finalizing 99；提交完成后才 completed。
 
-- [ ] 先加入桥接行为断言：取消另存为时导出服务调用数为零；默认目录和文件名正确；页面不能提供目标路径或工具路径。接口命名与下列 preload 代码一致：
+- [ ] **Step 11（5 分钟）: 实现取消**
 
-```js
-resolveVideoSource: (videoPath) =>
-  ipcRenderer.invoke('video:resolve-source', videoPath),
-startVideoExport: (request) =>
-  ipcRenderer.invoke('video-export:start', request),
-cancelVideoExport: (jobId) =>
-  ipcRenderer.invoke('video-export:cancel', jobId),
+idle 或 jobId 不匹配时安全返回；preparing/rendering 时标记、终止当前子进程并等待 finally；finalizing 不接受取消；每个 job 只返回一个终态。
+
+- [ ] **Step 12（5 分钟）: 核对源与目标保护**
+
+确认 EEXIST 映射 EXPORT_TARGET_EXISTS，源目标相同映射 EXPORT_SOURCE_OVERWRITE，渲染/写入失败仅清理本任务文件；不增加错误类层级。
+
+- [ ] **Step 13（5 分钟）: 运行聚焦测试**
+
+Run: node --test tests/render-recipe.test.js tests/video-export.test.js tests/subtitle-state.test.js
+
+Expected: 全部 PASS；特殊字符不再人工取证。
+
+- [ ] **Step 14（5 分钟）: 最后一次真实复核**
+
+复跑 Step 8（测试会创建另一独占目录）；确认新输出的字幕、音频、显示尺寸和时长。横竖屏留到周期 3。
+
+- [ ] **Step 15（5 分钟）: 自审实际 diff**
+
+逐项检查只有唯一 capability、固定参数、一个 current 和本任务临时目录清理；删除未被冻结验收需要的抽象。
+
+- [ ] **Step 16（5 分钟）: 验证提交范围**
+
+Run: git diff --check
+
+Expected: 只有周期 1 四个文件，或 Task 2 直接契约修正。
+
+- [ ] **Step 17（5 分钟）: 提交并报告**
+
+~~~bash
+git add src/render-recipe.js src/video-export.js tests/render-recipe.test.js tests/video-export.test.js
+git commit -m 'feat: render applied subtitles to MP4'
+~~~
+
+报告内部实现、可打开的 MP4 和时间账；未经用户授权不进入周期 2。
+
+---
+
+### Task 4：编辑器原生导出纵切（周期 2，90 分钟）
+
+**Files:**
+- Modify: main.js、preload.js、app/editor-core.js、app/editor-subtitles.js、app/editor-timeline.js、app/剪辑.html、tests/main-entry.test.js、tests/e2e/electron-main.js
+- Create: app/editor-export.js、tests/e2e/video-export-flow.spec.js
+- Conditional: tests/e2e/auto-subtitles-flow.spec.js（仅适配既有无效媒体夹具）
+
+**Interfaces:** 消费周期 1 服务和当前项目 video.path；产出四个 srtAPI 方法、右上角入口和一个页面级 isExporting。
+
+**不做与退出:** 不做 app/shared.js 改造、持续 Resize、锁控制器、任务中心或页面改版。支撑最多 10 分钟，其中窄 fake 注入最多 5 分钟、条件夹具适配最多 5 分钟；其他步骤是直接产品实现或冻结验收。第 45 分钟必须由真实按钮启动真实导出，保存、取消、源一致和恢复通过后停止。
+
+- [ ] **Step 1（3 分钟）: 写桥接 RED**
+
+在 tests/main-entry.test.js 读取 preload.js 源码，断言 `resolveVideoSource`、`startVideoExport`、`cancelVideoExport`、`onVideoExportProgress` 四个公开名及移除监听函数存在；同时断言 `startVideoExport` 只有一个 request 参数，页面桥接不出现 outputPath、ffmpegPath 或 ffprobePath。
+
+Run: `node --test tests/main-entry.test.js`
+
+Expected: FAIL，原因是四个桥接尚不存在。
+
+- [ ] **Step 2（5 分钟）: 注入真实服务**
+
+startApplication 参数增加 `videoExportService` 和 `showSaveDialog`；默认服务只以 `activeEnvironment.getExportTools` 构造，默认对话框调用 `dialog.showSaveDialog`。tests/e2e/electron-main.js 的 environment 包装原样转发 `getExportTools`，以便 Step 10 在生产环境模式调用真实服务。主进程只保留一个 `activeExport = null` 普通对象，不建 Job 类或队列。
+
+- [ ] **Step 3（3 分钟）: 加入 preload**
+
+~~~js
+resolveVideoSource: (videoPath) => ipcRenderer.invoke('video:resolve-source', videoPath),
+startVideoExport: (request) => ipcRenderer.invoke('video-export:start', request),
+cancelVideoExport: (jobId) => ipcRenderer.invoke('video-export:cancel', jobId),
 onVideoExportProgress: (callback) => {
-  const listener = (_event, progress) => callback(progress);
+  const listener = (_event, value) => callback(value);
   ipcRenderer.on('video-export:progress', listener);
   return () => ipcRenderer.removeListener('video-export:progress', listener);
-},
-```
+}
+~~~
 
-- [ ] 主进程 video:resolve-source 使用 fs.realpath/stat 与 node:url.pathToFileURL，返回真实本地视频路径和 src；不可用时返回 VIDEO_PATH_UNAVAILABLE。不公开任意文件读写。
-- [ ] 桌面 editor-core 初次打开按项目路径请求 source，然后设置播放器 src；loadedmetadata 成功才确认该项目源可用于识别/导出。失败后清空可导出路径，显示返回首页重新导入提示。浏览器保留原 Blob 预览。
-- [ ] 将 A/B 项目回归写入测试：给全局 Blob 放 B，再打开保存 A 路径的项目，断言播放器加载 A 的 file URL，currentProjectVideoPath 也为 A；A 无效时不能显示 B 并宣称 A 就绪。
-- [ ] main.js 的 startApplication 注入 videoExportService，默认以 activeEnvironment.getExportTools 构造实际模块。测试注入 fake 模块、源解析和原生对话框结果，避免测试打开用户真实文件对话框。
-- [ ] video-export:start 在任何异步工作前占用单任务槽，validateRecipe 后打开另存为；原生取消返回 cancelled。源与输出路径相同/输出已存在时返回错误；不会调用旧 cli:exec。
-- [ ] 另存为期间的主进程 preparing 槽独立记录取消/关闭标记；此时服务尚未 start，不能只调用服务 cancel。对话框返回后先检查标记和发起窗口是否存活，通过才调用 start；否则返回 cancelled，不创建进程或输出。进度发给发起窗口，完成后释放单任务槽。正常关闭或退出时通过同一 cancel 路径结束子进程并等待清理；文件正在 finalizing 时等待它结束再关闭。
-- [ ] 测试仅校验窄 IPC 行为、默认路径、取消、源一致。运行 node --test tests/main-entry.test.js 与该聚焦 E2E，再复跑自动字幕中与视频导入有关的场景。已有字幕测试使用无效 MP4 字节，需要为依赖 loadedmetadata 的新场景使用有效素材，不能调低生产检查迁就假素材。
-- [ ] 单独提交上述文件，提交说明 feat: connect native video export and project source。
+- [ ] **Step 4（5 分钟）: 接通单槽另存为与进度转发**
 
-**退出：** 主进程受控导出可调用，预览源与导出源一致，取消另存为不触发渲染；没有新增资产管理系统。
+`video-export:start` 只读 jobId/videoPath/recipe，并在第一个 await 前执行：已有 activeExport 就返回 `EXPORT_BUSY`，否则记录 slot `{ jobId, sender, phase:'dialog', cancelled:false, completion:null }`。从占槽开始用同一个外层 try/catch/finally 覆盖对话框、路径处理、通知和服务；无论同步异常、异步异常、取消或终态，finally 都按对象身份释放 slot。对话框使用 MP4 filter，默认 `path.join(path.dirname(videoPath), path.parse(videoPath).name + '-已编辑.mp4')`；非 `.mp4` 选择自动追加扩展名。
 
-### Task 5：导出交互、字幕外观与编辑锁（75 分钟）
+取消对话框、发起窗口销毁或 slot 已标记取消时不调用服务。选择后先向仍存活的发起 sender 发送 `{jobId,phase:'preparing',percent:null,outputPath}`，核心结构固定为：
 
-**Files:** app/editor-export.js、app/剪辑.html、app/editor-subtitles.js、app/editor-timeline.js、app/editor-core.js、app/shared.js、tests/e2e/video-export-flow.spec.js、必要 fixture、package.json。
+~~~js
+const PUBLIC_EXPORT_CODES = new Set([
+  'VIDEO_PATH_UNAVAILABLE', 'EXPORT_BUSY', 'EXPORT_UNSUPPORTED_OPERATION',
+  'EXPORT_RUNTIME_NOT_READY', 'EXPORT_INVALID_RECIPE',
+  'EXPORT_TARGET_EXISTS', 'EXPORT_SOURCE_OVERWRITE', 'EXPORT_INVALID_MEDIA',
+  'EXPORT_WRITE_FAILED', 'EXPORT_RENDER_FAILED'
+]);
+function publicExportCode(error, fallback) {
+  return error && PUBLIC_EXPORT_CODES.has(error.code) ? error.code : fallback;
+}
+if (activeExport) {
+  return { jobId, status: 'failed', errorCode: 'EXPORT_BUSY' };
+}
+const slot = activeExport = {
+  jobId, sender, phase: 'dialog', cancelled: false, completion: null
+};
+try {
+  const senderWindow = BrowserWindow.fromWebContents(sender);
+  const saveOptions = {
+    title: '导出视频',
+    defaultPath: path.join(
+      path.dirname(videoPath), path.parse(videoPath).name + '-已编辑.mp4'
+    ),
+    filters: [{ name: 'MP4 视频', extensions: ['mp4'] }]
+  };
+  const choice = await activeShowSaveDialog(senderWindow, saveOptions);
+  if (choice.canceled || slot.cancelled || sender.isDestroyed()) {
+    return { jobId, status: 'cancelled' };
+  }
+  const outputPath = /\.mp4$/i.test(choice.filePath)
+    ? choice.filePath : choice.filePath + '.mp4';
+  sender.send('video-export:progress', {
+    jobId, phase: 'preparing', percent: null, outputPath
+  });
+  slot.phase = 'service';
+  slot.completion = activeVideoExportService.start(
+    { jobId, videoPath, outputPath, recipe },
+    function(progress) {
+      if (activeExport === slot && !sender.isDestroyed()) {
+        sender.send('video-export:progress', progress);
+      }
+    }
+  );
+  return await slot.completion;
+} catch (error) {
+  return {
+    jobId,
+    status: 'failed',
+    errorCode: publicExportCode(error, 'EXPORT_WRITE_FAILED')
+  };
+} finally {
+  if (activeExport === slot) activeExport = null;
+}
+~~~
 
-**Consumes:** T2 配方和样式、T4 srtAPI、现有字幕与时间轴状态。
+- [ ] **Step 5（4 分钟）: 解析项目源**
 
-**Produces:** 可手动操作的导出界面；同一任务锁与 applied 快照。
+video:resolve-source 只做 fs.promises.realpath/stat 和 pathToFileURL，返回规范化路径与 file URL；失败返回 VIDEO_PATH_UNAVAILABLE。
 
-新增控制器接口：
-- subtitleController.getAppliedSegments() -> 深拷贝；已有 hasPendingChanges 保持语义。
-- timelineController.getUnsupportedExportItems() -> 当前 timelineEffects 的名称数组；不读取历史对话推断效果。
-- editorExportController.isBusy() -> boolean。
-- editorExportController.getSubtitleLayout(segments) -> 同一文本/字体测量生成的 segments + lines，仅用于预览和快照。
+- [ ] **Step 6（5 分钟）: 让预览绑定同一路径**
 
-- [ ] 在新 E2E 文件里先写用户行为：有草稿不能开始，应用后能开始，右上角浮层可收起/展开，取消后恢复编辑。运行 npx playwright test tests/e2e/video-export-flow.spec.js，预期缺入口失败。
-- [ ] 在 workspace 内、ws-scroll 之前加入右对齐工具栏。使用现有颜色变量，不改主题或侧栏。按如下 ID 固定最小 DOM：
+editor-core 在桌面版先把 currentProjectVideoPath 设为 null；resolve 成功且 previewVideo loadedmetadata 后才写入规范化路径。桌面失败不回退 IndexedDB；浏览器版保留 Blob。重新上传仍清空托管路径。
 
-```html
-<div class="export-toolbar" data-testid="export-toolbar">
-  <button type="button" data-testid="video-export-button"
-    aria-controls="videoExportPanel" aria-expanded="false">导出视频</button>
-  <section id="videoExportPanel" data-testid="video-export-panel"
-    aria-label="视频导出" hidden>
-    <p data-testid="video-export-status" role="status"></p>
-    <p data-testid="video-export-target"></p>
-    <progress data-testid="video-export-progress" max="100" value="0"></progress>
-    <button type="button" data-testid="video-export-cancel">取消导出</button>
-  </section>
-</div>
-```
+- [ ] **Step 7（5 分钟）: 增加两个窄读取口**
 
-- [ ] 新脚本在现有控制器之后加载；共享配方文件在 editor-subtitles 前加载。加入 app/editor-export.js，进度事件只更新当前 jobId；卸载时移除事件监听。
-- [ ] 点击的检查顺序：是否桌面/当前源已加载，是否已有生成请求，是否未应用草稿，是否有不支持项。检查通过后建立锁，获取 applied 快照并排版，再调用 startVideoExport。所有终态在 finally 中解锁。
-- [ ] 源不就绪提示重新导入；草稿提示应用并打开字幕区；不支持项逐项显示；已有请求提示等待。错误集中在同一导出浮层，不加聊天消息，不自动应用草稿。
-- [ ] 同一组布局数据供预览和 ASS 使用。字体加载完成后测量；按视频实际显示矩形计算内容区域，使用统一样式缩放。长句按实际字体测量折行，保留原始字符串，每个 lines 拼接等于 text。Resize 重算，不写字幕 store。
-- [ ] 在实际写入口添加 isBusy 检查：生成按钮、字幕内容输入/保存/应用/撤销、时间轴 drop/add/remove、重新上传、openProject/closeTab。禁用样式与逻辑共同生效；锁解除后重新计算按钮状态，不一律全部 enable。
-- [ ] 首页与项目导航在导出期间拦截并显示同一浮层。播放、seek、历史展开/收起仍可使用。不要禁用整个编辑器容器来实现锁。
-- [ ] 进度 UI 实现 preparing/rendering/finalizing 及唯一终态；finalizing 禁用取消，完成显示路径。渲染取消显示“正在取消”，等待模块终态后才显示“已取消”并解锁。
-- [ ] 用注入导出服务测试 jobId 和真实进度事件，而不在产品中加入演示计时器。下面的断言接在同一个成功/取消场景中：
+~~~js
+// subtitleController
+getAppliedSegments: function() {
+  return currentSubtitleState().segments.map(function(segment) {
+    return { id: segment.id, start: segment.start, end: segment.end, text: segment.text };
+  });
+}
 
-```js
-await window.getByTestId('video-export-button').click();
-await expect(window.getByTestId('video-export-status')).toContainText('导出中');
-await expect(window.locator('#generateBtn')).toBeDisabled();
-await expect(window.getByTestId('subtitle-document-apply')).toBeDisabled();
-await expect(window.locator('#tlPlayBtn')).toBeEnabled();
-await window.getByTestId('video-export-button').click();
-await expect(window.getByTestId('video-export-panel')).toBeHidden();
-await window.getByTestId('video-export-button').click();
-await window.getByTestId('video-export-cancel').click();
-await expect(window.getByTestId('video-export-status')).toContainText('已取消');
-```
+window.timelineController = {
+  isRequestInFlight: function() { return requestInFlight; },
+  getUnsupportedExportItems: function() {
+    return timelineEffects.map(function(effect) { return effect.name; });
+  }
+};
+~~~
 
-- [ ] package.json 显式 test:e2e 列表追加新文件；测试场景覆盖草稿、未支持项、取消/失败后恢复以及 T4 的 A/B 来源一致。无需对每种错误码复制一条 E2E。
-- [ ] 运行 node --test tests/render-recipe.test.js tests/video-export.test.js tests/subtitle-state.test.js，及 npx playwright test tests/e2e/video-export-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js。
-- [ ] 在真实编辑器打开同一视频，验证原生选择位置、浮层、取消；横屏/竖屏各核对一条长字幕。位置和字号不一致属于本任务缺陷，不在验收阶段改成“可以不一致”。
-- [ ] 单独提交，提交说明 feat: add editor export controls and applied-state guards。
+- [ ] **Step 8（5 分钟）: 加入最小 UI**
 
-**退出：** 用户能独立导出；UI、字幕外观、状态冻结与恢复均满足设计。不增加格式面板或后台任务中心。
+在 .workspace 内、.ws-scroll 前加入“导出视频”按钮及锚定浮层；浮层只含状态、目标路径、progress 和“取消导出”。使用现有 CSS 变量，不改颜色。render-recipe.js 在 editor-subtitles.js 前加载，editor-export.js 在 editor-timeline.js 后加载。
 
-### Task 6：真实整链复跑、回归与研发日志（60 分钟）
+- [ ] **Step 9（5 分钟）: 接通真实点击**
 
-**Files:** docs/DEVELOPMENT_LOG.md、docs/PROJECT_STATUS.md；仅允许修改阻断上述验收的现有任务文件。
+editor-export 点击依次检查：源已加载、没有 requestInFlight、没有 pending subtitle（否则用现有 openAfter(null) 展开字幕区）、没有未支持项。随后设 isExporting=true，获取 applied 深拷贝、构建 recipe、生成 jobId 并调用 startVideoExport；只处理同 jobId 事件。
 
-**Consumes:** T1–T5 已完成软件、可用 CLI、已有 Whisper Small、用户允许测试的真实视频。
+- [ ] **Step 10（5 分钟）: 执行第 45 分钟真实按钮闸门**
 
-**Produces:** 分开标注的模拟/真实证据、最终输出与未完成清单。
+在同一终端运行下列命令；唯一目录保证源与目标不存在。tests/e2e/electron-main.js 继续注入现有 fake CLI/字幕结果来快速得到 applied 字幕，但不注入 videoExportService 或 showSaveDialog，因此按钮、原生对话框和 FFmpeg 全为真实链路。
 
-- [ ] 先运行 npm test 和 npm run test:e2e 一次完整现有回归。若失败，定位与本期关系；不得为了“全部通过”删除断言或绕过源路径/能力检查。仅修当前链路阻断项。
-- [ ] 从首页真实导入，向已选择的本地 CLI 发送“给视频加字幕”，使用已经准备好的 Whisper 模型；本场景不替换为 fake 服务。
-- [ ] 在整段字幕文稿里修改一条文字，保存但不应用，确认导出被阻止；点击应用，确认预览更新。
-- [ ] 选择新文件名导出，在进度中播放/seek、收起/展开浮层、查看历史，并尝试一次被锁住的修改；确认没有修改成功。
-- [ ] 在外部播放器打开输出。将相同时间点的原视频预览与输出对照，检查修改文字已烧录、声音存在、时长与画面尺寸正确。
-- [ ] 用一条带旋转元数据的手机竖屏样片核对实际观看方向、显示尺寸及长中文字幕的位置、相对字号和换行；该样片可使用人工已应用字幕，标记为渲染布局验证，不冒充第二次 CLI/Whisper 全链路。
-- [ ] 验证一次取消和一次受控失败，检查子进程消失、锁释放、源文件与已有目标未改。正常关闭任务中的应用时不残留渲染进程。异常强制退出不扩展验收。
-- [ ] 验证 A/B 项目回开 A、未支持时间轴项删除前后、源路径失效。与前述 E2E 重复的纯界面断言无需在真实长视频反复跑。
-- [ ] 更新两份现有状态文档：实际提交基准、通过/失败的命令、真实素材时长、输出文件位置、观测结果、主动开发与等待时间。不得填写预期值替代观测值。
-- [ ] 完成记录使用以下固定字段，写入观察到的具体值后才能提交：
+~~~bash
+SRT_CYCLE2_DIR="$(mktemp -d /private/tmp/srt-cycle2.XXXXXX)"
+/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg -n -f lavfi -i color=c=0x243044:s=640x360:r=25 -f lavfi -i sine=frequency=660:sample_rate=48000 -t 4 -c:v libx264 -pix_fmt yuv420p -c:a aac "$SRT_CYCLE2_DIR/source.mp4"
+printf '%s\n' "$SRT_CYCLE2_DIR"
+SRT_E2E_USER_DATA="$SRT_CYCLE2_DIR/user-data" SRT_E2E_REAL_MAC=1 SRT_E2E_LOCAL_CLI=two ./node_modules/.bin/electron tests/e2e/electron-main.js
+~~~
 
-```text
-内部实现：哪些模块和接口已交付。
-用户可见成果：从哪个项目导出、输出位置、能看到的字幕修改。
-模拟验证：实际运行命令和通过/失败统计。
-真实验证：使用的 CLI、模型、FFmpeg/FFprobe 路径、素材与输出核对结果。
-时间：主动开发、支撑投入、外部等待各用多少分钟。
-仍未完成：AI 动态效果、Windows 真机、正式发布等排除项。
-```
+在应用中选择 Codex CLI、上传打印目录内的 source.mp4、发送“给视频加字幕”，然后点击导出并把新文件保存到同一打印目录。
 
-- [ ] 最后执行 git diff --check、检查只暂存本阶段明确文件。提交说明 docs: record subtitle video export acceptance；是否推送根据届时用户的明确要求处理。
-- [ ] 告知用户完成等级为“最低可用”，附可打开的导出视频和实际限制。达到验收即停止。
+Expected: 真实 FFmpeg 启动，浮层出现 preparing/rendering 和目标路径。失败即停止，不继续写状态锁或测试夹具。
 
-## 可读错误映射
+- [ ] **Step 11（5 分钟）: 冻结最小写入口**
 
-| code / 情况 | 用户提示 | 后续动作 |
-|---|---|---|
-| VIDEO_PATH_UNAVAILABLE | 当前视频无法读取，请从首页重新导入 | 不启动渲染 |
-| EXPORT_BUSY | 正在处理当前导出 | 展开当前进度 |
-| 已有编辑请求 | 请等待当前编辑完成后导出 | 不建立新导出 |
-| 未应用字幕 | 字幕修改尚未应用，请先点击“应用” | 展开字幕区 |
-| EXPORT_UNSUPPORTED_OPERATION | 当前效果暂不支持导出：实际名称 | 不丢弃效果 |
-| EXPORT_INVALID_RECIPE | 当前编辑数据无法导出 | 保留项目，记录诊断 |
-| EXPORT_RUNTIME_NOT_READY | 字幕导出工具尚未准备好，请前往检测页 | 不假装成功 |
-| EXPORT_TARGET_EXISTS | 文件已存在，请更换文件名 | 保留原目标 |
-| EXPORT_SOURCE_OVERWRITE | 请为导出选择新的文件名 | 源文件只读 |
-| EXPORT_INVALID_MEDIA | 当前视频暂不支持此导出方式 | 不自动转换尺寸/颜色 |
-| EXPORT_WRITE_FAILED | 无法保存到所选位置，请检查目录或磁盘空间 | 清理本次未完成文件 |
-| EXPORT_RENDER_FAILED | 导出失败，请重试 | 保留字幕，释放锁 |
+导出中禁用重复导出、发送、字幕保存/应用/撤销、重新上传，并将指令输入和字幕文字设为不可编辑。tabsBar.inert=true 冻结首页、切换和关闭；捕获 drop/contextmenu 阻止时间轴增删，但保留播放、seek、音量、历史和浮层收展。记录并恢复原状态。
 
-使用以上有限映射就足够；无需异常分类平台或自动重试。
+- [ ] **Step 12（5 分钟）: 完成进度、失败与取消**
 
-## 计划自审与覆盖
+preparing“准备导出”、rendering“导出中 N%”、finalizing“正在保存”、completed“导出完成”、cancelled“已取消”、failed 显示有限错误文案。finalizing 禁用取消；其他阶段只调用 cancelVideoExport(currentJobId)。completed/cancelled/failed 都在 finally 恢复入口。
 
-| 设计要求 | 对应任务 |
+- [ ] **Step 13（5 分钟）: 正常关闭**
+
+`video-export:cancel` 只接受当前 jobId：对话框阶段标记 cancelled，服务阶段调用 service.cancel。主窗口 close 时若拥有 activeExport，仅第一次 preventDefault，按同一路径取消并 await activeExport.completion，完成后 destroy；finalizing 时只等待 completion。另存为返回后窗口已销毁则不启动。不得增加强退、断电或重启恢复。
+
+- [ ] **Step 14（4 分钟，支撑）: 注入窄 fake**
+
+仅当 `SRT_E2E_REAL_MAC !== '1'` 时，electron-main.js 才注入固定 fake 服务和 fake showSaveDialog；real-mac 模式永远省略这两项，确保 Step 10 在周期结束后复跑仍走真实链路。fake 记录 exportRequests/exportCancels：第一次 start 发 rendering 42% 后返回 `{status:'failed',errorCode:'EXPORT_RENDER_FAILED'}`；第二次发 42% 后等待 cancel 并返回 cancelled。fake showSaveDialog 返回该测试 userDataDir 下不存在的 export.mp4。不修改 electron.fixture.js。
+
+- [ ] **Step 15（5 分钟）: 写一条组合 E2E**
+
+video-export-flow.spec.js 在一条测试中完成：
+
+1. 路径未完成 loadedmetadata 时点击，断言 VIDEO_PATH_UNAVAILABLE，服务未调用。
+2. 首页导入项目 A 后向 IndexedDB 放入 B，重开编辑器并派发测试 metadata。
+3. seed 已应用字幕；先保存 draft，断言导出阻止并展开字幕区；应用后继续。
+4. 临时加入“淡入”，断言实际名称被阻止；删除后继续。
+5. 断言 currentProjectVideoPath 和最终导出请求均为 A。
+6. 第一次点击导出，断言 42% 后显示导出失败，按钮、导航和编辑入口恢复。
+7. 第二次点击导出，断言 42%、主进程选择的目标、写入口禁用、播放可用、tabsBar.inert。
+8. 点击取消，断言“已取消”、exportCancels 的 jobId、按钮和导航恢复。
+
+不得拆分为错误码矩阵。
+
+- [ ] **Step 16（5 分钟）: 运行聚焦验证**
+
+Run:
+
+~~~bash
+node --test tests/main-entry.test.js tests/render-recipe.test.js tests/video-export.test.js tests/subtitle-state.test.js
+npx playwright test tests/e2e/video-export-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js
+~~~
+
+Expected: 全部 PASS。受控失败、A/B、未支持项和失效路径由本次聚焦自动测试证明，不做真实长视频矩阵。
+
+- [ ] **Step 17（5 分钟，条件支撑）: 只适配阻断夹具**
+
+仅当 Step 16 唯一失败原因是 auto-subtitles-flow 的假 MP4 不触发 metadata，才在其 openEditor helper 设置 duration/videoWidth/videoHeight 并派发 loadedmetadata，然后复跑失败场景；否则本步骤记 0 分钟。五分钟仍不通过即停止，不放宽生产检查。
+
+- [ ] **Step 18（5 分钟）: 手动完成一次**
+
+确认原生保存位置、真实进度、源/已有目标不变、播放/seek/历史可用和成功后恢复。真实取消只在周期 3 取证，本周期使用聚焦 E2E，避免重复。
+
+- [ ] **Step 19（3 分钟）: 复核范围**
+
+Run: git diff --check
+
+Expected: 没有 shared.js、package.json、环境模块、持续 Resize、锁框架或任务中心改动。
+
+- [ ] **Step 20（3 分钟）: 提交周期 2**
+
+显式 git add 实际改动的 Task 4 文件，若 auto-subtitles-flow.spec.js 未改则不加入。
+
+Commit: git commit -m 'feat: export applied subtitles from the editor'
+
+报告时间账；未经用户授权不进入周期 3。
+
+---
+
+### Task 5：真实整链、聚焦回归和研发记录（周期 3，40 分钟）
+
+**Files:**
+- Modify: docs/DEVELOPMENT_LOG.md、docs/PROJECT_STATUS.md
+- Conditional: 仅直接阻断冻结验收的 Task 2–4 文件
+
+**不做与退出:** 不重复人工矩阵，不修无关失败，不扩平台。计划步骤是直接验收/记录；意外诊断支撑最多 8 分钟且仍受 40 分钟总额约束。前 20 分钟必须先得到真实整链视频，冻结验收通过即停止。
+
+- [ ] **Step 1（5 分钟）: 记录额度并导入**
+
+记录时间账；不先跑全量测试。从首页导入一份普通横屏真实有声视频，通过已选本地 CLI 发送“给视频加字幕”。
+
+- [ ] **Step 2（5 分钟）: 修改和应用**
+
+在完整字幕文稿把一处改成常见中文长句并保存；确认未应用时导出被阻止，再点击应用。
+
+- [ ] **Step 3（5 分钟）: 真实导出**
+
+选择新路径导出；观察真实进度，期间收起/展开浮层并播放/seek。
+
+- [ ] **Step 4（5 分钟）: 执行 20 分钟闸门**
+
+外部播放器确认长句在对应时间出现，文字已烧录，白字、半透明黑底、相对位置和相对字号符合预览，且声音存在、时长和显示尺寸基本一致；不比较精确断行或像素。未得到最终视频即停止并报告卡在 CLI、字幕、保存、渲染或播放器哪一层。
+
+- [ ] **Step 5（5 分钟）: 一次竖屏和一次取消**
+
+用一份带旋转元数据的常见手机竖屏长句检查文字出现时间、白字与半透明黑底、相对位置和相对字号，不验精确断行或像素。再做一次真实取消，确认没有伪成功文件，源和已有目标不变。
+
+- [ ] **Step 6（5 分钟）: 运行冻结回归**
+
+Run:
+
+~~~bash
+node --test tests/environment.test.js tests/render-recipe.test.js tests/video-export.test.js tests/main-entry.test.js
+npx playwright test tests/e2e/video-export-flow.spec.js tests/e2e/auto-subtitles-flow.spec.js
+~~~
+
+Expected: 全部 PASS。默认不跑 npm test 或全部 E2E；相关失败需要定位且支撑额度足够时才限时运行，无关失败只记录。
+
+只修同时满足“直接阻断冻结验收、位于计划文件清单、能在剩余额度内完成”的问题，否则写入未完成并停止。
+
+- [ ] **Step 7（5 分钟）: 写单份证据**
+
+DEVELOPMENT_LOG.md 写实际内部实现、用户可见成果、命令与统计、CLI/模型/工具路径、横屏/竖屏/取消、三类时间和限制。PROJECT_STATUS.md 只写“最低可用”、成果、限制和日志链接。
+
+- [ ] **Step 8（5 分钟）: 验证并提交**
+
+Run:
+
+~~~bash
+git diff --check
+git status --short
+~~~
+
+Expected: 只有两份文档及通过三问闸门的直接阻断修复。
+
+显式暂存实际文件；文档提交信息为 docs: record subtitle video export acceptance。达到验收立即停止；推送仍须用户明确要求。
+
+## 有限错误文案
+
+| 状态 | 提示 |
 |---|---|
-| 真实工具、同一路径、可读准备状态 | T1 |
-| 最薄配方、唯一字幕能力、无存储迁移 | T2 |
-| MP4、硬字幕、音频、进度、取消、源/已有目标保护 | T3 |
-| 原生另存为、窄桥接、视频源一致、正常关闭 | T4 |
-| 已应用状态、未知项阻断、UI、锁、字幕外观 | T5 |
-| 真实链路、模拟/真实区别、日志、停止线 | T6 |
+| VIDEO_PATH_UNAVAILABLE | 当前视频无法读取，请从首页重新导入 |
+| EXPORT_BUSY | 正在处理当前导出 |
+| 请求仍在生成 | 请等待当前编辑完成后导出 |
+| 未应用字幕 | 字幕修改尚未应用，请先点击“应用” |
+| EXPORT_UNSUPPORTED_OPERATION | 当前效果暂不支持导出：实际名称 |
+| EXPORT_RUNTIME_NOT_READY | 字幕导出工具尚未准备好，请前往检测页 |
+| EXPORT_INVALID_RECIPE | 当前字幕数据无法导出，请检查字幕内容 |
+| EXPORT_TARGET_EXISTS / EXPORT_SOURCE_OVERWRITE | 文件已存在或是源文件，请更换文件名 |
+| EXPORT_INVALID_MEDIA | 当前视频暂不支持此导出方式 |
+| EXPORT_WRITE_FAILED / EXPORT_RENDER_FAILED | 无法保存或导出失败，请重试 |
 
-接口自审：全篇统一使用 version/steps/capability/params/segments，时间统一为秒；源参数统一 videoPath，目标 outputPath 只由主进程原生对话框确定；进度以 jobId 关联；不存在另一套 recipe 存储或已实现的“动态 AI 配方”宣称。
+不增加异常分类平台或自动重试。
 
-周期 0 实测说明：macOS 私有目录中的 PingFang 无法被当前 libass 可靠读取；系统公开字体 Heiti SC 已通过中文字幕烧录样片，因此当前 Mac 固定字体改为 Heiti SC。不引入字体下载器或字体管理系统。长句布局仍需周期 1 样片核对。预算是明确停止线，不能据此提前宣布能在 5.5 小时内交付所有未知条件。
+## 自审清单
+
+- 周期 0 只有完成证据，没有未来式安装、测试或样片任务。
+- 空 steps 和空字幕明确失败，没有普通转码出口。
+- 周期 1/2/3 的可见检查点分别为 45/45/20 分钟。
+- 剩余预算 90+90+40=220；支撑 14+10+8=32。
+- 周期 1 先产出真实 MP4；周期 2 先打通按钮；周期 3 先跑真实整链。
+- 没有持续 Resize、通用锁、任务中心、恢复平台、第二效果或无关修复。
+- RenderRecipe、videoExportService、IPC、progress、jobId 前后一致。
+- DEVELOPMENT_LOG.md 是唯一完整证据源。
+- 每个周期达到退出条件即停止；进入下一周期仍需用户授权。
