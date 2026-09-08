@@ -60,7 +60,7 @@ Installed FFmpeg confirms scale/crop/pad do not accept timeline enable. A conver
 
 **Interfaces:** `SRTVideoTransform`/CommonJS exports `PARAMETER_SCHEMA`, `normalizeParams(params, requireExplicit)`, `geometry(params, width, height)`. Geometry returns the named dimensions/offsets above plus normalized params, as frozen plain data. Registry exports `createTransformRegistration()` and includes it by default. Registration metadata is append/sourceEffect. Preview adapter returns active normalized params in graph order; toExport returns a fully normalized step.
 
-- [ ] Add behavioral tests before implementation: catalog discovers transforms; booleans remain booleans; reject string/number-as-boolean, unknown keys, nonfinite/out-of-range scales and invalid ranges. Prove normalization is an independent snapshot.
+- [x] Add behavioral tests before implementation: catalog discovers transforms; booleans remain booleans; reject string/number-as-boolean, unknown keys, nonfinite/out-of-range scales and invalid ranges. Prove normalization is an independent snapshot.
 
 ```js
 const recipe = {kind:'instruction', steps:[{capability:'video.transform@1',
@@ -72,10 +72,10 @@ assert.throws(() => registry.validateRecipe({kind:'instruction',steps:[{
   capability:'video.transform@1', params:{flipHorizontal:1}}]}));
 ```
 
-- [ ] Extend schema validation by declared type (number/boolean); use own-property membership. Prompt formatting must not print undefined min/max for booleans. Next-context serialization retains true AND false values with no extra payload fields.
-- [ ] Implement all six adapters with `lane:'video-effect'`, label `画面变换`, readable flip/scale summary. Test transform+color+subtitle uses unchanged atomic executor, common transaction and one undo; test second-step failure leaves prior JSON intact. No capability switch in ProjectEditing or timeline orchestration.
-- [ ] Add strict export validation for exactly `{capability,range,params}`, exactly three normalized params, and transform/color interleaving only before optional final subtitle. Revalidate persisted transform payloads in toGraph. Keep legacy export recipes valid.
-- [ ] Extend internal FFmpeg lowering. Use source probe geometry, fixed templates, generated labels and shell:false. The chosen structure per step is:
+- [x] Extend schema validation by declared type (number/boolean); use own-property membership. Prompt formatting must not print undefined min/max for booleans. Next-context serialization retains true AND false values with no extra payload fields.
+- [x] Implement all six adapters with `lane:'video-effect'`, label `画面变换`, readable flip/scale summary. Test transform+color+subtitle uses unchanged atomic executor, common transaction and one undo; test second-step failure leaves prior JSON intact. No capability switch in ProjectEditing or timeline orchestration.
+- [x] Add strict export validation for exactly `{capability,range,params}`, exactly three normalized params, and transform/color interleaving only before optional final subtitle. Revalidate persisted transform payloads in toGraph. Keep legacy export recipes valid.
+- [x] Extend internal FFmpeg lowering. Use source probe geometry, fixed templates, generated labels and shell:false. The chosen structure per step is:
 
 ```text
 format=yuv444p,split=2[baseN][workN];
@@ -86,8 +86,8 @@ format=yuv444p,split=2[baseN][workN];
 
 The last output remains the sole video output; preserve existing color/subtitle filters and audio mapping. Omit disabled flip filters. Preserve opaque black in shrink operations and unique labels across repeated transform nodes. Guard real media ranges as strictly as color ranges.
 
-- [ ] Generate one short asymmetric source video with distinct quadrants, off-center detail and audio in a temporary directory. Via actual product export service prove each flip, enlarged center scale, shrink and a combination at samples before/inside/after `[1,3)` including exactly 1 and 3. Compare source features at expected mapped positions; metadata duration/dimensions/audio stay intact. Keep fixture out of Git. Include shrink→enlarge to prove per-step clipping.
-- [ ] Run focused unit/export tests, real transform export with existing SRT_REAL_EXPORT tools, and full `npm test` once. Commit `feat: execute ranged video transforms through the shared graph`. Report exact results, file list and any concern to `.superpowers/sdd/cycle3-task-1-report.md`.
+- [x] Generate one short asymmetric source video with distinct quadrants, off-center detail and audio in a temporary directory. Via actual product export service prove each flip, enlarged center scale, shrink and a combination at samples before/inside/after `[1,3)` including exactly 1 and 3. Compare source features at expected mapped positions; metadata duration/dimensions/audio stay intact. Keep fixture out of Git. Include shrink→enlarge to prove per-step clipping.
+- [x] Run focused unit/export tests, real transform export with existing SRT_REAL_EXPORT tools, and full `npm test` once. Commit `feat: execute ranged video transforms through the shared graph`. Report exact results, file list and any concern to `.superpowers/sdd/cycle3-task-1-report.md`.
 
 ### Task 2: Graph-ordered transform preview and complete UI flow
 
@@ -96,8 +96,8 @@ The last output remains the sole video output; preserve existing color/subtitle 
 **Interfaces:** Consume Task 1 shared geometry and current `projectEditing.load(projectId)` snapshot. Keep `colorPreviewController.render()` compatibility for current consumers/tests. New controller handles graphs containing transforms with `render()` and frame lifecycle; runtime buffers are derived, never persisted.
 
 - [ ] First add a failing deterministic UI case using a scoped transform CLI recipe: horizontal flip + scale 1.25 over `[1,3)`. Check one timeline range item and revision, refresh equality, export recipe, entire-request undo, and next prompt containing boolean+scale params. Add mixed transform/color/subtitle and malformed second-step cases where meaningful; preserve previous fail/cancel scenarios.
-- [ ] Verify actual Chromium Canvas 2D can apply the existing SVG color filter to a drawn frame. Reuse a single helper that builds the four verified color primitives; color-only preview and existing parity checks remain intact. If Canvas URL filtering is unsupported, report the concrete result before selecting another composition mechanism.
-- [ ] For graphs with transform nodes, keep the existing video element as playback/audio source and display a canvas aligned to its content, with subtitles/UI above it. Draw the source then each active source effect in graph order. Color applies the verified SVG primitives to the previous frame. Each transform writes into a black, original-sized destination buffer before flipping/scaling the prior frame using shared geometry. Swap two buffers; never combine two transforms into one CSS matrix.
+- [x] Verify actual Chromium Canvas 2D can apply the existing SVG color filter to a drawn frame. Reuse a single helper that builds the four verified color primitives; color-only preview and existing parity checks remain intact. If Canvas URL filtering is unsupported, report the concrete result before selecting another composition mechanism.
+- [x] For graphs with transform nodes, keep the existing video element as playback/audio source and display a canvas aligned to its content, with subtitles/UI above it. Draw the source then each active source effect in graph order. Color applies the verified SVG primitives to the previous frame. Each transform writes into a black, original-sized destination buffer before flipping/scaling the prior frame using shared geometry. Swap two buffers; never combine two transforms into one CSS matrix.
 
 ```js
 // Conceptual transform stage; coordinates come only from shared geometry.
@@ -110,8 +110,8 @@ ctx.drawImage(previous,0,0,W,H,0,0,g.scaledWidth,g.scaledHeight);
 ctx.restore();
 ```
 
-- [ ] Repaint on decoded playback frames, seeks, metadata and project state changes; stop scheduled work on pause/pagehide and avoid duplicate loops. Size the canvas to intrinsic video/project dimensions and object-fit it to display. Black bars belong to the video frame, not the fixed 16:9 editor chrome. Clear/hide transform canvas after undo or absent transforms. Source re-upload/loading must not retain a stale frame.
-- [ ] Pixel-level browser tests use an asymmetric real or canvas source, assert actual flip orientation, center resize, black margins, per-node loss of cropped pixels and interleaved color/transform ordering. Include portrait content displayed within the editor frame and the half-open boundaries. Attribute-only checks cannot prove these behaviors.
+- [x] Repaint on decoded playback frames, seeks, metadata and project state changes; stop scheduled work on pause/pagehide and avoid duplicate loops. Size the canvas to intrinsic video/project dimensions and object-fit it to display. Black bars belong to the video frame, not the fixed 16:9 editor chrome. Clear/hide transform canvas after undo or absent transforms. Source re-upload/loading must not retain a stale frame.
+- [ ] Pixel-level browser tests use an asymmetric real or canvas source, assert actual flip orientation, center resize, black margins, per-node loss of cropped pixels and interleaved color/transform ordering. Include portrait content displayed within the editor frame and the half-open boundaries. Attribute-only checks cannot prove these behaviors. (18 intrinsic/composition checks passed; the actual editor portrait-layout screenshot remains pending Electron execution.)
 - [ ] Test the full UI transaction with transforms+existing effects, refresh, next-context and undo; existing subtitle draft handling must keep working after pure transform. Run focused Playwright suites and `npm test`; add new spec to `test:e2e`. Commit `feat: preview graph-ordered video transforms`. Report to `.superpowers/sdd/cycle3-task-2-report.md`.
 
 ### Task 3: Final real-chain acceptance and development log
@@ -120,13 +120,23 @@ ctx.restore();
 
 **Interfaces:** Consume completed Tasks 1–2 only. No new product feature.
 
-- [ ] Run the real transform exports plus browser/export comparison for horizontal, vertical, enlargement, shrink, combination and a mixed chain. Assert recognizable interior patches/geometry with codec tolerance rather than demanding identical resampling pixels.
+- [x] Run the real transform exports plus browser/export comparison for horizontal, vertical, enlargement, shrink, combination and a mixed chain. Assert recognizable interior patches/geometry with codec tolerance rather than demanding identical resampling pixels.
 - [ ] Run `SRT_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe npm test`; run full `npm run test:e2e` with real parity enabled. Serialize Playwright invocations or use different output directories.
 - [ ] Run one actual local Claude UI smoke in isolated userData using production main/default services. Only inject save destination. Submit a valid ranged flip+scale request on a real video; verify one transform item, seek in/out, refresh, actual FFmpeg export and undo. Reuse existing `/tmp/srt-cycle2-real.IRxuRN/` bootstrap pattern; do not use the mock CLI fixture as real evidence. Capture exact returned recipe, screenshot and output metadata.
-- [ ] Read-only whole-cycle code review from `fba4cb1` to final commit. Resolve actual blocking regressions with focused tests; retain low-priority unrelated work in the ledger.
-- [ ] Append development log with internal modules/interfaces, user-visible behavior, exact automated/real smoke results, evidence paths and limits. State the source frame stays same size/time/audio; shrink black margins and center clipping are explicit. Distinguish agent validation from pending human viewing. Record no Cycle 4 start and no automatic GitHub push.
+- [x] Read-only whole-cycle code review from `fba4cb1` to final commit. Resolve actual blocking regressions with focused tests; retain low-priority unrelated work in the ledger.
+- [x] Append development log with internal modules/interfaces, user-visible behavior, exact automated/real smoke results, evidence paths and limits. State the source frame stays same size/time/audio; shrink black margins and center clipping are explicit. Distinguish agent validation from pending human viewing. Record no Cycle 4 start and no automatic GitHub push.
 - [ ] Commit `docs: record cycle 3 transform acceptance` and finish the cycle.
 
 ## Self-review
 
 All Cycle 3 roadmap goals map to these three deliverables. Typed booleans also reach the next prompt. Shared geometry controls rounding/centering in both targets. Mixed ordering is preserved, including color applied to black margins and sequential destructive framing. No animation, rotation, user crop or future graph system is introduced. Completion percentages are rough roadmap indicators, not measured total product functionality.
+
+## Execution status — 2026-09-08
+
+- Contract/export: implemented and reviewed at `146a258`.
+- Preview/UI code: implemented and reviewed at `dd89fab`; 18 actual browser pixel checks passed.
+- Final real Node/media suite: 260/260 passed; direct preview/export comparison: 9 cases, 580 patches, maximum 5/255 channel difference (limit 7/255).
+- Actual Claude → production editor → production export, reload, next-command context and one-request undo passed through an isolated loopback transport. This is not production Electron IPC.
+- Electron aborts in macOS `_RegisterApplication` before application JavaScript in this environment. Six new E2E tests collect but could not execute; full desktop regression, the actual editor portrait screenshot and native CLI/IPC smoke remain pending. Do not mark the entire cycle accepted.
+- Checkbox items requiring Electron execution remain unchecked even where their code/tests are implemented. The browser intrinsic-portrait check passed; the editor portrait-layout screenshot still requires desktop execution.
+- Development log records the separate informational-question parse failure and one deferred Minor compositor error-observability concern. No new chat redesign, Cycle 4, or GitHub push.
