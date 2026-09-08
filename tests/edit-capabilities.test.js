@@ -21,7 +21,7 @@ test('exposes only registrations with every executable adapter and routing metad
 
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
-  }), ['subtitle.generate@1', 'video.color.adjust@1']);
+  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1']);
   assert.equal(createCapabilityRegistry().promptDefinitions()[0].description,
     '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨');
   assert.equal(createCapabilityRegistry().get('subtitle.generate@1').definition.range.allowed, false);
@@ -369,6 +369,7 @@ test('loads the same registry in a browser without Node dependencies', function(
   const source = fs.readFileSync(path.join(__dirname, '../src/edit-capabilities.js'), 'utf8');
   const context = { window: { SRTRenderRecipe: { SUBTITLE_STYLE } } };
   vm.runInNewContext(colorSource, context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/video-transform.js'), 'utf8'), context);
   vm.runInNewContext(source, context);
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('subtitle.generate@1').definition.id, 'subtitle.generate@1');

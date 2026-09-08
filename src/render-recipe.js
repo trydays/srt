@@ -2,10 +2,13 @@
   var api = factory(function() {
     return typeof module === 'object' && module.exports
       ? require('./color-adjustment') : root.SRTColorAdjustment;
+  }, function() {
+    return typeof module === 'object' && module.exports
+      ? require('./video-transform') : root.SRTVideoTransform;
   });
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTRenderRecipe = api;
-})(typeof window === 'undefined' ? null : window, function(getColorAdjustment) {
+})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform) {
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
@@ -69,23 +72,25 @@
     return { capability: 'subtitle.burn@1', params: { segments: segments } };
   }
 
-  function validateColorStep(step) {
+  function validateSourceEffectStep(step) {
+    var transform = step.capability === 'video.transform@1';
     if (!hasOnlyKeys(step, ['capability', 'params', 'range'])
         || !isPlainObject(step.range) || !hasOnlyKeys(step.range, ['end', 'start'])
         || !Number.isFinite(step.range.start) || !Number.isFinite(step.range.end)
         || step.range.start < 0 || step.range.end <= step.range.start
         || !isPlainObject(step.params)
-        || !hasOnlyKeys(step.params, ['brightness', 'contrast', 'saturation', 'temperature'])) {
+        || !hasOnlyKeys(step.params, transform ? ['flipHorizontal', 'flipVertical', 'scale']
+          : ['brightness', 'contrast', 'saturation', 'temperature'])) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
     var params;
     try {
-      params = getColorAdjustment().normalizeParams(step.params, false);
+      params = (transform ? getVideoTransform() : getColorAdjustment()).normalizeParams(step.params, false);
     } catch (_) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
     return {
-      capability: 'video.color.adjust@1',
+      capability: step.capability,
       range: { start: step.range.start, end: step.range.end },
       params: params
     };
@@ -101,11 +106,12 @@
       if (!isPlainObject(step) || typeof step.capability !== 'string') {
         throw codedError('EXPORT_INVALID_RECIPE');
       }
-      if (step.capability !== 'video.color.adjust@1' && step.capability !== 'subtitle.burn@1') {
+      if (step.capability !== 'video.color.adjust@1' && step.capability !== 'video.transform@1'
+          && step.capability !== 'subtitle.burn@1') {
         throw codedError('EXPORT_UNSUPPORTED_OPERATION');
       }
       if (hasSubtitle) throw codedError('EXPORT_INVALID_RECIPE');
-      if (step.capability === 'video.color.adjust@1') return validateColorStep(step);
+      if (step.capability !== 'subtitle.burn@1') return validateSourceEffectStep(step);
       hasSubtitle = true;
       return validateSubtitleStep(step);
     });

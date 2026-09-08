@@ -605,3 +605,43 @@ test('requires color ranges to end within source duration without subtitle round
   }), { jobId: 'exact-range', status: 'failed', errorCode: 'EXPORT_INVALID_MEDIA' });
   assert.equal(spawnCalls, 1);
 });
+
+test('lowers repeated transforms from probed geometry between color steps and before subtitles', async (t) => {
+  const paths = await createFakePaths(t);
+  let render;
+  const probe = JSON.parse(PROBE_JSON);
+  Object.assign(probe.streams[0], { width: 96, height: 64, sample_aspect_ratio: '4:3' });
+  const service = createFakeService((_command, args, options) => {
+    assert.equal(options.shell, false);
+    if (!args.includes('-progress')) return fakeChild({ stdoutChunks: [JSON.stringify(probe)] });
+    render = args;
+    return fakeChild({ beforeClose: () => fs.writeFile(args.at(-1), 'rendered') });
+  });
+  const recipe = colorRecipe(true);
+  const transform = { capability: 'video.transform@1', range: { start: 1, end: 3 },
+    params: { flipHorizontal: true, flipVertical: false, scale: 0.49 } };
+  recipe.steps.splice(1, 0, transform);
+  recipe.steps.splice(3, 0, { ...transform, params: { ...transform.params, flipVertical: true, scale: 1.25 } });
+  const result = await service.start({ jobId: 'transforms', videoPath: paths.sourcePath,
+    outputPath: paths.outputPath, recipe });
+  assert.equal(result.status, 'completed');
+  const filter = render[render.indexOf('-vf') + 1];
+  assert.match(filter, /scale=47:31:flags=bilinear,pad=96:64:24:16:color=black,crop=96:64:0:0:exact=1,setsar=4\/3/);
+  assert.match(filter, /hflip,vflip,scale=120:80:flags=bilinear,pad=120:80:0:0:color=black,crop=96:64:12:8:exact=1/);
+  assert.equal((filter.match(/split=2/g) || []).length, 2);
+  assert.equal((filter.match(/overlay=0:0:format=auto:enable='gte\(t,1\)\*lt\(t,3\)'/g) || []).length, 2);
+  const positions = ['colorchannelmixer=rr=0.8', 'scale=47:31', 'colorchannelmixer=rr=1.2', 'scale=120:80', 'ass=captions.ass'].map(v => filter.indexOf(v));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
+  assert.equal(render[render.indexOf('-pix_fmt') + 1], 'yuv420p');
+});
+
+test('rejects transform ranges past the source without subtitle rounding tolerance', async (t) => {
+  const paths = await createFakePaths(t);
+  let calls = 0;
+  const service = createFakeService(() => { calls++; return fakeChild({ stdoutChunks: [PROBE_JSON] }); });
+  const result = await service.start({ jobId: 'range-transform', videoPath: paths.sourcePath,
+    outputPath: paths.outputPath, recipe: { version: 1, steps: [{ capability: 'video.transform@1',
+      range: { start: 1, end: 4.0005 }, params: { flipHorizontal: true, flipVertical: false, scale: 1 } }] } });
+  assert.equal(result.errorCode, 'EXPORT_INVALID_MEDIA');
+  assert.equal(calls, 1);
+});

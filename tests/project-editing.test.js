@@ -148,3 +148,36 @@ for (const stage of ['prepare', 'toEdit', 'toGraph']) {
     assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
   });
 }
+
+test('mixed transform color subtitle request preserves effect order, reload and one entire-request undo', async () => {
+  const f = fixture(); f.init();
+  const before = await applySteps(f, [colorStep()], 'before');
+  const writes = f.writes();
+  const transform = { capability: 'video.transform@1', range: { start: 1, end: 3 },
+    params: { flipHorizontal: true, flipVertical: false, scale: 1.25 } };
+  const result = await applySteps(f, [transform, recipe.steps[0], colorStep(0, 1),
+    { ...transform, params: { scale: 0.5 } }], 'mixed', 1);
+  assert.equal(result.document.revision, 2);
+  assert.equal(f.writes(), writes + 1);
+  assert.deepEqual(new Set(result.document.edits.slice(1).map(e => e.transactionId)), new Set(['mixed']));
+  assert.deepEqual(result.graph.nodes.map(n => n.type), ['source.video@1', 'video.color@1',
+    'video.transform@1', 'video.color@1', 'video.transform@1', 'visual.subtitle@1']);
+  const loaded = createProjectEditing({ storage: f.storage, storageKey: 'edits' }).load('p1');
+  assert.deepEqual(loaded, f.editing.load('p1'));
+  const context = f.editing.aiContext('p1');
+  assert.deepEqual(context.operations[1], transform);
+  assert.deepEqual(f.editing.timelineItems('p1').map(i => i.lane),
+    ['video-effect', 'video-effect', 'subtitle', 'video-effect', 'video-effect']);
+  assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 2,
+    transactionId: 'mixed' }).document.edits, before.document.edits);
+});
+
+test('invalid transform in second step leaves existing JSON and undo intact', async () => {
+  const f = fixture(); f.init(); await applySteps(f, [colorStep()], 'before');
+  const raw = f.raw(), writes = f.writes();
+  await assert.rejects(applySteps(f, [colorStep(), { capability: 'video.transform@1',
+    params: { flipHorizontal: 'true' } }], 'invalid', 1), { code: 'RECIPE_INVALID_PARAM' });
+  assert.equal(f.raw(), raw);
+  assert.equal(f.writes(), writes);
+  assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
+});

@@ -6,7 +6,7 @@ const { CAPABILITY_SCHEMAS, getCapabilitySchema, buildPrompt, parseInstruction }
 test('exports only the current registry prompt catalog', () => {
   assert.deepEqual(CAPABILITY_SCHEMAS, createCapabilityRegistry().promptDefinitions());
   assert.deepEqual(CAPABILITY_SCHEMAS.map((definition) => definition.id), [
-    'subtitle.generate@1', 'video.color.adjust@1'
+    'subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1'
   ]);
   assert.equal(getCapabilitySchema('subtitle.generate@1').range.allowed, false);
   assert.equal(getCapabilitySchema('video.color.adjust@1').range.allowed, true);

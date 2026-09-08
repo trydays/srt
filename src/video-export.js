@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { validateRenderRecipe, SUBTITLE_STYLE } = require('./render-recipe');
+const videoTransform = require('./video-transform');
 
 function codedError(code) {
   const error = new Error(code);
@@ -13,14 +14,31 @@ function codedError(code) {
 
 // The recipe has already crossed the strict export validator. Only numeric
 // values enter these fixed filter templates; ASS uses a service-owned filename.
-function buildVideoFilters(recipe) {
+function buildVideoFilters(recipe, media) {
   const filters = [];
+  let transformIndex = 0;
   for (const step of recipe.steps) {
     if (step.capability === 'video.color.adjust@1') {
       const { temperature, brightness, saturation, contrast } = step.params;
       const enable = `enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`;
       filters.push(`colorchannelmixer=rr=${1 + 0.2 * temperature}:gg=1:bb=${1 - 0.2 * temperature}:${enable}`);
       filters.push(`eq=brightness=${0.25 * brightness}:saturation=${saturation}:contrast=${contrast}:${enable}`);
+    } else if (step.capability === 'video.transform@1') {
+      const g = videoTransform.geometry(step.params, media.displayWidth, media.displayHeight);
+      const index = transformIndex++;
+      const changed = [];
+      if (g.params.flipHorizontal) changed.push('hflip');
+      if (g.params.flipVertical) changed.push('vflip');
+      changed.push(`scale=${g.scaledWidth}:${g.scaledHeight}:flags=bilinear`,
+        `pad=${g.padWidth}:${g.padHeight}:${g.padX}:${g.padY}:color=black`,
+        `crop=${media.displayWidth}:${media.displayHeight}:${g.cropX}:${g.cropY}:exact=1`,
+        `setsar=${media.sampleAspectRatio}`);
+      // A complete opaque frame on the second branch preserves clipping and
+      // black margins independently at every step. Only overlay supports enable.
+      filters.push(`format=yuv444p,split=2[base${index}][work${index}];`
+        + `[work${index}]${changed.join(',')}[changed${index}];`
+        + `[base${index}][changed${index}]overlay=0:0:format=auto:`
+        + `enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`);
     } else if (step.capability === 'subtitle.burn@1') {
       filters.push('ass=captions.ass');
     }
@@ -91,7 +109,8 @@ function createVideoExportService(options) {
     const audio = streams.find((stream) => stream.codec_type === 'audio');
     const duration = Number(probe.format && probe.format.duration || video && video.duration);
     if (!video || !Number.isFinite(duration) || duration <= 0
-        || !Number.isFinite(Number(video.width)) || !Number.isFinite(Number(video.height))) {
+        || !Number.isSafeInteger(Number(video.width)) || Number(video.width) <= 0
+        || !Number.isSafeInteger(Number(video.height)) || Number(video.height) <= 0) {
       throw codedError('EXPORT_INVALID_MEDIA');
     }
     const sideRotation = Array.isArray(video.side_data_list)
@@ -99,9 +118,14 @@ function createVideoExportService(options) {
       : null;
     const rotation = Number(sideRotation && sideRotation.rotation || video.tags && video.tags.rotate || 0);
     const rotated = Math.abs(rotation) % 180 === 90;
+    const sar = /^(\d+):(\d+)$/.exec(String(video.sample_aspect_ratio));
+    const validSar = sar && [Number(sar[1]), Number(sar[2])].every(v => Number.isSafeInteger(v) && v > 0);
+    const sampleAspectRatio = validSar
+      ? (rotated ? Number(sar[2]) + '/' + Number(sar[1]) : Number(sar[1]) + '/' + Number(sar[2])) : '1/1';
     return {
       duration,
       hasAudio: Boolean(audio),
+      sampleAspectRatio,
       displayWidth: Number(rotated ? video.height : video.width),
       displayHeight: Number(rotated ? video.width : video.height)
     };
@@ -184,10 +208,10 @@ function createVideoExportService(options) {
       const source = await probeMedia(tools.ffprobePath, sourcePath);
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       if (recipe.steps.some((step) => {
-        const isColor = step.capability === 'video.color.adjust@1';
-        const ranges = isColor ? [step.range] : step.params.segments;
+        const isSourceEffect = step.capability !== 'subtitle.burn@1';
+        const ranges = isSourceEffect ? [step.range] : step.params.segments;
         return ranges.some((range) => range.start >= source.duration
-          || range.end > source.duration + (isColor ? 0 : 0.001));
+          || range.end > source.duration + (isSourceEffect ? 0 : 0.001));
       })) {
         throw codedError('EXPORT_INVALID_MEDIA');
       }
@@ -201,7 +225,7 @@ function createVideoExportService(options) {
       if (current.cancelled) throw codedError('EXPORT_CANCELLED');
       const renderArgs = [
         '-hide_banner', '-nostdin', '-n', '-i', sourcePath,
-        '-map', '0:v:0', '-map', '0:a:0?', '-vf', buildVideoFilters(recipe),
+        '-map', '0:v:0', '-map', '0:a:0?', '-vf', buildVideoFilters(recipe, source),
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
         '-pix_fmt', 'yuv420p', '-fps_mode', 'passthrough',
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',

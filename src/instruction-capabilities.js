@@ -41,8 +41,10 @@ function capabilityLine(definition) {
   if (propertyNames.length) {
     line += '；参数：' + propertyNames.map(function(name) {
       var property = properties[name];
-      return name + '（type: ' + property.type + ', minimum: ' + property.minimum
-        + ', maximum: ' + property.maximum + ', default: ' + property.default
+      return name + '（type: ' + property.type
+        + (property.minimum === undefined ? '' : ', minimum: ' + property.minimum)
+        + (property.maximum === undefined ? '' : ', maximum: ' + property.maximum)
+        + ', default: ' + property.default
         + ', description: ' + property.description + '）';
     }).join('；');
   }
@@ -97,6 +99,8 @@ function projectContextLines(context) {
     var params = {};
     Object.keys(properties).forEach(function(name) {
       var schema = properties[name], value = supplied[name];
+      if (!Object.prototype.hasOwnProperty.call(supplied, name)) return;
+      if (schema.type === 'boolean' && typeof value === 'boolean') params[name] = value;
       if (schema.type === 'number' && finiteNumber(value)
           && (schema.minimum === undefined || value >= schema.minimum)
           && (schema.maximum === undefined || value <= schema.maximum)) params[name] = value;

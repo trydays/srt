@@ -5,10 +5,12 @@
   var colorAdjustment = typeof module === 'object' && module.exports
     ? require('./color-adjustment')
     : root && root.SRTColorAdjustment;
-  var api = factory(renderRecipe, colorAdjustment);
+  var videoTransform = typeof module === 'object' && module.exports
+    ? require('./video-transform') : root && root.SRTVideoTransform;
+  var api = factory(renderRecipe, colorAdjustment, videoTransform);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
@@ -284,6 +286,45 @@
     };
   }
 
+  function createTransformRegistration() {
+    return {
+      definition: {
+        schemaVersion: 1, id: 'video.transform@1', label: '画面变换',
+        description: '水平或垂直翻转后居中等比缩放；至少提供一个参数，字幕保持原样',
+        params: { type: 'object', additionalProperties: false, properties: videoTransform.PARAMETER_SCHEMA },
+        range: { allowed: true, default: 'wholeTarget' }
+      },
+      editMode: 'append', editType: 'video.transform.operation@1',
+      nodeType: 'video.transform@1', graphStage: 'sourceEffect',
+      prepare: async function() { return {}; },
+      toEdit: function(_prepared, step) {
+        return { type: 'video.transform.operation@1', range: clone(step.range),
+          payload: videoTransform.normalizeParams(step.params, true) };
+      },
+      toGraph: function(edit, graphContext) {
+        return { id: 'node-' + edit.id, type: 'video.transform@1', range: clone(edit.range),
+          inputs: [{ port: 'base', nodeId: graphContext.videoHead }],
+          props: videoTransform.normalizeParams(edit.payload, false) };
+      },
+      toTimeline: function(edit) {
+        var params = videoTransform.normalizeParams(edit.payload, false);
+        return { editId: edit.id, transactionId: edit.transactionId, lane: 'video-effect',
+          range: clone(edit.range), label: '画面变换',
+          summary: '水平翻转 ' + (params.flipHorizontal ? '开' : '关')
+            + '，垂直翻转 ' + (params.flipVertical ? '开' : '关') + '，缩放 ' + params.scale + ' 倍' };
+      },
+      preview: function(graph, time) {
+        return graph.nodes.filter(function(node) {
+          return node.type === 'video.transform@1' && colorAdjustment.isActive(node.range, time);
+        }).map(function(node) { return videoTransform.normalizeParams(node.props, false); });
+      },
+      toExport: function(node) {
+        return { capability: 'video.transform@1', range: clone(node.range),
+          params: videoTransform.normalizeParams(node.props, false) };
+      }
+    };
+  }
+
   function completeRegistration(registration) {
     var definition = registration && registration.definition;
     return isPlainObject(registration) && isPlainObject(definition)
@@ -304,7 +345,7 @@
 
   function createCapabilityRegistry(registrations) {
     var items = registrations === undefined
-      ? [createSubtitleRegistration(), createColorRegistration()]
+      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration()]
       : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);
@@ -338,10 +379,14 @@
         var parameterNames = Object.keys(step.params);
         if ((Object.keys(properties).length > 0 && parameterNames.length === 0)
             || parameterNames.some(function(key) {
+              if (!Object.prototype.hasOwnProperty.call(properties, key)) return true;
               var schema = properties[key];
               var value = step.params[key];
-              return !schema || schema.type !== 'number' || typeof value !== 'number'
-                || !Number.isFinite(value) || value < schema.minimum || value > schema.maximum;
+              if (schema.type === 'boolean') return typeof value !== 'boolean';
+              return schema.type !== 'number' || typeof value !== 'number'
+                || !Number.isFinite(value)
+                || (schema.minimum !== undefined && value < schema.minimum)
+                || (schema.maximum !== undefined && value > schema.maximum);
             })) {
           throw codedError('RECIPE_INVALID_PARAM');
         }
@@ -396,6 +441,7 @@
   return {
     createCapabilityRegistry: createCapabilityRegistry,
     createColorRegistration: createColorRegistration,
+    createTransformRegistration: createTransformRegistration,
     createSubtitleRegistration: createSubtitleRegistration,
     codedError: codedError,
     clone: clone,
