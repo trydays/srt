@@ -203,6 +203,8 @@ function renderRequestStatusCard(card, record) {
       + escapeConversationText(record.id)
       + '" data-testid="subtitle-undo"' + (window.isExporting ? ' disabled' : '')
       + '>撤销本次编辑</button>' : '';
+  var saveAsSkill = window.personalSkillController && window.personalSkillController.canSave(record)
+    ? '<button type="button" class="save-as-skill" data-testid="save-as-skill">保存为技能</button>' : '';
   var summary = isSuccessfulRequest(record)
     ? '<button type="button" class="request-status-summary" data-request-details-toggle'
       + ' data-testid="request-status-summary">' + escapeConversationText(requestCardSummary(record)) + '</button>' : '';
@@ -214,7 +216,7 @@ function renderRequestStatusCard(card, record) {
     + statusRowHTML(secondTestId, secondLabel, record.timelineStatus)
     + (isSubtitle && record.timelineStatus === 'success'
       ? '<div class="request-result">已生成 ' + Number(record.resultCount || 0) + ' 条字幕</div>' : '')
-    + clarify + error + undo + '</div>'
+    + clarify + error + undo + saveAsSkill + '</div>'
     + (record.historyWarning ? '<div class="request-error">' + escapeConversationText(record.historyWarning) + '</div>' : '');
 }
 function appendRequestStatusCard(record) {
@@ -245,9 +247,12 @@ function appendFollowupMessage(card, text) {
   chatArea.scrollTop = chatArea.scrollHeight;
 }
 function createConversationRequest(text) {
-  return { id: createLocalId(), text: text, submittedAt: Date.now(),
+  var record = { id: createLocalId(), text: text, submittedAt: Date.now(),
     instructionStatus: 'converting', timelineStatus: 'waiting', subtitleRequest: null,
     turns: [{ role: 'user', text: text }], clarifyMessage: '' };
+  var selected = window.personalSkillController && window.personalSkillController.captureSelection();
+  if (selected) record.skillContext = selected;
+  return record;
 }
 function isFinalRequest(record) {
   if (record.instructionStatus === 'failed') return true;
@@ -341,7 +346,7 @@ async function translateAndApply(text, record, card) {
   if (window.projectEditingError) throw window.projectEditingError;
   var loaded = window.projectEditing.load(activeProjectId);
   var context = currentProjectContext();
-  var translated = await window.srtAPI.translateInstruction(text, record.turns, context);
+  var translated = await window.srtAPI.translateInstruction(text, record.turns, context, record.skillContext);
   if (!translated.ok) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
@@ -454,6 +459,7 @@ generateBtn.addEventListener('click', async function() {
   }
   requestInFlight = true;
   setSubmitState();
+  if (window.personalSkillController) window.personalSkillController.refresh();
   try {
     await translateAndApply(text, record, card);
   } catch (error) {
@@ -470,9 +476,17 @@ generateBtn.addEventListener('click', async function() {
   } finally {
     requestInFlight = false;
     setSubmitState();
+    if (window.personalSkillController) window.personalSkillController.afterRequest(record);
   }
 });
 chatArea.addEventListener('click', function(event) {
+  var saveButton = event.target.closest('[data-testid="save-as-skill"]');
+  if (saveButton) {
+    var saveCard = saveButton.closest('[data-request-id]');
+    var saveRecord = conversationRecords.find(function(record) { return record.id === saveCard.dataset.requestId; });
+    if (saveRecord && window.personalSkillController) window.personalSkillController.openSave(saveRecord);
+    return;
+  }
   var summary = event.target.closest('[data-request-details-toggle]');
   if (summary) {
     var summaryCard = summary.closest('[data-request-id]');
@@ -508,6 +522,16 @@ editorEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey)
 
 window.timelineController = {
   isRequestInFlight: function() { return requestInFlight; },
+  hasPendingClarify: function() { return Boolean(pendingClarifyRecord && pendingClarifyCard); },
+  exitPendingClarify: function() {
+    if (!pendingClarifyRecord || !pendingClarifyCard || requestInFlight) return false;
+    var record = pendingClarifyRecord, card = pendingClarifyCard;
+    pendingClarifyRecord = null; pendingClarifyCard = null;
+    updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+      clarifyMessage: '', error: '已退出本次补充，可开始新的请求。' });
+    if (window.personalSkillController) window.personalSkillController.afterRequest(record);
+    return true;
+  },
   getUnsupportedExportItems: function() {
     return [];
   }

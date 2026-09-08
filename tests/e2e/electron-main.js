@@ -64,8 +64,8 @@ const localCliService = {
     selectedCliId = id;
     return { available: localCliStates, selectedCliId };
   },
-  async translateInstruction(text, history, context) {
-    state.translationCalls = (state.translationCalls || []).concat([{ text, history, context }]);
+  async translateInstruction(text, history, context, skill) {
+    state.translationCalls = (state.translationCalls || []).concat([{ text, history, context, skill }]);
     if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
       const error = new Error('Invalid local CLI instruction output');
       error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
@@ -132,6 +132,39 @@ const localCliService = {
       if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
       return { kind: 'instruction', steps: /新增/.test(text) ? [second] : /两个/.test(text) ? [group, second] : [group] };
     }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'personal-skill-transactions') {
+      if (/慢速执行/.test(text)) await new Promise(resolve => setTimeout(resolve, 150));
+      if (skill && skill.capabilityVersions.some((id) => id === 'retired.film@1')) {
+        return { kind: 'clarify', message: '技能引用的 retired.film@1 当前不可用，请说明希望保留的视觉感受。' };
+      }
+      if (/需要补充/.test(text) && (!Array.isArray(history) || history.length <= 1)) {
+        return { kind: 'clarify', message: '希望把重点卡片放在画面的哪个位置？' };
+      }
+      const portrait = context && context.video && context.video.height > context.video.width;
+      const duration = context && context.video ? context.video.durationSeconds : 4;
+      const range = skill
+        ? (portrait ? { start: .25, end: Math.min(2.75, duration) }
+          : { start: .5, end: Math.min(3.5, duration) })
+        : { start: 1, end: Math.min(3.8, duration) };
+      const group = { capability: 'visual.group@1', range, params: {
+        layers: [
+          { kind: 'shape', params: portrait
+            ? { x: .1, y: .22, width: .8, height: .24, color: '#D05030' }
+            : { x: .18, y: .25, width: .52, height: .28, color: '#D05030' } },
+          { kind: 'text', params: portrait
+            ? { text: '竖屏重点', x: .18, y: .29, fontSize: .065, color: '#FFFFFF' }
+            : { text: '横屏重点', x: .24, y: .33, fontSize: .075, color: '#FFFFFF' } }
+        ],
+        pivotX: portrait ? .5 : .44, pivotY: portrait ? .34 : .39,
+        opacity: { keyframes: [{ time: 0, value: 0 }, { time: .45, value: 1, easing: 'ease-out' }] },
+        scale: { keyframes: [{ time: 0, value: .8 }, { time: .45, value: 1, easing: 'back-out' }] }
+      } };
+      if (/错误配方/.test(text)) {
+        return { kind: 'instruction', steps: [{ ...group, params: { ...group.params,
+          scale: { keyframes: [{ time: 0, value: 1 }, { time: 0, value: 2 }] } } }] };
+      }
+      return { kind: 'instruction', steps: [group] };
+    }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'layer-transactions-success') {
       if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
       const first = [
@@ -183,6 +216,9 @@ const subtitleService = {
 };
 let videoExportService;
 let showSaveDialog;
+const exportOutputPath = path.join(userDataDir, 'personal-skill-export.mp4');
+state.exportOutputPath = exportOutputPath;
+showSaveDialog = async () => ({ canceled: false, filePath: exportOutputPath });
 if (!useProductionEnvironment) {
   let exportStartCount = 0;
   let pendingExport = null;
@@ -211,11 +247,8 @@ if (!useProductionEnvironment) {
       }
     }
   };
-  showSaveDialog = async () => ({
-    canceled: false,
-    filePath: path.join(userDataDir, 'export.mp4')
-  });
 }
 app.__srtE2EState = state;
 startApplication({ environmentModule, localCliService, subtitleService,
-  ...(useProductionEnvironment ? {} : { videoExportService, showSaveDialog }) });
+  showSaveDialog,
+  ...(useProductionEnvironment ? {} : { videoExportService }) });

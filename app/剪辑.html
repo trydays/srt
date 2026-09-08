@@ -194,6 +194,37 @@
     .input-submit:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:var(--shadow-sm)}
     .input-submit:active:not(:disabled){transform:translateY(1px);box-shadow:var(--shadow-xs)}
     .input-submit:disabled{opacity:.5;cursor:default;box-shadow:none}
+    .skill-context-row{display:flex;align-items:center;gap:7px;min-height:0;flex-wrap:wrap}
+    .skill-context-row:empty{display:none}
+    .selected-skill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:5px 9px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--border));border-radius:var(--radius-pill);background:var(--accent-tint);color:var(--accent-strong);font-size:11.5px}
+    .selected-skill[hidden],.skill-exit-clarify[hidden]{display:none}
+    .selected-skill__name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .selected-skill__clear{appearance:none;border:0;background:transparent;color:inherit;font:inherit;line-height:1;cursor:pointer;padding:0 1px}
+    .selected-skill__clear:disabled{opacity:.45;cursor:default}
+    .personal-skills-button,.skill-exit-clarify,.save-as-skill,.skill-button{appearance:none;height:29px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);font:inherit;font-size:11px;cursor:pointer}
+    .personal-skills-button:disabled,.skill-button:disabled{opacity:.48;cursor:default}
+    .save-as-skill{margin-top:7px}
+    .skill-dialog{width:min(430px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));padding:0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);color:var(--text);box-shadow:var(--shadow-lg)}
+    .skill-dialog::backdrop{background:rgba(0,0,0,.28)}
+    .skill-dialog__body{display:flex;flex-direction:column;gap:12px;padding:18px;max-height:inherit;overflow:auto}
+    .skill-dialog__head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .skill-dialog__title{font-size:14px;font-weight:650;color:var(--text-strong)}
+    .skill-dialog__close{appearance:none;border:0;background:transparent;color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer}
+    .skill-dialog__empty,.skill-dialog__error{font-size:11.5px;line-height:1.5;color:var(--text-muted)}
+    .skill-dialog__error{color:var(--red)}
+    .skill-list{display:flex;flex-direction:column;gap:9px}
+    .skill-item{padding:11px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg)}
+    .skill-item__head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .skill-item__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:650;color:var(--text-strong)}
+    .skill-item__actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+    .skill-item__details{margin-top:9px;padding-top:9px;border-top:1px solid var(--border-soft);display:grid;gap:7px;font-size:11.5px;line-height:1.5;color:var(--text-muted);white-space:pre-wrap;overflow-wrap:anywhere}
+    .skill-item__details[hidden]{display:none}
+    .skill-item__details strong{color:var(--text-strong);font-weight:650}
+    .skill-form-field{display:grid;gap:6px;font-size:11.5px;color:var(--text-muted)}
+    .skill-form-field input,.skill-form-field textarea{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text-strong);font:inherit;font-size:12.5px;padding:8px 9px;outline:none;resize:vertical}
+    .skill-form-field input:focus,.skill-form-field textarea:focus{border-color:color-mix(in srgb,var(--accent) 48%,var(--border))}
+    .skill-dialog__actions{display:flex;justify-content:flex-end;gap:7px}
+    .skill-button--primary{border-color:var(--accent);background:var(--accent);color:white}
 
     @media(max-width:560px){.ws-scroll{padding:16px 16px 0}.preview,.timeline{max-width:100%}.input-card{margin:0 10px 10px}.chat{padding:12px 10px}}
   </style>
@@ -231,9 +262,16 @@
         </div>
 
         <div class="input-card">
+          <div class="skill-context-row">
+            <span class="selected-skill" data-testid="selected-skill" hidden>
+              <span>技能</span><span class="selected-skill__name"></span>
+              <button class="selected-skill__clear" data-testid="selected-skill-clear" type="button" aria-label="清除所选技能">×</button>
+            </span>
+            <button class="skill-exit-clarify" data-testid="skill-exit-clarify" type="button" hidden>退出本次补充</button>
+          </div>
           <div class="input-editor" contenteditable="true" data-placeholder="描述要给视频加什么效果…" aria-label="效果描述输入" role="textbox" aria-multiline="true"></div>
           <div class="input-foot">
-            <div class="input-foot-l">39 组件 · 6 Glam 配方 · <strong>MIT</strong></div>
+            <div class="input-foot-l"><button class="personal-skills-button" data-testid="personal-skills-button" type="button">我的技能</button></div>
             <div class="input-foot-r">
               <button class="input-submit" id="generateBtn">生成效果 →</button>
             </div>
@@ -310,6 +348,40 @@
     </main>
   </div>
 
+  <dialog class="skill-dialog" data-testid="personal-skills-dialog" aria-labelledby="personalSkillsTitle">
+    <div class="skill-dialog__body">
+      <div class="skill-dialog__head">
+        <div class="skill-dialog__title" id="personalSkillsTitle">我的技能</div>
+        <button class="skill-dialog__close" type="button" data-skill-dialog-close>关闭</button>
+      </div>
+      <div class="skill-dialog__error" data-skill-list-error hidden></div>
+      <div class="skill-dialog__empty" data-skill-list-empty>还没有保存技能</div>
+      <div class="skill-list" data-skill-list></div>
+    </div>
+  </dialog>
+
+  <dialog class="skill-dialog" data-testid="skill-save-dialog" aria-labelledby="skillSaveTitle">
+    <form class="skill-dialog__body" data-skill-save-form>
+      <div class="skill-dialog__head">
+        <div class="skill-dialog__title" id="skillSaveTitle">保存为技能</div>
+      </div>
+      <label class="skill-form-field">名称
+        <input data-testid="skill-name" maxlength="60" autocomplete="off" />
+      </label>
+      <label class="skill-form-field">剪辑意图
+        <textarea data-testid="skill-intent" rows="6" maxlength="4000"></textarea>
+      </label>
+      <label class="skill-form-field">偏好
+        <textarea data-testid="skill-preferences" rows="4" maxlength="2000"></textarea>
+      </label>
+      <div class="skill-dialog__error" data-skill-save-error hidden></div>
+      <div class="skill-dialog__actions">
+        <button class="skill-button" data-testid="skill-cancel" type="button">取消</button>
+        <button class="skill-button skill-button--primary" data-testid="skill-save" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
   <input type="file" id="reupload" accept="video/*" style="display:none" />
 
   <script src="shared.js"></script>
@@ -323,6 +395,7 @@
   <script src="../src/keyframes.js"></script>
   <script src="../src/visual-group.js"></script>
   <script src="../src/edit-capabilities.js"></script>
+  <script src="../src/personal-skills.js"></script>
   <script src="../src/render-graph.js"></script>
   <script src="../src/project-editing.js"></script>
   <script src="subtitle-draft-state.js"></script>
@@ -332,6 +405,7 @@
   <script src="editor-layer-preview.js"></script>
   <script src="editor-subtitles.js"></script>
   <script src="editor-timeline.js"></script>
+  <script src="editor-skills.js"></script>
   <script src="editor-export.js"></script>
   <script>
     window.__PAGE = { id: 'editor' };

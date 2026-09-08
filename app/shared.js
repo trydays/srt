@@ -20,6 +20,7 @@ window.STORAGE_KEYS = {
   PROJECT_SUBTITLES: 'srt_project_subtitles',
   PROJECT_EDIT_STATE: 'srt_project_edit_state',
   PROJECT_SUBTITLE_DRAFTS: 'srt_project_subtitle_drafts',
+  PERSONAL_SKILLS: 'srt_personal_skills',
   EDITOR_SIDEBAR_SIDE: 'srt_editor_sidebar_side',
   EDITOR_SIDEBAR_WIDTH: 'srt_editor_sidebar_width',
 };
