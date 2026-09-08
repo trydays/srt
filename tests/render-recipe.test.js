@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createCapabilityRegistry, createGroupRegistration, createNoiseRegistration,
-  createVignetteRegistration } = require('../src/edit-capabilities');
+  createVignetteRegistration, createTransformRegistration, createShapeRegistration,
+  createSubtitleRegistration } = require('../src/edit-capabilities');
 
 test('validates canonical texture steps and preserves source-effect order', () => {
   const recipe = validateRenderRecipe({ version: 1, steps: [
@@ -27,6 +28,31 @@ test('builds texture render steps only with an explicit texture registry', () =>
   assert.deepEqual(buildRenderRecipe(graph, registry).steps.map(step => step.capability),
     ['video.noise@1', 'video.vignette@1']);
   assert.throws(() => buildRenderRecipe(graph, createCapabilityRegistry()), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+});
+
+test('render recipes retain texture-transform order before visuals and a single subtitle', () => {
+  const registry = createCapabilityRegistry([createNoiseRegistration(), createVignetteRegistration(),
+    createTransformRegistration(), createShapeRegistration(), createSubtitleRegistration()]);
+  for (const sources of [
+    [{ type: 'video.noise@1', props: { amount: .4 } },
+      { type: 'video.transform@1', props: { flipHorizontal: true, flipVertical: false, scale: 1 } }],
+    [{ type: 'video.transform@1', props: { flipHorizontal: false, flipVertical: true, scale: 1 } },
+      { type: 'video.vignette@1', props: { strength: .7 } }]
+  ]) {
+    const nodes = [{ type: 'source.video@1' }, ...sources.map((node, index) => ({
+      id: `source-${index}`, range: { start: 0, end: 4 }, ...node
+    })), {
+      id: 'shape', type: 'visual.shape@1', range: { start: 0, end: 4 },
+      props: { x: .1, y: .1, width: .2, height: .2, color: '#000000' }
+    }, {
+      id: 'subtitle', type: 'visual.subtitle@1', props: {
+        segments: [{ id: 's', start: 1, end: 2, text: 'top' }]
+      }
+    }];
+    assert.deepEqual(buildRenderRecipe({ nodes }, registry).steps.map(step => step.capability), [
+      ...sources.map(node => node.type), 'visual.shape@1', 'subtitle.burn@1'
+    ]);
+  }
 });
 const { normalizeParams: normalizeGroup } = require('../src/visual-group');
 const {

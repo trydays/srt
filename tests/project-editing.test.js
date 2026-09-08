@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const { createProjectEditing } = require('../src/project-editing');
 const { SUBTITLE_STYLE } = require('../src/render-recipe');
 const { createCapabilityRegistry, createSubtitleRegistration, createColorRegistration,
-  createGroupRegistration, createNoiseRegistration, createVignetteRegistration } = require('../src/edit-capabilities');
+  createGroupRegistration, createNoiseRegistration, createVignetteRegistration,
+  createTransformRegistration, createShapeRegistration } = require('../src/edit-capabilities');
 const { createRenderGraphCompiler } = require('../src/render-graph');
 const facts = { duration: 8, canvas: { width: 1280, height: 720 }, source: { id: 'main-video', assetId: 'asset-1' } };
 const recipe = { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
@@ -111,6 +112,25 @@ test('invalid later texture leaves prior storage document and undo unchanged', a
     params: { amount: 0.5, seed: 1 } }], 'bad', 1), { code: 'RECIPE_INVALID_PARAM' });
   assert.equal(f.raw(), raw); assert.equal(f.writes(), writes);
   assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
+});
+
+test('texture and transform retain both requested orders below visual layers and subtitles', async () => {
+  for (const sourceSteps of [
+    [{ capability: 'video.noise@1', params: { amount: .4 } },
+      { capability: 'video.transform@1', params: { flipHorizontal: true } }],
+    [{ capability: 'video.transform@1', params: { flipVertical: true } },
+      { capability: 'video.vignette@1', params: { strength: .7 } }]
+  ]) {
+    const registry = createCapabilityRegistry([createSubtitleRegistration(), createShapeRegistration(),
+      createNoiseRegistration(), createVignetteRegistration(), createTransformRegistration()]);
+    const f = fixture({ capabilityRegistry: registry }); f.init();
+    const result = await applySteps(f, [recipe.steps[0],
+      { capability: 'visual.shape@1', params: { x: .1, y: .1, width: .2, height: .2, color: '#000000' } },
+      ...sourceSteps], 'ordered');
+    assert.deepEqual(result.graph.nodes.slice(1).map(node => node.type), [
+      ...sourceSteps.map(step => step.capability), 'visual.shape@1', 'visual.subtitle@1'
+    ]);
+  }
 });
 test('appends color ranges and projects normalized payloads without runtime paths', async () => {
   const f = fixture(); f.init();
