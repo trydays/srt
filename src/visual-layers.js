@@ -26,7 +26,7 @@
     var schema = kind==='shape' ? SHAPE_PARAMETERS : kind==='text' ? TEXT_PARAMETERS : null;
     if (!schema || !plain(params)) fail();
     var names=Object.keys(params); if (requireExplicit && names.length===0) fail();
-    if (names.some(function(k){return !schema[k];})) fail();
+    if (names.some(function(k){return !Object.prototype.hasOwnProperty.call(schema,k);})) fail();
     var out={};
     Object.keys(schema).forEach(function(name){
       var rule=schema[name], value=params[name];
@@ -50,8 +50,8 @@
   function geometry(kind, params, width, height) {
     if (!Number.isFinite(width)||width<=0||!Number.isFinite(height)||height<=0) fail();
     var p=normalizeParams(kind,params,false), x=Math.round(p.x*width), y=Math.round(p.y*height);
-    if(kind==='shape') return {x:x,y:y,width:Math.round(p.width*width),height:Math.round(p.height*height),color:p.color};
-    var size=Math.round(p.fontSize*height), lineHeight=Math.round(1.2*size);
+    if(kind==='shape') return {x:x,y:y,width:Math.max(1,Math.round(p.width*width)),height:Math.max(1,Math.round(p.height*height)),color:p.color};
+    var size=Math.max(1,Math.round(p.fontSize*height)), lineHeight=Math.max(1,Math.round(1.2*size));
     return {x:x,y:y,fontSize:size,lineHeight:lineHeight,lines:p.text.split('\n').map(function(text,i){return{text:text,x:x,baseline:y+size+i*lineHeight};}),color:p.color};
   }
   function draw(ctx,kind,params,width,height) {

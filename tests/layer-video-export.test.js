@@ -53,3 +53,16 @@ test('renders overlapping layers and literal multilingual text into real media',
   assert.ok(whiteInk>30,`expected real text ink, got ${whiteInk} bright pixels`);
   console.log(`REAL_LAYER_EXPORT_OUTPUT=${output}`);
 });
+
+test('a minimum shape on 48x48 media does not cover the center',{skip:process.env.SRT_REAL_EXPORT!=='1'},async(t)=>{
+  const ffmpeg=process.env.SRT_FFMPEG_PATH,ffprobe=process.env.SRT_FFPROBE_PATH;assert.ok(ffmpeg);assert.ok(ffprobe);
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'srt-cycle4-min-shape-real-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const source=path.join(dir,'source.mp4'),output=path.join(dir,'shape.mp4');
+  await execFileAsync(ffmpeg,['-n','-f','lavfi','-i','color=c=0x243044:s=48x48:r=25','-t','1','-c:v','libx264','-pix_fmt','yuv420p',source]);
+  const minShape={version:1,steps:[{capability:'visual.shape@1',range:{start:0,end:1},params:{x:0,y:0,width:.01,height:.01,color:'#FF0000'}}]};
+  const service=createVideoExportService({getExportTools:async()=>({ffmpegPath:ffmpeg,ffprobePath:ffprobe})});
+  assert.equal((await service.start({jobId:'real-min-shape',videoPath:source,outputPath:output,recipe:minShape})).status,'completed');
+  const {stdout:raw}=await execFileAsync(ffmpeg,['-v','error','-ss','0.5','-i',output,'-vf','format=rgb24','-frames:v','1','-f','rawvideo','pipe:1'],{encoding:'buffer'});
+  const center=[...raw.subarray((24*48+24)*3,(24*48+24)*3+3)];
+  assert.ok(center[2]>center[0],`expected center to remain blue, got ${center.join(',')}`);
+});

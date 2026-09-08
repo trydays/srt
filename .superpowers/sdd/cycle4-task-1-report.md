@@ -35,3 +35,28 @@
 - Export filenames derive only from validated recipe indices; colors and geometry are normalized before fixed filter construction; empty explicit text lines create no drawtext call.
 - The first sandboxed full run had seven unrelated `listen EPERM` failures from loopback restrictions. The same full suite passed completely after granting the existing server tests loopback permission.
 - UI script loading and timeline aggregation remain intentionally deferred to Task 2.
+
+## Review fix scope
+
+### Behavior
+
+- Floor every positive shape extent, text font size, and text line height to at least one pixel after rounding. Positions remain rounded without a floor; text baseline remains `y + fontSize`.
+- Reject parameter keys unless they are own properties of the selected schema, including an own `constructor` key.
+- Added Canvas geometry/draw regressions and a real 48×48 FFmpeg export regression.
+
+## TDD RED evidence
+
+1. `node --test tests/visual-layers.test.js tests/layer-video-export.test.js`
+   - Exit 1.
+   - `rejects unsafe or malformed layer parameters`: `Missing expected exception` for `{ constructor: 1 }`.
+   - `floors positive extents and text metrics to one pixel`: actual shape width/height were `0`, expected `1`.
+2. `SRT_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe node --test --test-name-pattern='minimum shape' tests/layer-video-export.test.js`
+   - Exit 1.
+   - Center pixel was `254,0,0`, proving the zero-sized FFmpeg drawbox covered the frame.
+
+## GREEN verification
+
+1. `node --test tests/visual-layers.test.js tests/layer-video-export.test.js`
+   - Exit 0: 9 tests, 7 passed, 2 real-export tests skipped by their environment gate, 0 failed.
+2. `SRT_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe node --test tests/layer-video-export.test.js`
+   - Exit 0: 4 tests passed, 0 failed, 0 skipped.

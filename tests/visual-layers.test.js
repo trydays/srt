@@ -21,6 +21,23 @@ test('rejects unsafe or malformed layer parameters', () => {
   for (const [kind, params] of invalid) assert.throws(() => layers.normalizeParams(kind, params, true));
 });
 
+test('rejects an own constructor parameter outside the schema', () => {
+  assert.throws(() => layers.normalizeParams('shape', { constructor: 1 }, true));
+});
+
+test('floors positive extents and text metrics to one pixel', () => {
+  assert.deepEqual(layers.geometry('shape', { x: 0, y: 0, width: .01, height: .01 }, 48, 48),
+    { x: 0, y: 0, width: 1, height: 1, color: '#000000' });
+  assert.deepEqual(layers.geometry('text', { text: 'x', x: 0, y: 0, fontSize: .02 }, 48, 24), {
+    x: 0, y: 0, fontSize: 1, lineHeight: 1,
+    lines: [{ text: 'x', x: 0, baseline: 1 }], color: '#FFFFFF'
+  });
+  const calls = [];
+  const ctx = { save() {}, restore() {}, fillRect: (...args) => calls.push(args) };
+  layers.draw(ctx, 'shape', { x: 0, y: 0, width: .01, height: .01 }, 48, 48);
+  assert.deepEqual(calls, [[0, 0, 1, 1]]);
+});
+
 test('shares rounded geometry and literal canvas drawing', () => {
   assert.deepEqual(layers.geometry('shape', { x: .1, y: .1, width: .3, height: .15, color: '#123456' }, 641, 359),
     { x: 64, y: 36, width: 192, height: 54, color: '#123456' });
