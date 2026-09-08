@@ -8,6 +8,8 @@
 
 **Tech Stack:** Existing Electron, JavaScript UMD/CommonJS, Canvas, FFmpeg, node:test and Playwright; no new runtime dependency.
 
+Real-enabled Node command for every task: `env -u FORCE_COLOR -u NO_COLOR SRT_REAL_EXPORT=1 SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe npm test`. The separate `/opt/homebrew/bin/ffmpeg` installation lacks the required text/subtitle filters and is not the project baseline tool.
+
 ## Global Constraints
 
 - User approved Cycle 5 after its goals/boundaries report. Cycle 4 backup was pushed and independently verified at `b530e2da1fc083bcfa0a41b85c6693bb120bf4c0` on `trydays/srt`, branch `feature/subtitle-export-cycle0` before development. Use existing isolated worktree `/Users/mac/Documents/Codex/SRTP-worktrees/subtitle-export-cycle0`; preserve unrelated changes. No automatic push of Cycle 5 or main merge.
@@ -29,7 +31,7 @@
 valueSchema(minimum, maximum, defaultValue); // finite scalar OR strict keyframes object
 normalize(value, minimum, maximum, duration); // canonical scalar/object; duration optional until range known
 valueAt(value, elapsed, minimum, maximum); // pure, clamped; already canonical input
-expression(value, elapsedExpression, minimum, maximum); // only trusted caller supplies variable expression
+expression(value, elapsedExpression, minimum, maximum); // FFmpeg-native if/lt/min/max/pow syntax; trusted caller supplies T/t expression, never AI
 ```
 
 `src/visual-group.js` UMD `SRTVisualGroup`, depends on keyframes and visual-layers:
@@ -62,7 +64,7 @@ assert.throws(()=>keyframes.normalize({keyframes:[{time:0,value:0},{time:0,value
 ```
 
 - [ ] Run `node --test tests/keyframes.test.js tests/visual-group.test.js tests/project-editing.test.js`; record expected missing feature RED. Cover descending/duplicate/nonfinite times, unknown easing/fields, wrong scalar types, >16 frames/layers, nesting, first time !=0, animation outside explicit and default whole-video ranges, malformed child text/color. Assertions must test behavior, not file text.
-- [ ] Implement normalization, pure evaluation and controlled expression generation from the same easing definitions. Segment evaluation uses `p=(elapsed-a.time)/(b.time-a.time)` clamped[0,1], destination easing, linear value interpolation and final domain clamp; expression uses identical segment comparisons and coefficients. Include JS evaluation tests for every easing, held last value, reversed sampling order and domain caps.
+- [ ] Implement normalization, pure evaluation and controlled FFmpeg expression generation from the same easing definitions. Segment evaluation uses `p=(elapsed-a.time)/(b.time-a.time)` clamped[0,1], destination easing, linear value interpolation and final domain clamp; expression uses identical segment comparisons and coefficients. Include JavaScript valueAt tests for every easing, held last value, reversed sampling order and domain caps. Check generated expression syntax/coefficients here; actual numeric FFmpeg agreement is Task 2. Do not build a test expression interpreter or use eval.
 - [ ] Implement group canonicalization, integer geometry and flatten-once drawing. For draw tests use an instrumented minimal Canvas interface to verify children draw on scratch before a single opacity-bearing destination drawImage, preserving relative geometry. Do not independently alpha-blend each child onto the destination.
 - [ ] Add the group registration factory and strict render-recipe support without making it default/AI-visible yet. Extend declared schema matching only as required, retain unknown-key rejection (including `constructor`), all old adapter contracts and scalar behavior. Verify removing any required adapter hides the group from a custom registry catalog. Verify graph order group-before-subtitle and ordered groups.
 - [ ] Run focused tests then real-enabled `npm test` once. Commit Task 1 code/tests as `feat: add shared keyframe and visual group contracts`. Write `.superpowers/sdd/cycle5-task-1-report.md` with RED/GREEN, files, limits; no push.
@@ -82,8 +84,8 @@ split[base][group]; [group]format=rgba,
 drawbox=x=0:y=0:w=iw:h=ih:color=black@0:t=fill:replace=1,
 <ordered static drawbox replace=1 / literal drawtext with y_align=baseline>,
 format=gbrap,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(opacity(T-start))',
-scale=w='max(1,floor(W*scale(t-start)+0.5))':h='max(1,floor(H*scale(t-start)+0.5))':eval=frame:flags=bilinear[groupScaled];
-[base][groupScaled]overlay=x='floor(pivotX*(W-overlay_w)+0.5)':y='floor(pivotY*(H-overlay_h)+0.5)':format=auto:enable='gte(t,start)*lt(t,end)*gt(scale(t-start),0)'
+format=gbrap,scale=w='max(1,floor(W*scale(t-start)+0.5))':h='max(1,floor(H*scale(t-start)+0.5))':eval=frame:flags=bilinear,setsar=SOURCE_SAR[groupScaled];
+[base][groupScaled]overlay=x='floor(pivotX*(W-overlay_w)+0.5)':y='floor(pivotY*(H-overlay_h)+0.5)':eval=frame:format=rgb:alpha=straight:enable='gte(t,start)*lt(t,end)*gt(scale(t-start),0)'
 ```
 
 The bracket names, paths and expression syntax are software-owned; insert only normalized numbers/hex strings and expressions from SRTKeyframes. Alpha is applied before scale so geq has fixed dimensions. Preserve source sample aspect ratio and existing map/audio/finalization/cancellation paths. Dynamic overlay exact geometry must match shared rules; adjust generated syntax for installed FFmpeg without changing those semantics.
@@ -92,7 +94,7 @@ The bracket names, paths and expression syntax are software-owned; insert only n
 
 ## Task 3: Desktop playback, AI contract and compact history
 
-**Files:** Modify `app/剪辑.html`, `app/editor-layer-preview.js`, `app/editor-timeline.js`, `src/edit-capabilities.js`, `src/instruction-capabilities.js`, `tests/e2e/electron-main.js`, `package.json`. Create `tests/e2e/group-animation-flow.spec.js`; extend `tests/layer-preview.test.js` and `tests/instruction-capabilities.test.js` as needed.
+**Files:** Modify `app/剪辑.html`, `app/editor-layer-preview.js`, `app/editor-timeline.js`, `src/edit-capabilities.js`, `src/instruction-capabilities.js`, `tests/e2e/electron-main.js`, `package.json`. Create `tests/e2e/group-animation-flow.spec.js`; extend `tests/layer-preview.test.js`, `tests/instruction-capabilities.test.js` and catalog/script-loading expectations in `tests/edit-capabilities.test.js` as needed.
 
 **Interfaces:** Load keyframes and visual-group scripts before edit-capabilities. Reuse existing preview controller decoded media time, seeking guards and single callback. Draw group with `SRTVisualGroup.sample` and `draw`, using one scratch canvas owned by the preview draw target (not new persistent state). Enable createGroupRegistration in default catalog only after preview and export paths exist. Capability schema serialization must include actual nested layer/keyframe schema and strict enums, not string `[object Object]`; context must preserve validated nested arrays/values.
 
