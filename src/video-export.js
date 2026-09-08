@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { validateRenderRecipe, SUBTITLE_STYLE } = require('./render-recipe');
 const videoTransform = require('./video-transform');
 const visualLayers = require('./visual-layers');
+const { buildGroupFilter, groupTextFiles } = require('./visual-group-export');
 
 function codedError(code) {
   const error = new Error(code);
@@ -46,6 +47,8 @@ function buildVideoFilters(recipe, media) {
     } else if (step.capability === 'visual.text@1') {
       const g=visualLayers.geometry('text',step.params,media.displayWidth,media.displayHeight);
       g.lines.forEach((line,lineIndex)=>{ if(line.text) filters.push(`drawtext=font='${visualLayers.FONT_FAMILY}':textfile=layer-${stepIndex}-${lineIndex}.txt:expansion=none:fontsize=${g.fontSize}:x=${line.x}:y=${line.baseline}:y_align=baseline:fontcolor=0x${g.color.slice(1)}:enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`); });
+    } else if (step.capability === 'visual.group@1') {
+      filters.push(buildGroupFilter(step, stepIndex, media));
     } else if (step.capability === 'subtitle.burn@1') {
       filters.push('ass=captions.ass');
     }
@@ -228,10 +231,16 @@ function createVideoExportService(options) {
       const subtitleStep = recipe.steps.find((step) => step.capability === 'subtitle.burn@1');
       if (subtitleStep) await fsApi.writeFile(assPath, buildAss(subtitleStep, source), 'utf8');
       for (const [stepIndex, step] of recipe.steps.entries()) {
-        if (step.capability !== 'visual.text@1') continue;
-        const lines = visualLayers.geometry('text',step.params,source.displayWidth,source.displayHeight).lines;
-        for (const [lineIndex,line] of lines.entries()) if(line.text) {
-          await fsApi.writeFile(path.join(taskDir,`layer-${stepIndex}-${lineIndex}.txt`),line.text,'utf8');
+        if (step.capability === 'visual.text@1') {
+          const lines = visualLayers.geometry('text',step.params,source.displayWidth,source.displayHeight).lines;
+          for (const [lineIndex,line] of lines.entries()) if(line.text) {
+            await fsApi.writeFile(path.join(taskDir,`layer-${stepIndex}-${lineIndex}.txt`),line.text,'utf8');
+          }
+        } else if (step.capability === 'visual.group@1') {
+          const files = groupTextFiles(step, stepIndex, source);
+          for (const file of files) {
+            await fsApi.writeFile(path.join(taskDir, file.filename), file.text, 'utf8');
+          }
         }
       }
       current.phase = 'rendering';
