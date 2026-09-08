@@ -43,6 +43,32 @@ remain later Cycle 5 tasks.
 
 ## TDD evidence
 
+### Review follow-up: sparse keyframe slots
+
+The Cycle 5 review found that `Array.prototype.map()` skipped an absent first slot in a
+two-element keyframe array. `normalize()` therefore returned a sparse canonical value instead
+of throwing `KEYFRAMES_INVALID`, leaving `valueAt()` to fail later with an ordinary
+`TypeError`.
+
+RED command:
+
+```sh
+node --test tests/keyframes.test.js
+```
+
+Observed result before the production change: exit 1, 6 passed / 1 failed. The direct public
+`normalize()` regression failed with `Missing expected exception`.
+
+GREEN command:
+
+```sh
+node --test tests/keyframes.test.js tests/visual-group.test.js
+```
+
+Observed result after the production change: exit 0, **12/12 passed**. `normalize()` now checks
+that every keyframe array index is an own property before mapping; no other validation or API
+behavior was changed.
+
 ### Initial RED
 
 Command:
@@ -191,3 +217,9 @@ failures, which disappeared outside the sandbox.
 - The scratch canvas is caller-owned; Task 3 should provide one intrinsic-size transparent
   surface per draw path and continue to call `sample()` for the authoritative frame geometry.
 - No external calls, Electron runs, app changes, exporter changes, merges, or pushes were made.
+
+## Review follow-up files changed
+
+- `src/keyframes.js`
+- `tests/keyframes.test.js`
+- `.superpowers/sdd/cycle5-task-1-report.md`

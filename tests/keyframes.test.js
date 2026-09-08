@@ -40,6 +40,16 @@ test('rejects malformed times, values, easing, fields and frame counts', () => {
   }
 });
 
+test('rejects sparse keyframe arrays through the public normalization API', () => {
+  const sparse = [];
+  sparse.length = 2;
+  sparse[1] = { time: 1, value: 1 };
+
+  assert.throws(() => keyframes.normalize({ keyframes: sparse }, 0, 1, 2), {
+    code: 'KEYFRAMES_INVALID'
+  });
+});
+
 test('treats null and undefined duration as unknown but enforces known range duration', () => {
   const animation = { keyframes: [{ time: 0, value: 0 }, { time: 3, value: 1 }] };
   assert.deepEqual(keyframes.normalize(animation, 0, 1), keyframes.normalize(animation, 0, 1, null));

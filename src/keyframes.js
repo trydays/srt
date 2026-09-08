@@ -93,6 +93,9 @@
     if (!plain(value) || Object.keys(value).length !== 1 || !onlyKeys(value, ['keyframes'])
         || !Array.isArray(value.keyframes) || value.keyframes.length < 2
         || value.keyframes.length > 16) fail();
+    for (var frameIndex = 0; frameIndex < value.keyframes.length; frameIndex++) {
+      if (!Object.prototype.hasOwnProperty.call(value.keyframes, frameIndex)) fail();
+    }
     var previous = -Infinity;
     var frames = value.keyframes.map(function(frame, index) {
       if (!plain(frame) || !onlyKeys(frame, ['time', 'value', 'easing'])
