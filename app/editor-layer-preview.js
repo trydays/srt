@@ -1,5 +1,9 @@
 /* Transparent visual-overlay preview derived from the current render graph. */
 (function(root) {
+  var groupSurfaces = new WeakMap();
+  function isVisualNode(node) {
+    return node.type === 'visual.shape@1' || node.type === 'visual.text@1' || node.type === 'visual.group@1';
+  }
   function drawGraph(canvas, graph, time, width, height) {
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
@@ -7,11 +11,22 @@
     context.clearRect(0, 0, width, height);
     var count = 0;
     graph.nodes.forEach(function(node) {
-      if (node.type !== 'visual.shape@1' && node.type !== 'visual.text@1') return;
+      if (!isVisualNode(node)) return;
       var registration = root.editCapabilityRegistry.forNodeType(node.type);
       var params = registration.preview({ nodes: [node] }, time)[0];
       if (!params) return;
-      root.SRTVisualLayers.draw(context, node.type === 'visual.shape@1' ? 'shape' : 'text', params, width, height);
+      if (node.type === 'visual.group@1') {
+        var surface = groupSurfaces.get(canvas);
+        if (!surface) {
+          surface = canvas.ownerDocument.createElement('canvas');
+          groupSurfaces.set(canvas, surface);
+        }
+        // The adapter has evaluated keyframes; sample these scalars for intrinsic geometry only.
+        var frame = root.SRTVisualGroup.sample(params, node.range, time, width, height);
+        root.SRTVisualGroup.draw(context, surface, params, frame, width, height);
+      } else {
+        root.SRTVisualLayers.draw(context, node.type === 'visual.shape@1' ? 'shape' : 'text', params, width, height);
+      }
       count += 1;
     });
     canvas.hidden = count === 0;
@@ -47,9 +62,7 @@
   function render(time) {
     if (suspended || video.seeking || root.projectEditingState !== 'ready') { stop(); clear(); return false; }
     var snapshot = root.projectEditing.load(getActiveProjectId());
-    if (!snapshot.graph.nodes.some(function(node) {
-      return node.type === 'visual.shape@1' || node.type === 'visual.text@1';
-    })) { stop(); clear(); return false; }
+    if (!snapshot.graph.nodes.some(isVisualNode)) { stop(); clear(); return false; }
     if (video.readyState < 1 || root.projectVideoLoading) { stop(); clear(); return true; }
     var width = video.videoWidth || snapshot.document.timeline.canvas.width;
     var height = video.videoHeight || snapshot.document.timeline.canvas.height;

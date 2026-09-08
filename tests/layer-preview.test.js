@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const layers = require('../src/visual-layers');
+const groups = require('../src/visual-group');
 const capabilities = require('../src/edit-capabilities');
 
 function loadPreview(registrations) {
@@ -11,6 +12,7 @@ function loadPreview(registrations) {
   delete require.cache[modulePath];
   global.window = {
     SRTVisualLayers: layers,
+    SRTVisualGroup: groups,
     editCapabilityRegistry: { forNodeType(type) { return registrations[type]; } }
   };
   require(modulePath);
@@ -22,7 +24,8 @@ test.afterEach(() => { delete global.window; });
 function controllerHarness({ animationFrames = false } = {}) {
   const pending = new Map(); let next = 0;
   const handlers = {};
-  const context = { clearRect() {}, save() {}, restore() {}, fillRect() {}, fillText() {} };
+  const draws = [];
+  const context = { clearRect() {}, save() {}, restore() {}, fillRect() {}, fillText() {}, drawImage(...args) { draws.push({ alpha: this.globalAlpha, args }); } };
   const canvas = { width: 0, height: 0, hidden: true, getContext: () => context };
   const video = {
     videoWidth: 96, videoHeight: 64, readyState: 2, currentTime: 0,
@@ -43,8 +46,10 @@ function controllerHarness({ animationFrames = false } = {}) {
   }] };
   let snapshot = { document: { timeline: { canvas: { width: 96, height: 64 } } }, graph };
   const document = { getElementById: id => ({ previewVideo: video, previewLayerCanvas: canvas }[id]) };
+  document.createElement = () => ({ width: 0, height: 0, getContext: () => context });
+  canvas.ownerDocument = document;
   const window = {
-    document, SRTVisualLayers: layers, editCapabilityRegistry: capabilities.createCapabilityRegistry(),
+    document, SRTVisualLayers: layers, SRTVisualGroup: groups, editCapabilityRegistry: capabilities.createCapabilityRegistry(),
     projectEditingState: 'ready', projectVideoLoading: false,
     projectEditing: { load: () => snapshot }, projectEditingReady: new Promise(() => {}),
     addEventListener(type, fn) { (windowHandlers[type] ||= []).push(fn); },
@@ -55,7 +60,7 @@ function controllerHarness({ animationFrames = false } = {}) {
   const sandbox = vm.createContext({ window, document, getActiveProjectId: () => 'project' });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../app/editor-layer-preview.js'), 'utf8'), sandbox);
   return {
-    window, video, canvas, pending,
+    window, video, canvas, pending, draws,
     setSnapshot(value) { snapshot = value; },
     frame(time) {
       const entry = pending.entries().next().value;
@@ -89,6 +94,50 @@ test('drawGraph clears and draws active visual nodes in graph order', () => {
   assert.equal(preview.drawGraph(canvas, graph, 3, 100, 80), 0);
   assert.deepEqual(calls, [['clear', 0, 0, 100, 80]]);
   assert.equal(canvas.hidden, true);
+});
+
+test('group draw uses evaluated scalars once and reuses one scratch surface per target', () => {
+  const registration = capabilities.createGroupRegistration();
+  const props = groups.normalizeParams({ layers: [{ kind: 'shape', params: { width: .4 } }],
+    opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1, easing: 'ease-out' }] },
+    scale: { keyframes: [{ time: 0, value: .5 }, { time: 1, value: 1 }] } });
+  const graph = { nodes: [{ type: 'visual.group@1', range: { start: 2, end: 4 }, props }] };
+  const calls = [], surfaces = [];
+  const scratch = { clearRect() {}, save() {}, restore() {}, fillRect() {} };
+  const context = { clearRect() {}, save() {}, restore() {}, drawImage(...args) { calls.push([this.globalAlpha, ...args]); } };
+  const ownerDocument = { createElement(tag) { assert.equal(tag, 'canvas');
+    const surface = { getContext: () => scratch }; surfaces.push(surface); return surface;
+  } };
+  const canvas = { width: 0, height: 0, getContext: () => context, ownerDocument };
+  const preview = loadPreview({ 'visual.group@1': registration });
+  assert.equal(preview.drawGraph(canvas, graph, 2.5, 96, 64), 1);
+  assert.equal(calls[0][0], .875);
+  assert.deepEqual(calls[0].slice(2), [12, 8, 72, 48]);
+  preview.drawGraph(canvas, graph, 2.75, 64, 96);
+  assert.equal(surfaces.length, 1); assert.equal(surfaces[0].width, 64); assert.equal(surfaces[0].height, 96);
+  const second = { ...canvas };
+  preview.drawGraph(second, graph, 2.5, 96, 64);
+  assert.equal(surfaces.length, 2, 'different targets own separate scratch surfaces');
+});
+
+test('group-only decoded playback preserves one callback, seek guards, paused samples and ended cleanup', () => {
+  const h = controllerHarness();
+  const graph = { nodes: [{ type: 'visual.group@1', range: { start: 1, end: 3 },
+    props: groups.normalizeParams({ layers: [{ kind: 'shape', params: { width: .4 } }],
+      opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1 }] } }) }] };
+  h.setSnapshot({ ...h.window.projectEditing.load(), graph });
+  h.video.paused = false; h.video.emit('play');
+  assert.equal(h.pending.size, 1); h.frame(1.5);
+  assert.equal(h.draws.at(-1).alpha, .5);
+  h.video.currentTime = 1.8; h.video.emit('timeupdate');
+  assert.equal(h.draws.at(-1).alpha, .5); assert.equal(h.pending.size, 1);
+  h.video.seeking = true; h.video.emit('seeking'); h.video.emit('timeupdate');
+  assert.equal(h.pending.size, 0); assert.equal(h.canvas.hidden, true);
+  h.video.seeking = false; h.video.currentTime = 1.25; h.video.emit('seeked');
+  assert.equal(h.pending.size, 1); h.frame(1.25); assert.equal(h.draws.at(-1).alpha, .25);
+  h.video.paused = true; h.video.emit('pause'); assert.equal(h.pending.size, 0);
+  h.video.currentTime = 3; h.video.ended = true; h.video.emit('ended');
+  assert.equal(h.canvas.hidden, true); assert.equal(h.pending.size, 0);
 });
 
 test('drawGraph updates intrinsic portrait dimensions and clips through the canvas', () => {

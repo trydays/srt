@@ -6,7 +6,7 @@ const { CAPABILITY_SCHEMAS, getCapabilitySchema, buildPrompt, parseInstruction }
 test('exports only the current registry prompt catalog', () => {
   assert.deepEqual(CAPABILITY_SCHEMAS, createCapabilityRegistry().promptDefinitions());
   assert.deepEqual(CAPABILITY_SCHEMAS.map((definition) => definition.id), [
-    'subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1'
+    'subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1'
   ]);
   assert.equal(getCapabilitySchema('subtitle.generate@1').range.allowed, false);
   assert.equal(getCapabilitySchema('video.color.adjust@1').range.allowed, true);
@@ -44,6 +44,55 @@ test('buildPrompt preserves conversation history', () => {
   assert.match(prompt, /用户：做个效果/);
   assert.match(prompt, /助手：当前能力未接通/);
   assert.match(prompt, /用户当前请求：对/);
+});
+
+test('group prompt serializes the full strict schema and describes timing and additive limits', () => {
+  const prompt = buildPrompt('新增组合');
+  const definition = getCapabilitySchema('visual.group@1');
+  assert.ok(definition, 'group is available after both executable paths are wired');
+  assert.ok(prompt.includes(JSON.stringify(definition.params)), 'full nested schema reaches the CLI');
+  assert.doesNotMatch(prompt, /\[object Object\]|type: undefined|description: undefined/);
+  assert.match(prompt, /相对.*range.start/);
+  assert.match(prompt, /目标关键帧.*easing.*进入/);
+  assert.match(prompt, /固定.*pivotX.*pivotY/);
+  assert.match(prompt, /不能.*原位修改.*已有.*clarify/);
+  assert.match(prompt, /新增.*组合.*追加/);
+  const schema = definition.params;
+  assert.deepEqual(schema.properties.scale.oneOf[1].properties.keyframes.items.properties.easing.enum,
+    ['linear', 'ease-out', 'back-out']);
+  assert.equal(schema.properties.layers.items.oneOf[0].additionalProperties, false);
+});
+
+test('group context preserves nested valid payloads and omits undeclared or malformed values', () => {
+  const layers = [{ kind: 'shape', params: { color: '#123456', width: .4 } },
+    { kind: 'text', params: { text: '重点', fontSize: .08 } }];
+  const scale = { keyframes: [{ time: 0, value: .5 }, { time: 1, value: 1, easing: 'back-out' }] };
+  const prompt = buildPrompt('继续', [], { operations: [
+    { capability: 'visual.group@1', range: { start: 2, end: 4 }, params: { layers, scale, pivotX: .3, unexpected: 'secret-top' } },
+    { capability: 'visual.group@1', params: { layers: [{ kind: 'text', params: { text: 'ok', font: 'secret-nested' } }],
+      opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1, easing: 'secret-curve' }] }, scale: 1 } }
+  ] });
+  const context = prompt.split('当前编辑上下文：')[1];
+  assert.ok(context, 'valid nested operations enter the prompt');
+  assert.ok(context.includes(JSON.stringify(layers))); assert.ok(context.includes(JSON.stringify(scale)));
+  assert.match(context, /"pivotX":0.3/); assert.match(context, /"scale":1/);
+  assert.doesNotMatch(context, /secret-|unexpected|font"/);
+});
+
+test('parseInstruction accepts the nested group schema and rejects unknown child or easing fields', () => {
+  const recipe = { kind: 'instruction', steps: [{ capability: 'visual.group@1', range: { start: 1, end: 3 }, params: {
+    layers: [{ kind: 'text', params: { text: '重点' } }],
+    opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1, easing: 'ease-out' }] }
+  } }] };
+  assert.deepEqual(parseInstruction(JSON.stringify(recipe)), recipe);
+  for (const mutate of [
+    p => { p.layers[0].params.html = 'bad'; },
+    p => { p.opacity.keyframes[1].easing = 'custom'; },
+    p => { p.layers[0].id = 'existing-edit'; }
+  ]) {
+    const invalid = structuredClone(recipe); mutate(invalid.steps[0].params);
+    assert.throws(() => parseInstruction(JSON.stringify(invalid)), { code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT' });
+  }
 });
 
 test('buildPrompt defines incremental actions without removing applied context', () => {

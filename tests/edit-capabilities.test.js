@@ -25,7 +25,7 @@ test('exposes only registrations with every executable adapter and routing metad
 
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
-  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1']);
+  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1']);
   assert.equal(createCapabilityRegistry().promptDefinitions()[0].description,
     '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨');
   assert.equal(createCapabilityRegistry().get('subtitle.generate@1').definition.range.allowed, false);
@@ -74,10 +74,10 @@ test('normalizes and lowers independent visual layer capabilities', () => {
   }
 });
 
-test('keeps groups out of the default catalog and hides incomplete custom registrations', () => {
+test('enables executable groups in the default catalog and hides incomplete custom registrations', () => {
   const defaults = createCapabilityRegistry();
-  assert.equal(defaults.get('visual.group@1'), null);
-  assert.equal(defaults.promptDefinitions().some(item => item.id === 'visual.group@1'), false);
+  assert.equal(defaults.get('visual.group@1').nodeType, 'visual.group@1');
+  assert.equal(defaults.promptDefinitions().some(item => item.id === 'visual.group@1'), true);
   const complete = createGroupRegistration();
   assert.deepEqual(createCapabilityRegistry([complete]).promptDefinitions().map(item => item.id),
     ['visual.group@1']);
@@ -150,7 +150,7 @@ test('normalizes group duration after range and lowers all canonical adapters', 
     props: normalized.params });
   assert.deepEqual(registration.toTimeline(persisted), {
     editId: 'group-edit', transactionId: 'request', lane: 'visual', range: normalized.range,
-    label: '动画图层', summary: '2 个元素'
+    label: '动画图层', summary: '2 个元素', elementCount: 2, animated: true
   });
   assert.deepEqual(registration.preview({ nodes: [node] }, 2.5), [{
     ...normalized.params, opacity: .875, scale: 1
@@ -501,4 +501,12 @@ test('loads the same registry in a browser without Node dependencies', function(
     .get('subtitle.generate@1').definition.id, 'subtitle.generate@1');
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('video.color.adjust@1').definition.id, 'video.color.adjust@1');
+  assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
+    .get('visual.group@1').definition.id, 'visual.group@1');
+  const html = fs.readFileSync(path.join(__dirname, '../app/剪辑.html'), 'utf8');
+  const scripts = ['../src/visual-layers.js', '../src/keyframes.js', '../src/visual-group.js', '../src/edit-capabilities.js'];
+  scripts.forEach((script, index) => {
+    assert.ok(html.includes('src="' + script + '"'), script + ' loads in the editor');
+    if (index) assert.ok(html.indexOf(scripts[index - 1]) < html.indexOf(script));
+  });
 });

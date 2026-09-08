@@ -83,7 +83,7 @@ test('transform adapters revalidate persisted payloads and retain graph order an
 test('prompt describes booleans and carries true and false without undeclared context fields', () => {
   const prompt = buildPrompt('翻转', [], { operations: [step({ flipHorizontal: true,
     flipVertical: false, scale: 1.25, path: '/secret/movie', html: '<script>' })] });
-  assert.match(prompt, /flipHorizontal.*type: boolean.*default: false/);
+  assert.match(prompt, /"flipHorizontal":\{"type":"boolean","default":false/);
   assert.doesNotMatch(prompt, /undefined/);
   const context = prompt.split('当前编辑上下文：')[1];
   assert.ok(context);

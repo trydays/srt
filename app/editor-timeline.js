@@ -47,11 +47,13 @@ function aggregateVisualTimelineItems(items) {
     var aggregate = visual[item.transactionId];
     if (!aggregate) aggregate = visual[item.transactionId] = { editId: item.editId,
       editIds: [], transactionId: item.transactionId, lane: 'visual', range: { start: item.range.start, end: item.range.end },
-      label: '静态图层', summary: '' };
+      label: '静态图层', summary: '', elementCount: 0 };
     aggregate.editIds.push(item.editId);
     aggregate.range.start = Math.min(aggregate.range.start, item.range.start);
     aggregate.range.end = Math.max(aggregate.range.end, item.range.end);
-    aggregate.summary = aggregate.editIds.length + ' 个元素';
+    aggregate.elementCount += Number.isInteger(item.elementCount) && item.elementCount > 0 ? item.elementCount : 1;
+    if (item.animated) aggregate.label = '动画图层';
+    aggregate.summary = aggregate.elementCount + ' 个元素';
   });
   var emitted = {};
   return items.reduce(function(result, item) {

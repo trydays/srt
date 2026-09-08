@@ -404,7 +404,7 @@
         schemaVersion: 1,
         id: 'visual.group@1',
         label: '动画图层',
-        description: '把矩形和文字组合为共享透明度与缩放动画的平面图层',
+        description: '新增矩形和文字的平面组合，按步骤顺序追加；layers 按数组顺序从下到上绘制，子元素坐标与字号是原始视频宽高的比例。所有子元素共享组的半开 range、透明度 opacity 和统一缩放 scale。pivotX、pivotY 是固定缩放中心。opacity/scale 可为标量或关键帧；time 是相对组 range.start 的秒数，首帧必须为 0，时间严格递增，末帧不得超过组时长，末值保持到组结束。目标关键帧的 easing 描述进入该帧的插值段；linear 为线性，ease-out 为三次减速，back-out 为固定回弹；结果限制在属性范围内。只新增组合，不引用或替换已有编辑',
         params: visualGroup.PARAMETERS,
         range: { allowed: true, default: 'wholeTarget' }
       },
@@ -437,7 +437,9 @@
           lane: 'visual',
           range: clone(edit.range),
           label: '动画图层',
-          summary: params.layers.length + ' 个元素'
+          summary: params.layers.length + ' 个元素',
+          elementCount: params.layers.length,
+          animated: true
         };
       },
       preview: function(graph, time) {
@@ -482,7 +484,7 @@
 
   function createCapabilityRegistry(registrations) {
     var items = registrations === undefined
-      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration(), createShapeRegistration(), createTextRegistration()]
+      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration(), createShapeRegistration(), createTextRegistration(), createGroupRegistration()]
       : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);

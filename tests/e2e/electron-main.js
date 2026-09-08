@@ -94,6 +94,29 @@ const localCliService = {
         { capability: 'video.color.adjust@1', range: { start: 1, end: 3 }, params: { brightness: 0.2 } },
         { capability: 'subtitle.generate@1', params: {} }] : [transform] };
     }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'group-transactions-success') {
+      if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
+      if (/修改已有/.test(text)) return { kind: 'clarify', message: '当前能力未接通原位修改已有图层；只能新增组合。' };
+      const group = { capability: 'visual.group@1', range: { start: 1, end: 3.5 }, params: {
+        layers: [
+          { kind: 'shape', params: { x: .2, y: .2, width: .5, height: .5, color: '#CC3322' } },
+          { kind: 'text', params: { text: '重点', x: .25, y: .3, fontSize: .08, color: '#FFFFFF' } },
+          { kind: 'text', params: { text: 'MMMMMMMM\nMMMMMMMM', x: .9, y: .8, fontSize: .2, color: '#11CC33' } }
+        ], pivotX: .5, pivotY: .5,
+        opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1 }] },
+        scale: { keyframes: [{ time: 0, value: .5 }, { time: 1, value: 1, easing: 'back-out' }] }
+      } };
+      const second = { capability: 'visual.group@1', range: { start: 2, end: 4 }, params: {
+        layers: [
+          { kind: 'shape', params: { x: .4, y: .4, width: .25, height: .25, color: '#2244CC' } },
+          { kind: 'text', params: { text: '上层', x: .42, y: .42, fontSize: .06 } }
+        ]
+      } };
+      if (/错误第二步/.test(text)) return { kind: 'instruction', steps: [group,
+        { ...second, params: { ...second.params, scale: { keyframes: [{ time: 0, value: 1 }, { time: 0, value: 2 }] } } }] };
+      if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
+      return { kind: 'instruction', steps: /新增/.test(text) ? [second] : /两个/.test(text) ? [group, second] : [group] };
+    }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'layer-transactions-success') {
       if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
       const first = [
@@ -153,7 +176,7 @@ if (!useProductionEnvironment) {
       exportStartCount += 1;
       state.exportRequests = (state.exportRequests || []).concat([request]);
       onProgress({ jobId: request.jobId, phase: 'rendering', percent: 42 });
-      if (['color-transactions-success', 'transform-transactions-success', 'layer-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
+      if (['color-transactions-success', 'transform-transactions-success', 'layer-transactions-success', 'group-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
         return { jobId: request.jobId, status: 'completed', outputPath: request.outputPath };
       }
       if (exportStartCount === 1) {

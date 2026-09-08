@@ -1,4 +1,5 @@
-var capabilityRegistry = require('./edit-capabilities').createCapabilityRegistry();
+var capabilities = require('./edit-capabilities');
+var capabilityRegistry = capabilities.createCapabilityRegistry();
 var CAPABILITY_SCHEMAS = capabilityRegistry.promptDefinitions();
 
 var SCHEMA_BY_ID = (function() {
@@ -36,21 +37,7 @@ function rangeText(range) {
 
 function capabilityLine(definition) {
   var line = '- ' + definition.id + '：' + definition.description;
-  var properties = definition.params.properties || {};
-  var propertyNames = Object.keys(properties);
-  if (propertyNames.length) {
-    line += '；参数：' + propertyNames.map(function(name) {
-      var property = properties[name];
-      return name + '（type: ' + property.type
-        + (property.minimum === undefined ? '' : ', minimum: ' + property.minimum)
-        + (property.maximum === undefined ? '' : ', maximum: ' + property.maximum)
-        + (property.minLength === undefined ? '' : ', minLength: ' + property.minLength)
-        + (property.maxLength === undefined ? '' : ', maxLength: ' + property.maxLength)
-        + (property.pattern === undefined ? '' : ', pattern: ' + property.pattern)
-        + (property.default === undefined ? '' : ', default: ' + property.default)
-        + ', description: ' + property.description + '）';
-    }).join('；');
-  }
+  line += '；参数 JSON Schema：' + JSON.stringify(definition.params);
   if (definition.range && definition.range.allowed === false) {
     line += '；只作用于整段视频，不接受时间区间';
   } else if (definition.range && definition.range.allowed === true) {
@@ -103,14 +90,7 @@ function projectContextLines(context) {
     Object.keys(properties).forEach(function(name) {
       var schema = properties[name], value = supplied[name];
       if (!Object.prototype.hasOwnProperty.call(supplied, name)) return;
-      if (schema.type === 'boolean' && typeof value === 'boolean') params[name] = value;
-      if (schema.type === 'number' && finiteNumber(value)
-          && (schema.minimum === undefined || value >= schema.minimum)
-          && (schema.maximum === undefined || value <= schema.maximum)) params[name] = value;
-      if (schema.type === 'string' && typeof value === 'string'
-          && (schema.minLength === undefined || value.length >= schema.minLength)
-          && (schema.maxLength === undefined || value.length <= schema.maxLength)
-          && (schema.pattern === undefined || new RegExp(schema.pattern).test(value))) params[name] = value;
+      if (capabilities.matchesParameterSchema(schema, value)) params[name] = value;
     });
     var renderedRange = rangeText(operation.range);
     operationLines.push('- ' + (operationLines.length + 1) + '. ' + definition.id
@@ -156,6 +136,7 @@ function buildPrompt(userText, history, context) {
     '- 当前上下文中的已应用状态是已经完成的事实，不是待执行任务。',
     '- 未被本次动作替换的已应用状态由软件保留；“保留”或“继续”不表示重做，禁止为了保留旧操作而将其复制到 steps。',
     '- 调色、变换等画面操作会按顺序追加并叠加在已有结果上，重复输出就会再次执行；重新生成字幕按能力说明替换现有字幕轨。',
+    '- 当前不能原位修改、替换或引用已有图层/组合的编辑 ID；如果用户要求修改已有编辑而非新增，必须输出 clarify 说明当前能力未接通，不能把追加步骤声称为修改完成。',
     '- 只有用户本次明确要求再次执行或重复叠加旧操作时，才输出对应的新步骤；参数相同也要保留这次明确要求的新动作。',
     '- 用户仅要求保持现状、没有要求执行新动作时，输出 clarify 说明无需变更，不要编造步骤。'
   ]);
