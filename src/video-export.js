@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { validateRenderRecipe, SUBTITLE_STYLE } = require('./render-recipe');
 const videoTransform = require('./video-transform');
 const visualLayers = require('./visual-layers');
+const videoTexture = require('./video-texture');
 const { buildGroupFilter, groupTextFiles } = require('./visual-group-export');
 
 function codedError(code) {
@@ -25,6 +26,12 @@ function buildVideoFilters(recipe, media) {
       const enable = `enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`;
       filters.push(`colorchannelmixer=rr=${1 + 0.2 * temperature}:gg=1:bb=${1 - 0.2 * temperature}:${enable}`);
       filters.push(`eq=brightness=${0.25 * brightness}:saturation=${saturation}:contrast=${contrast}:${enable}`);
+    } else if (step.capability === 'video.noise@1') {
+      const filter = videoTexture.buildFilter('noise', step.params, step.range);
+      if (filter) filters.push(filter);
+    } else if (step.capability === 'video.vignette@1') {
+      const filter = videoTexture.buildFilter('vignette', step.params, step.range);
+      if (filter) filters.push(filter);
     } else if (step.capability === 'video.transform@1') {
       const g = videoTransform.geometry(step.params, media.displayWidth, media.displayHeight);
       const index = transformIndex++;
@@ -53,7 +60,7 @@ function buildVideoFilters(recipe, media) {
       filters.push('ass=captions.ass');
     }
   }
-  return filters.join(',');
+  return filters.length ? filters.join(',') : 'null';
 }
 
 function createVideoExportService(options) {

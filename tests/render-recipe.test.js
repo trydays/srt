@@ -1,6 +1,33 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCapabilityRegistry, createGroupRegistration } = require('../src/edit-capabilities');
+const { createCapabilityRegistry, createGroupRegistration, createNoiseRegistration,
+  createVignetteRegistration } = require('../src/edit-capabilities');
+
+test('validates canonical texture steps and preserves source-effect order', () => {
+  const recipe = validateRenderRecipe({ version: 1, steps: [
+    { capability: 'video.noise@1', range: { start: 0, end: 2 }, params: { amount: 0.5 } },
+    { capability: 'video.vignette@1', range: { start: 1, end: 3 }, params: { strength: 1 } }
+  ] });
+  assert.deepEqual(recipe.steps.map(step => step.capability), ['video.noise@1', 'video.vignette@1']);
+  assert.ok(Object.isFrozen(recipe.steps[0].params));
+  for (const step of [
+    { capability: 'video.noise@1', range: { start: 0, end: 2 }, params: { amount: 1, seed: 2 } },
+    { capability: 'video.vignette@1', range: { start: 0, end: 2 }, params: { strength: NaN } },
+    { capability: 'video.noise@1', range: { start: 2, end: 2 }, params: { amount: 1 } }
+  ]) assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }), { code: 'EXPORT_INVALID_RECIPE' });
+});
+
+test('builds texture render steps only with an explicit texture registry', () => {
+  const graph = { nodes: [
+    { type: 'source.video@1' },
+    { id: 'n', type: 'video.noise@1', range: { start: 0, end: 2 }, props: { amount: 0.4 } },
+    { id: 'v', type: 'video.vignette@1', range: { start: 0, end: 2 }, props: { strength: 0.6 } }
+  ] };
+  const registry = createCapabilityRegistry([createNoiseRegistration(), createVignetteRegistration()]);
+  assert.deepEqual(buildRenderRecipe(graph, registry).steps.map(step => step.capability),
+    ['video.noise@1', 'video.vignette@1']);
+  assert.throws(() => buildRenderRecipe(graph, createCapabilityRegistry()), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+});
 const { normalizeParams: normalizeGroup } = require('../src/visual-group');
 const {
   buildSubtitleRecipe,

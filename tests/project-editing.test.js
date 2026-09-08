@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { createProjectEditing } = require('../src/project-editing');
 const { SUBTITLE_STYLE } = require('../src/render-recipe');
 const { createCapabilityRegistry, createSubtitleRegistration, createColorRegistration,
-  createGroupRegistration } = require('../src/edit-capabilities');
+  createGroupRegistration, createNoiseRegistration, createVignetteRegistration } = require('../src/edit-capabilities');
 const { createRenderGraphCompiler } = require('../src/render-graph');
 const facts = { duration: 8, canvas: { width: 1280, height: 720 }, source: { id: 'main-video', assetId: 'asset-1' } };
 const recipe = { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
@@ -76,6 +76,42 @@ function colorStep(start = 2, end = 5) {
 function applySteps(f, steps, requestId, expectedRevision = 0) {
   return f.editing.applyRecipe({ projectId: 'p1', recipe: { kind: 'instruction', steps }, requestId, expectedRevision });
 }
+
+test('color grain and vignette share one transaction, survive reload and undo exactly', async () => {
+  const registry = createCapabilityRegistry([createColorRegistration(), createNoiseRegistration(),
+    createVignetteRegistration(), createSubtitleRegistration(), createGroupRegistration()]);
+  const f = fixture({ capabilityRegistry: registry }); f.init();
+  const steps = [colorStep(0, 8),
+    { capability: 'video.noise@1', range: { start: 1, end: 4 }, params: { amount: 0.6 } },
+    { capability: 'video.vignette@1', params: { strength: 0.8 } }];
+  const before = f.raw();
+  const result = await applySteps(f, steps, 'textures');
+  assert.equal(result.document.revision, 1);
+  assert.deepEqual(result.document.edits.map(edit => edit.transactionId), ['textures', 'textures', 'textures']);
+  assert.deepEqual(result.document.edits.map(edit => edit.range),
+    [{ start: 0, end: 8 }, { start: 1, end: 4 }, { start: 0, end: 8 }]);
+  assert.deepEqual(result.graph.nodes.map(node => node.type),
+    ['source.video@1', 'video.color@1', 'video.noise@1', 'video.vignette@1']);
+  assert.deepEqual(f.editing.aiContext('p1').operations.map(operation => operation.params),
+    [result.document.edits[0].payload, { amount: 0.6 }, { strength: 0.8 }]);
+  const reloaded = createProjectEditing({ storage: f.storage, storageKey: 'edits',
+    capabilityRegistry: registry }).load('p1');
+  assert.deepEqual(reloaded, f.editing.load('p1'));
+  assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
+    transactionId: 'textures' }).document.edits, []);
+  assert.notEqual(f.raw(), before);
+});
+
+test('invalid later texture leaves prior storage document and undo unchanged', async () => {
+  const registry = createCapabilityRegistry([createColorRegistration(), createNoiseRegistration()]);
+  const f = fixture({ capabilityRegistry: registry }); f.init();
+  await applySteps(f, [colorStep()], 'before');
+  const raw = f.raw(), writes = f.writes();
+  await assert.rejects(applySteps(f, [colorStep(), { capability: 'video.noise@1',
+    params: { amount: 0.5, seed: 1 } }], 'bad', 1), { code: 'RECIPE_INVALID_PARAM' });
+  assert.equal(f.raw(), raw); assert.equal(f.writes(), writes);
+  assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
+});
 test('appends color ranges and projects normalized payloads without runtime paths', async () => {
   const f = fixture(); f.init();
   const first = await applySteps(f, [colorStep()], 'request-1');

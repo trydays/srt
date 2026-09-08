@@ -11,9 +11,44 @@ const {
   createShapeRegistration,
   createTextRegistration,
   createGroupRegistration,
+  createNoiseRegistration,
+  createVignetteRegistration,
   matchesParameterSchema,
   validateSubtitlePayload
 } = require('../src/edit-capabilities');
+
+test('texture registrations expose complete opt-in source-effect adapters', async () => {
+  for (const [registration, expected] of [
+    [createNoiseRegistration(), { id: 'video.noise@1', editType: 'video.noise.adjustment@1', nodeType: 'video.noise@1', label: '画面颗粒', key: 'amount' }],
+    [createVignetteRegistration(), { id: 'video.vignette@1', editType: 'video.vignette.adjustment@1', nodeType: 'video.vignette@1', label: '画面暗角', key: 'strength' }]
+  ]) {
+    assert.equal(registration.definition.id, expected.id);
+    assert.deepEqual(registration.definition.params.required, [expected.key]);
+    assert.equal(registration.editType, expected.editType);
+    assert.equal(registration.nodeType, expected.nodeType);
+    assert.equal(registration.graphStage, 'sourceEffect');
+    const step = { range: { start: 1, end: 2 }, params: { [expected.key]: 0.5 } };
+    const edit = registration.toEdit(await registration.prepare(), step);
+    edit.id = 'texture'; edit.transactionId = 'tx';
+    const node = registration.toGraph(edit, { videoHead: 'source' });
+    assert.deepEqual(registration.preview({ nodes: [node] }, 1.5), [{ [expected.key]: 0.5 }]);
+    assert.deepEqual(registration.preview({ nodes: [node] }, 2), []);
+    assert.equal(registration.toTimeline(edit).lane, 'video-effect');
+    assert.equal(registration.toTimeline(edit).label, expected.label);
+    assert.equal(registration.toExport(node).capability, expected.id);
+  }
+});
+
+test('texture capabilities stay out of default registry and incomplete opt-in definitions are hidden', () => {
+  assert.equal(createCapabilityRegistry().get('video.noise@1'), null);
+  for (const factory of [createNoiseRegistration, createVignetteRegistration]) {
+    const complete = factory();
+    for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport']) {
+      const broken = { ...complete }; delete broken[adapter];
+      assert.deepEqual(createCapabilityRegistry([broken]).promptDefinitions(), []);
+    }
+  }
+});
 const { PARAMETER_SCHEMA } = require('../src/color-adjustment');
 const { SUBTITLE_STYLE } = require('../src/render-recipe');
 

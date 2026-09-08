@@ -11,10 +11,12 @@
     ? require('./visual-layers') : root && root.SRTVisualLayers;
   var visualGroup = typeof module === 'object' && module.exports
     ? require('./visual-group') : root && root.SRTVisualGroup;
-  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup);
+  var videoTexture = typeof module === 'object' && module.exports
+    ? require('./video-texture') : root && root.SRTVideoTexture;
+  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
@@ -375,6 +377,54 @@
     };
   }
 
+  function createTextureRegistration(kind) {
+    var noise = kind === 'noise';
+    var key = noise ? 'amount' : 'strength';
+    var capability = noise ? 'video.noise@1' : 'video.vignette@1';
+    var label = noise ? '画面颗粒' : '画面暗角';
+    return {
+      definition: {
+        schemaVersion: 1, id: capability, label: label,
+        description: noise ? '添加确定性的细颗粒画面效果' : '添加居中的圆形画面暗角',
+        params: { type: 'object', additionalProperties: false,
+          properties: noise ? videoTexture.NOISE_PARAMETERS : videoTexture.VIGNETTE_PARAMETERS,
+          required: [key] },
+        range: { allowed: true, default: 'wholeTarget' }
+      },
+      editMode: 'append',
+      editType: noise ? 'video.noise.adjustment@1' : 'video.vignette.adjustment@1',
+      nodeType: capability,
+      graphStage: 'sourceEffect',
+      prepare: async function() { return {}; },
+      toEdit: function(_prepared, step) {
+        return { type: noise ? 'video.noise.adjustment@1' : 'video.vignette.adjustment@1',
+          range: clone(step.range), payload: videoTexture.normalizeParams(kind, step.params) };
+      },
+      toGraph: function(edit, context) {
+        return { id: 'node-' + edit.id, type: capability, range: clone(edit.range),
+          inputs: [{ port: 'base', nodeId: context.videoHead }],
+          props: videoTexture.normalizeParams(kind, edit.payload) };
+      },
+      toTimeline: function(edit) {
+        var params = videoTexture.normalizeParams(kind, edit.payload);
+        return { editId: edit.id, transactionId: edit.transactionId, lane: 'video-effect',
+          range: clone(edit.range), label: label, summary: String(params[key]) };
+      },
+      preview: function(graph, time) {
+        return graph.nodes.filter(function(node) {
+          return node.type === capability && time >= node.range.start && time < node.range.end;
+        }).map(function(node) { return videoTexture.normalizeParams(kind, node.props); });
+      },
+      toExport: function(node) {
+        return { capability: capability, range: clone(node.range),
+          params: videoTexture.normalizeParams(kind, node.props) };
+      }
+    };
+  }
+
+  function createNoiseRegistration() { return createTextureRegistration('noise'); }
+  function createVignetteRegistration() { return createTextureRegistration('vignette'); }
+
   function createLayerRegistration(kind) {
     var text = kind === 'text', capability = 'visual.' + kind + '@1';
     return {
@@ -581,6 +631,8 @@
     createCapabilityRegistry: createCapabilityRegistry,
     createColorRegistration: createColorRegistration,
     createTransformRegistration: createTransformRegistration,
+    createNoiseRegistration: createNoiseRegistration,
+    createVignetteRegistration: createVignetteRegistration,
     createSubtitleRegistration: createSubtitleRegistration,
     createShapeRegistration: createShapeRegistration,
     createTextRegistration: createTextRegistration,

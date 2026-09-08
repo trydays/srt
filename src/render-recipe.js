@@ -11,10 +11,13 @@
   }, function() {
     return typeof module === 'object' && module.exports
       ? require('./visual-group') : root.SRTVisualGroup;
+  }, function() {
+    return typeof module === 'object' && module.exports
+      ? require('./video-texture') : root.SRTVideoTexture;
   });
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTRenderRecipe = api;
-})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform, getVisualLayers, getVisualGroup) {
+})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform, getVisualLayers, getVisualGroup, getVideoTexture) {
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
@@ -80,18 +83,22 @@
 
   function validateSourceEffectStep(step) {
     var transform = step.capability === 'video.transform@1';
+    var textureKind = step.capability === 'video.noise@1' ? 'noise'
+      : step.capability === 'video.vignette@1' ? 'vignette' : null;
     if (!hasOnlyKeys(step, ['capability', 'params', 'range'])
         || !isPlainObject(step.range) || !hasOnlyKeys(step.range, ['end', 'start'])
         || !Number.isFinite(step.range.start) || !Number.isFinite(step.range.end)
         || step.range.start < 0 || step.range.end <= step.range.start
         || !isPlainObject(step.params)
         || !hasOnlyKeys(step.params, transform ? ['flipHorizontal', 'flipVertical', 'scale']
-          : ['brightness', 'contrast', 'saturation', 'temperature'])) {
+          : textureKind ? [textureKind === 'noise' ? 'amount' : 'strength']
+            : ['brightness', 'contrast', 'saturation', 'temperature'])) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
     var params;
     try {
-      params = (transform ? getVideoTransform() : getColorAdjustment()).normalizeParams(step.params, false);
+      params = textureKind ? getVideoTexture().normalizeParams(textureKind, step.params)
+        : (transform ? getVideoTransform() : getColorAdjustment()).normalizeParams(step.params, false);
     } catch (_) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
@@ -160,6 +167,7 @@
         throw codedError('EXPORT_INVALID_RECIPE');
       }
       if (step.capability !== 'video.color.adjust@1' && step.capability !== 'video.transform@1'
+          && step.capability !== 'video.noise@1' && step.capability !== 'video.vignette@1'
           && step.capability !== 'visual.shape@1' && step.capability !== 'visual.text@1'
           && step.capability !== 'visual.group@1' && step.capability !== 'subtitle.burn@1') {
         throw codedError('EXPORT_UNSUPPORTED_OPERATION');

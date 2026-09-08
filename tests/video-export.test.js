@@ -9,7 +9,22 @@ const { PassThrough } = require('node:stream');
 const { promisify } = require('node:util');
 const { buildSubtitleRecipe, buildRenderRecipe, SUBTITLE_STYLE } = require('../src/render-recipe');
 const { createCapabilityRegistry } = require('../src/edit-capabilities');
-const { createVideoExportService } = require('../src/video-export');
+const { createVideoExportService, buildVideoFilters } = require('../src/video-export');
+
+test('lowers validated textures in order and keeps a valid neutral filter', () => {
+  const media = { displayWidth: 96, displayHeight: 64, sampleAspectRatio: '1/1' };
+  const filter = buildVideoFilters({ version: 1, steps: [
+    { capability: 'video.noise@1', range: { start: 1, end: 2 }, params: { amount: 0.5 } },
+    { capability: 'video.vignette@1', range: { start: 0, end: 3 }, params: { strength: 1 } }
+  ] }, media);
+  assert.equal((filter.match(/format=gbrp,geq=/g) || []).length, 2);
+  assert.ok(filter.indexOf('127.5') < filter.indexOf('pow(X-(W-1)/2'));
+  assert.match(filter, /gte\(T,1\)\*lt\(T,2\)/);
+  assert.equal(buildVideoFilters({ version: 1, steps: [
+    { capability: 'video.noise@1', range: { start: 0, end: 4 }, params: { amount: 0 } },
+    { capability: 'video.vignette@1', range: { start: 0, end: 4 }, params: { strength: 0 } }
+  ] }, media), 'null');
+});
 
 const execFileAsync = promisify(execFile);
 
