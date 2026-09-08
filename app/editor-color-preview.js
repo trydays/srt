@@ -11,23 +11,27 @@
     return element;
   }
 
+  function appendPrimitives(parent, params) {
+    var matrices = window.SRTColorAdjustment.buildPreviewMatrices(params);
+    primitive('feColorMatrix', { 'data-color-temperature': '', type: 'matrix',
+      values: matrices.temperature.join(' ') }, parent);
+    primitive('feColorMatrix', { 'data-color-encode': '', type: 'matrix',
+      values: matrices.rgbToYuv.join(' ') }, parent);
+    primitive('feColorMatrix', { 'data-color-tone': '', type: 'matrix',
+      values: matrices.planes.join(' ') }, parent);
+    primitive('feColorMatrix', { 'data-color-decode': '', type: 'matrix',
+      values: matrices.yuvToRgb.join(' ') }, parent);
+  }
+  window.SRTColorPreview = { appendPrimitives: appendPrimitives };
+
   function render() {
     filter.replaceChildren();
     video.style.filter = '';
+    if (window.sourcePreviewController && window.sourcePreviewController.render()) return;
     if (window.projectEditingState !== 'ready') return;
     var graph = window.projectEditing.load(getActiveProjectId()).graph;
     var colors = window.editCapabilityRegistry.get('video.color.adjust@1').preview(graph, video.currentTime);
-    colors.forEach(function(params) {
-      var matrices = window.SRTColorAdjustment.buildPreviewMatrices(params);
-      primitive('feColorMatrix', { 'data-color-temperature': '', type: 'matrix',
-        values: matrices.temperature.join(' ') }, filter);
-      primitive('feColorMatrix', { 'data-color-encode': '', type: 'matrix',
-        values: matrices.rgbToYuv.join(' ') }, filter);
-      primitive('feColorMatrix', { 'data-color-tone': '', type: 'matrix',
-        values: matrices.planes.join(' ') }, filter);
-      primitive('feColorMatrix', { 'data-color-decode': '', type: 'matrix',
-        values: matrices.yuvToRgb.join(' ') }, filter);
-    });
+    colors.forEach(function(params) { appendPrimitives(filter, params); });
     if (colors.length) video.style.filter = 'url(#previewColorFilter)';
   }
 

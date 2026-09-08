@@ -78,6 +78,8 @@
     .preview{width:100%;max-width:800px;aspect-ratio:16/9;background:#000;border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;overflow:hidden;box-shadow:var(--shadow-xs);flex-shrink:0}
     .preview video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none}
     .preview.has-video video{display:block}
+    #previewSourceCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1}
+    #previewSourceCanvas[hidden]{display:none}
     .preview.has-video .preview__overlay{opacity:0;transition:opacity 200ms var(--ease-out)}
     .preview.has-video:hover .preview__overlay,.preview.has-video.paused .preview__overlay{opacity:1}
     .preview__overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2}
@@ -272,6 +274,7 @@
       <div class="ws-scroll">
         <div class="preview" id="previewArea" data-od-id="video-preview">
           <video id="previewVideo" playsinline></video>
+          <canvas id="previewSourceCanvas" aria-hidden="true" hidden></canvas>
           <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
             <defs><filter id="previewColorFilter" color-interpolation-filters="sRGB"></filter></defs>
           </svg>
@@ -318,6 +321,7 @@
   <script src="subtitle-draft-state.js"></script>
   <script src="editor-project-editing.js"></script>
   <script src="editor-color-preview.js"></script>
+  <script src="editor-source-preview.js"></script>
   <script src="editor-subtitles.js"></script>
   <script src="editor-timeline.js"></script>
   <script src="editor-export.js"></script>

@@ -83,6 +83,17 @@ const localCliService = {
         { capability: 'fade.out@1', params: { start: 18, end: 20 } }
       ] };
     }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'transform-transactions-success') {
+      if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
+      const transform = { capability: 'video.transform@1', range: { start: 1, end: 3 },
+        params: { flipHorizontal: true, scale: 1.25 } };
+      if (/错误第二步/.test(text)) return { kind: 'instruction', steps: [transform,
+        { capability: 'video.transform@1', params: { flipVertical: 'true' } }] };
+      if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
+      return { kind: 'instruction', steps: /字幕/.test(text) ? [transform,
+        { capability: 'video.color.adjust@1', range: { start: 1, end: 3 }, params: { brightness: 0.2 } },
+        { capability: 'subtitle.generate@1', params: {} }] : [transform] };
+    }
     if (['color-transactions', 'color-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
       if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
       const color = { capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
@@ -124,7 +135,7 @@ if (!useProductionEnvironment) {
       exportStartCount += 1;
       state.exportRequests = (state.exportRequests || []).concat([request]);
       onProgress({ jobId: request.jobId, phase: 'rendering', percent: 42 });
-      if (process.env.SRT_E2E_EFFECT_RESULT === 'color-transactions-success') {
+      if (['color-transactions-success', 'transform-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
         return { jobId: request.jobId, status: 'completed', outputPath: request.outputPath };
       }
       if (exportStartCount === 1) {
