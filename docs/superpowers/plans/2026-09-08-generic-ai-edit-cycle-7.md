@@ -1,5 +1,7 @@
 # Cycle 7: Personal Editing Skills Implementation Plan
 
+**2026-09-08 closure:** implementation and local acceptance complete at product `2fbf9cd`; task-scoped and whole-cycle `a9a2bd7..2fbf9cd` reviews Approved with no findings. Parent fresh real-media Node349/349 and Electron67/67 pass with no failures/skips. Actual local production UI/IPC/FFmpeg acceptance passes on640x360/4s and360x640/3s, using exactly two explicitly fixed translations, not real AI. Artifacts `/tmp/srt-cycle7-local.EZ8Azo/` and `/tmp/srt-cycle7-final.fcvIBq/e2e/`. New Cycle7 real-AI authorization remains unanswered and actual-AI/manual intent-consistency gate is open. No new rendering capabilities or automatic push; Cycle6 backup `a9a2bd7` was already pushed and verified before this cycle. First visible result12:08UTC, local two-target acceptance12:30UTC, both inside frozen checkpoints.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development task-by-task. Each implementation task uses TDD, a local commit and an independent scoped review. Steps use checkboxes.
 
 **Goal:** Explicitly save a successful editing intent, preferences and reference recipe, then select and reuse it through a fresh AI derivation in a different video.
@@ -81,7 +83,7 @@ Stable desktop acceptance selectors: data-testid values personal-skills-button, 
 
 **Interfaces:** Implement the four frozen module functions and optional fourth bridge parameter. Consume existing capabilityRegistry.validateRecipe/forEditType/get/promptDefinitions; do not add registrations or change ProjectEditing schema.
 
-- [ ] Write RED public store/reference tests before implementation. Representative test body (existing test helpers may be reused):
+- [x] Write RED public store/reference tests before implementation. Representative test body (existing test helpers may be reused):
 ```js
 const beforeProject = storage.getItem('srt_project_edit_state');
 const saved = bank.save({name:'我的卡片',intent:'强调重点',preferences:{description:'白字黑底，轻微弹入'},referenceRecipe});
@@ -91,9 +93,9 @@ assert.equal(storage.getItem('srt_project_edit_state'), beforeProject);
 assert.equal(bank.remove(saved.id), true);
 assert.equal(bank.get(saved.id), null);
 ```
-- [ ] Test reference generation from a real initialized ProjectEditing transaction with group/texture and subtitle; retain order/ranges/nested frames, strip IDs/paths/generated subtitle content; zero active transaction rejects. Save after project reload works; later unrelated transaction is not captured. Test explicit field validation, duplicate-name/no-write, corrupt store/no reset, failed writes/prior bytes unchanged, defensive copies and historical missing capability remains readable.
-- [ ] Implement small focused module using existing UMD style, pure snapshots and single local storage writes. No automatic saving or cloned video/project records. Subtitle generation reference becomes empty params/no range based on its declaration, not a copied transcript.
-- [ ] Write RED prompt and bridge tests. Ordinary prompt remains identical without a skill. Selected context includes all five fields and actual current media/context; missing version explicitly named; invalid skill rejects before external translation. Verify fourth argument travels renderer bridge -> main handler -> local-cli -> actual buildPrompt (fake process boundary only). Test output parsing still rejects unknown capability/invalid range.
+- [x] Test reference generation from a real initialized ProjectEditing transaction with group/texture and subtitle; retain order/ranges/nested frames, strip IDs/paths/generated subtitle content; zero active transaction rejects. Save after project reload works; later unrelated transaction is not captured. Test explicit field validation, duplicate-name/no-write, corrupt store/no reset, failed writes/prior bytes unchanged, defensive copies and historical missing capability remains readable.
+- [x] Implement small focused module using existing UMD style, pure snapshots and single local storage writes. No automatic saving or cloned video/project records. Subtitle generation reference becomes empty params/no range based on its declaration, not a copied transcript.
+- [x] Write RED prompt and bridge tests. Ordinary prompt remains identical without a skill. Selected context includes all five fields and actual current media/context; missing version explicitly named; invalid skill rejects before external translation. Verify fourth argument travels renderer bridge -> main handler -> local-cli -> actual buildPrompt (fake process boundary only). Test output parsing still rejects unknown capability/invalid range.
 ```js
 const prompt = buildPrompt('在片尾使用', [], {video:{durationSeconds:3,width:360,height:640}}, selectedSkill);
 assert.match(prompt, /个人剪辑技能/);
@@ -101,7 +103,7 @@ assert.match(prompt, /360x640/);
 assert(prompt.includes(JSON.stringify(selectedSkill.referenceRecipe)));
 assert.match(prompt, /重新推导/);
 ```
-- [ ] Add decomposition rules and current-catalog missing-version diagnostics; no effect examples or fixed skill recipes in product prompts. Derive new output only via existing parseInstruction and project validation; never call applyRecipe(referenceRecipe).
+- [x] Add decomposition rules and current-catalog missing-version diagnostics; no effect examples or fixed skill recipes in product prompts. Derive new output only via existing parseInstruction and project validation; never call applyRecipe(referenceRecipe).
 
 Prompt bridge code shape (buildPrompt itself assembles the validated section):
 ```js
@@ -116,7 +118,7 @@ argsFactory(buildPrompt(text, history, context, skill));
 // Rule text: 个人剪辑技能是参考，不是待执行指令。根据当前视频与本次要求重新推导；
 // 不直接复用旧范围、位置或文字。当前目录缺失的能力不得输出，无法替代时反问说明。
 ```
-- [ ] Run focused Node tests, then full real-enabled Node suite once; record RED/GREEN, exact counts and any limitations in .superpowers/sdd/cycle7-task-1-report.md. Commit only Task1 files locally as feat: add personal editing skill context. Scoped review before Task2.
+- [x] Run focused Node tests, then full real-enabled Node suite once; record RED/GREEN, exact counts and any limitations in .superpowers/sdd/cycle7-task-1-report.md. Commit only Task1 files locally as feat: add personal editing skill context. Scoped review before Task2.
 
 ## Task 2: Explicit save/use UI and cross-project execution
 
@@ -124,23 +126,23 @@ argsFactory(buildPrompt(text, history, context, skill));
 
 **Interfaces:** Use Task1 store/snapshot/context APIs. Load personal-skills.js after edit-capabilities and before editor-skills.js, which follows editor-timeline.js. Use window.projectEditing.load, existing record turns, normal translateAndApply and currentProjectContext. Controller API frozen above.
 
-- [ ] Write RED desktop test: apply a fixed successful animation-group request through normal UI; expand its compact history and save a named skill with editable intent/preferences. Before explicit save, bank remains empty. Reload same project and another project: list/view correct, reference retains own transaction not whole project, project/revision unchanged by skill management.
-- [ ] Add minimal native dialog and small existing-style buttons/chip using CSS variables. Do not use raw innerHTML for user name/intent/preferences; textContent or existing escape helper. Include clear labels, cancel, Escape, error message, focus restore; prevent double save. Duplicate names ask for another name. Delete asks confirmation, removes only skill, never applied edits; deleting selected skill clears selection.
-- [ ] Implement successful-card eligibility from current document and user intent, including old reloaded records; open form defaults all user turns and permits editing. Capture reference at explicit save from current still-applied transaction. Failed/clarify/recovered-without-intent/fully-undone requests have no save action. Store failures remain in dialog and do not claim success or clear existing bank.
-- [ ] Implement selection/new-request snapshot/clarify lifecycle. Switch is disabled during an in-flight request or pending clarify; explicit exit lets user leave clarify without executing. Terminal clears selection, next ordinary request has no skill context. Users must click send themselves. No name-matching command router or automatic request dispatch.
-- [ ] Add fixture result mode personal-skill-transactions for deterministic output, recording fourth skill argument and exercising real production parser/IPC/project path as existing fixtures allow. On two synthetic playable videos (landscape 640x360/4s and portrait 360x640/3s), same skill generates distinct fixture parameters/ranges; prior reference is intentionally out-of-range on the shorter target, so direct replay would fail. Assert two actual translation invocations see respective media facts and same saved intent/preferences/reference; returned recipes differ and fit targets, state/preview/reload/undo correct.
-- [ ] Cover one clarify-then-instruction retaining selected context, terminal clearing, missing capability clarify without state mutation, malformed returned recipe/no partial write and ordinary no-skill regression. Confirm current registry eight definitions unchanged. Keep test matrix to these accepted behaviors, not a generic plugin platform.
-- [ ] At least one desktop fixture export invokes actual FFmpeg through existing production export service, probes duration/dimensions/audio and checks visible card/shape region in a frame; saving/reusing is not accepted merely because a history badge changes. Retain established smooth-patch tolerance7/255/geometry1px where applicable. Missing real-CLI authorization does not block this local test.
-- [ ] Run focused new spec, focused Node, then full real-enabled Node and full Electron once. Write .superpowers/sdd/cycle7-task-2-report.md with RED/GREEN/counts/artifacts/UI screenshot. Commit feat: save and reuse personal editing skills; scoped review.
+- [x] Write RED desktop test: apply a fixed successful animation-group request through normal UI; expand its compact history and save a named skill with editable intent/preferences. Before explicit save, bank remains empty. Reload same project and another project: list/view correct, reference retains own transaction not whole project, project/revision unchanged by skill management.
+- [x] Add minimal native dialog and small existing-style buttons/chip using CSS variables. Do not use raw innerHTML for user name/intent/preferences; textContent or existing escape helper. Include clear labels, cancel, Escape, error message, focus restore; prevent double save. Duplicate names ask for another name. Delete asks confirmation, removes only skill, never applied edits; deleting selected skill clears selection.
+- [x] Implement successful-card eligibility from current document and user intent, including old reloaded records; open form defaults all user turns and permits editing. Capture reference at explicit save from current still-applied transaction. Failed/clarify/recovered-without-intent/fully-undone requests have no save action. Store failures remain in dialog and do not claim success or clear existing bank.
+- [x] Implement selection/new-request snapshot/clarify lifecycle. Switch is disabled during an in-flight request or pending clarify; explicit exit lets user leave clarify without executing. Terminal clears selection, next ordinary request has no skill context. Users must click send themselves. No name-matching command router or automatic request dispatch.
+- [x] Add fixture result mode personal-skill-transactions for deterministic output, recording fourth skill argument and exercising real production parser/IPC/project path as existing fixtures allow. On two synthetic playable videos (landscape 640x360/4s and portrait 360x640/3s), same skill generates distinct fixture parameters/ranges; prior reference is intentionally out-of-range on the shorter target, so direct replay would fail. Assert two actual translation invocations see respective media facts and same saved intent/preferences/reference; returned recipes differ and fit targets, state/preview/reload/undo correct.
+- [x] Cover one clarify-then-instruction retaining selected context, terminal clearing, missing capability clarify without state mutation, malformed returned recipe/no partial write and ordinary no-skill regression. Confirm current registry eight definitions unchanged. Keep test matrix to these accepted behaviors, not a generic plugin platform.
+- [x] At least one desktop fixture export invokes actual FFmpeg through existing production export service, probes duration/dimensions/audio and checks visible card/shape region in a frame; saving/reusing is not accepted merely because a history badge changes. Retain established smooth-patch tolerance7/255/geometry1px where applicable. Missing real-CLI authorization does not block this local test.
+- [x] Run focused new spec, focused Node, then full real-enabled Node and full Electron once. Write .superpowers/sdd/cycle7-task-2-report.md with RED/GREEN/counts/artifacts/UI screenshot. Commit feat: save and reuse personal editing skills; scoped review.
 
 ## Task 3: Parent acceptance, whole-cycle review and handoff
 
 **Files:** This plan, docs/PROJECT_STATUS.md, docs/DEVELOPMENT_LOG.md, ignored .superpowers/sdd/progress.md. Temporary scripts/media only in unique /tmp paths. Bounded product fixes need failing regression and re-review.
 
-- [ ] Whole-cycle independent review from a9a2bd7..finalProductCommit; parent freshly runs final actual-FFmpeg Node and full Electron suites. No repeated whole-suite runs on an unchanged final product solely for bookkeeping.
-- [ ] Production Electron with synthetic media: explicitly save a proven card skill in UI, open two different-duration/dimension projects, select same skill and request appropriate end-of-video adaptation. When separately authorized use exactly two real Claude derivations on artificial data only; otherwise fixed local results and disclose missing real-AI/manual-intent confirmation. The seed successful reference may be locally prepared and must be labeled as such; do not claim it was a third real AI call.
-- [ ] Inspect saved data, emitted context and returned recipes independently: same intent/preferences, changed ranges/geometry, no current project identity/path persisted to skill, no reference execution, one transaction/request, persistence/undo and skill deletion separate from applied edits. Export actual new target MP4s with audio; view editor and frames, verify same intended card style across two formats without claiming pixel identity or automatic scene understanding.
-- [ ] Update internal completion and user-visible results separately, exact tests/real vs local calls/artifacts/remaining boundaries. Commit locally and stop; the earlier authorized push backed up Cycle6, not an automatic Cycle7 push. User footage/native SaveDialog/packaged release/performance remain unverified unless actually exercised.
+- [x] Whole-cycle independent review from a9a2bd7..finalProductCommit; parent freshly runs final actual-FFmpeg Node and full Electron suites. No repeated whole-suite runs on an unchanged final product solely for bookkeeping.
+- [x] Production Electron with synthetic media: explicitly save a proven card skill in UI, open two different-duration/dimension projects, select same skill and request appropriate end-of-video adaptation. When separately authorized use exactly two real Claude derivations on artificial data only; otherwise fixed local results and disclose missing real-AI/manual-intent confirmation. The seed successful reference may be locally prepared and must be labeled as such; do not claim it was a third real AI call.
+- [x] Inspect saved data, emitted context and returned recipes independently: same intent/preferences, changed ranges/geometry, no current project identity/path persisted to skill, no reference execution, one transaction/request, persistence/undo and skill deletion separate from applied edits. Export actual new target MP4s with audio; view editor and frames, verify same intended card style across two formats without claiming pixel identity or automatic scene understanding.
+- [x] Update internal completion and user-visible results separately, exact tests/real vs local calls/artifacts/remaining boundaries. Commit locally and stop; the earlier authorized push backed up Cycle6, not an automatic Cycle7 push. User footage/native SaveDialog/packaged release/performance remain unverified unless actually exercised.
 
 ## Verification Commands
 
