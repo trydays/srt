@@ -73,6 +73,8 @@ window.personalSkillController = {
 
 Small hooks in editor-timeline.js guard optional controller presence; final async controller initialization calls refreshRequestCards(). record.skillContext is request-local/persistable short reference context only when selected; normal records unchanged. Request creation captures selection; translateAndApply passes the same record.skillContext in all turns. Exiting pending clarification clears pendingClarifyRecord/Card plus selection without executing or deleting history. Saved skills remain available after restart and opening another project.
 
+Stable desktop acceptance selectors: data-testid values personal-skills-button, personal-skills-dialog, save-as-skill, skill-save-dialog, skill-name, skill-intent, skill-preferences, skill-save, skill-cancel, personal-skill-item (also data-skill-id), skill-view, skill-use, skill-delete, selected-skill, selected-skill-clear, skill-exit-clarify. View/use/delete are scoped to their list item; dialogs have explicit 关闭/取消 buttons. Rendering uses readable effect labels, not raw recipe JSON.
+
 ## Task 1: Skill storage, reference snapshots and generated prompt
 
 **Files:** Create src/personal-skills.js, tests/personal-skills.test.js. Modify src/instruction-capabilities.js, src/local-cli.js, main.js, preload.js; targeted tests/instruction-capabilities.test.js, tests/local-cli.test.js, tests/main-entry.test.js only if its IPC tests require updates. No app UI changes.
