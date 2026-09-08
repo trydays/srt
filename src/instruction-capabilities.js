@@ -141,10 +141,16 @@ function buildPrompt(userText, history, context) {
   });
   lines = lines.concat([
     '每次只输出一个 JSON 对象，只能是下面两种之一：',
-    '1. 能力未接通或信息不足：{"kind":"clarify","message":"清楚说明当前不可用能力或追问内容"}',
+    '1. 能力未接通、信息不足或无需变更：{"kind":"clarify","message":"清楚说明当前不可用能力、追问内容或无需变更的原因"}',
     '2. 可以执行：{"kind":"instruction","steps":[{"capability":"能力id","range":{"start":开始秒数,"end":结束秒数},"params":{}}]}',
     'instruction 的 steps 是一个或多个步骤组成的数组；每一步只使用 capability、可选的顶层 range 和 params。',
-    'instruction 必须严格符合能力目录；不要输出命令、Markdown、代码块或额外解释。'
+    'instruction 必须严格符合能力目录；不要输出命令、Markdown、代码块或额外解释。',
+    '执行语义：instruction.steps 只包含本次需要新执行的动作，不是完整项目配方。',
+    '- 当前上下文中的已应用状态是已经完成的事实，不是待执行任务。',
+    '- 未被本次动作替换的已应用状态由软件保留；“保留”或“继续”不表示重做，禁止为了保留旧操作而将其复制到 steps。',
+    '- 调色、变换等画面操作会按顺序追加并叠加在已有结果上，重复输出就会再次执行；重新生成字幕按能力说明替换现有字幕轨。',
+    '- 只有用户本次明确要求再次执行或重复叠加旧操作时，才输出对应的新步骤；参数相同也要保留这次明确要求的新动作。',
+    '- 用户仅要求保持现状、没有要求执行新动作时，输出 clarify 说明无需变更，不要编造步骤。'
   ]);
 
   var contextLines = projectContextLines(context);

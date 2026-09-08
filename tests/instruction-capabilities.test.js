@@ -32,7 +32,7 @@ test('buildPrompt teaches typed color parameters, ranges and multi-step output w
   assert.match(prompt, /一个或多个步骤/);
   assert.doesNotMatch(prompt, /color\.grade|fade\.|texture\.grain|vignette/);
   assert.doesNotMatch(prompt, /冷色.*能力|淡入.*能力/);
-  assert.doesNotMatch(prompt, /撤销|叠加/);
+  assert.doesNotMatch(prompt, /撤销/);
   assert.doesNotMatch(prompt, /冷色.*temperature|复古.*saturation|效果名.*参数/);
 });
 
@@ -44,6 +44,36 @@ test('buildPrompt preserves conversation history', () => {
   assert.match(prompt, /用户：做个效果/);
   assert.match(prompt, /助手：当前能力未接通/);
   assert.match(prompt, /用户当前请求：对/);
+});
+
+test('buildPrompt defines incremental actions without removing applied context', () => {
+  const context = { revision: 1, operations: [{ capability: 'video.transform@1',
+    range: { start: 1, end: 3 }, params: { flipHorizontal: true, flipVertical: false, scale: 1.25 } }] };
+  for (const current of [undefined, context]) {
+    const prompt = buildPrompt('保留刚才已经执行的编辑，在第3到4秒新增垂直翻转', [], current);
+    assert.match(prompt, /steps 只包含本次需要新执行的动作，不是完整项目配方/);
+    assert.match(prompt, /已应用状态.*不是待执行任务/);
+    assert.match(prompt, /禁止为了保留旧操作而将其复制到 steps/);
+    assert.match(prompt, /未被本次动作替换的已应用状态由软件保留/);
+    assert.match(prompt, /画面操作.*按顺序追加.*叠加/);
+    assert.match(prompt, /重新生成字幕.*替换.*字幕轨/);
+    if (current) {
+      assert.match(prompt, /当前 revision：1/);
+      assert.match(prompt, /已应用操作（按顺序）：\n.*video\.transform@1.*"flipHorizontal":true.*"flipVertical":false.*"scale":1.25/);
+    }
+  }
+});
+
+test('buildPrompt permits explicitly requested repeated effects with identical parameters', () => {
+  const prompt = buildPrompt('再做一次刚才的画面变换');
+  assert.match(prompt, /只有用户本次明确要求.*再次执行.*重复叠加/);
+  assert.match(prompt, /参数相同也要保留这次明确要求的新动作/);
+});
+
+test('buildPrompt keeps an unchanged project on clarify without inventing a step', () => {
+  const prompt = buildPrompt('就保持现在这样');
+  assert.match(prompt, /信息不足或无需变更.*"kind":"clarify"/);
+  assert.match(prompt, /仅要求保持现状.*没有要求执行新动作.*clarify.*不要编造步骤/);
 });
 
 test('buildPrompt includes revision, media facts, ordered edit metadata and capped subtitles', () => {
@@ -73,7 +103,7 @@ test('buildPrompt includes revision, media facts, ordered edit metadata and capp
 
 test('buildPrompt omits malformed or absent project context', () => {
   const prompt = buildPrompt('加字幕', 'not history', { revision: '4', edits: [{}] });
-  assert.doesNotMatch(prompt, /当前 revision|已应用编辑|对话历史/);
+  assert.doesNotMatch(prompt, /当前 revision|已应用编辑（按顺序）：|对话历史：/);
 });
 
 test('buildPrompt serializes ordered applied operations using only declared scalar parameters', () => {

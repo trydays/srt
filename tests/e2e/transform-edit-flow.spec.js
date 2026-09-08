@@ -20,9 +20,14 @@ async function openEditor(window, testInfo) {
   await expect.poll(() => window.locator('#previewVideo').getAttribute('src')).toBeTruthy();
   await metadata(window);
 }
-async function submit(window, text) {
+async function submit(window, text, { instruction = 'success', timeline = 'success' } = {}) {
   await window.locator('.input-editor').fill(text); await window.locator('#generateBtn').click();
-  await expect(window.getByTestId('request-status-card').last()).toHaveClass(/is-collapsed/);
+  const card = window.getByTestId('request-status-card').last();
+  await expect(card.getByTestId('instruction-status')).toHaveAttribute('data-state', instruction);
+  await expect(card.locator('[data-testid="timeline-status"], [data-testid="subtitle-status"]'))
+    .toHaveAttribute('data-state', timeline);
+  if (instruction === 'success' && timeline === 'success') await expect(card).toHaveClass(/is-collapsed/);
+  else await expect(card).not.toHaveClass(/is-collapsed/);
 }
 function business(document) { const { revision, ...rest } = document; return rest; }
 
@@ -47,21 +52,36 @@ test.describe('ranged transform editing', () => {
         payload: SRTVideoTransform.normalizeParams({ flipHorizontal: true, scale: 0.5 }, true) }, { videoHead: 'source' });
       compositor.render(source, { nodes: [node] }, 2, 64, 96);
       document.getElementById('previewOverlay').style.display = 'none';
-      const bounds = document.getElementById('previewArea').getBoundingClientRect();
-      return { width: bounds.width, height: bounds.height };
+      const pixel = (x, y) => Array.from(canvas.getContext('2d').getImageData(x, y, 1, 1).data);
+      const intrinsic = [pixel(8, 48), pixel(25, 48), pixel(39, 48)];
+      // Keep reference colors in the same Canvas-to-display-to-screenshot path:
+      // display color conversion can shift screenshot RGB from intrinsic RGB.
+      source.style.cssText = 'position:absolute;left:8px;top:8px;width:32px;height:48px;z-index:3;pointer-events:none';
+      const preview = document.getElementById('previewArea'); preview.appendChild(source);
+      const bounds = preview.getBoundingClientRect(), reference = source.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height, intrinsic,
+        reference: { left: reference.left - bounds.left, top: reference.top - bounds.top,
+          width: reference.width, height: reference.height } };
     });
-    const screenshot = await window.locator('#previewArea').screenshot();
+    expect(box.intrinsic).toEqual([[0, 0, 0, 255], [32, 192, 64, 255], [208, 32, 32, 255]]);
+    const screenshot = await window.locator('#previewArea').screenshot({ path: testInfo.outputPath('portrait-in-editor.png') });
     const samples = await window.evaluate(async ({ data, box }) => {
       const image = new Image(); image.src = 'data:image/png;base64,' + data; await image.decode();
       const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
       const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0);
       // The intrinsic portrait frame spans H*2/3 inside a W-wide 16:9 container.
       const contentWidth = (box.height - 2) * 2 / 3;
-      const at = x => Array.from(ctx.getImageData(Math.round(x / box.width * image.width), Math.round(image.height / 2), 1, 1).data);
-      return [at(box.width * 0.1), at(box.width / 2 - contentWidth * 0.4),
-        at(box.width / 2 - contentWidth * 0.1), at(box.width / 2 + contentWidth * 0.1)];
+      const at = (x, y = box.height / 2) => Array.from(ctx.getImageData(
+        Math.round(x / box.width * image.width), Math.round(y / box.height * image.height), 1, 1).data);
+      const referenceY = box.reference.top + box.reference.height / 2;
+      return { preview: [at(box.width * 0.1), at(box.width / 2 - contentWidth * 0.4),
+        at(box.width / 2 - contentWidth * 0.1), at(box.width / 2 + contentWidth * 0.1)],
+        red: at(box.reference.left + box.reference.width * 0.25, referenceY),
+        green: at(box.reference.left + box.reference.width * 0.75, referenceY) };
     }, { data: screenshot.toString('base64'), box });
-    expect(samples).toEqual([[0, 0, 0, 255], [0, 0, 0, 255], [32, 192, 64, 255], [208, 32, 32, 255]]);
+    expect(samples.red).not.toEqual(samples.green);
+    expect([samples.red[3], samples.green[3]]).toEqual([255, 255]);
+    expect(samples.preview).toEqual([[0, 0, 0, 255], [0, 0, 0, 255], samples.green, samples.red]);
     await testInfo.attach('portrait-in-editor', { body: screenshot, contentType: 'image/png' });
   });
   for (const mixed of [false, true]) {
@@ -69,7 +89,8 @@ test.describe('ranged transform editing', () => {
       await openEditor(window, testInfo);
       const before = await window.evaluate(() => projectEditing.load(getActiveProjectId()));
       await submit(window, mixed ? '1到3秒水平翻转并放大1.25倍，调色并生成字幕' : '1到3秒水平翻转并放大1.25倍');
-      await expect(window.getByTestId('subtitle-status').last()).toHaveAttribute('data-state', 'success');
+      await expect(window.getByTestId(mixed ? 'subtitle-status' : 'timeline-status').last())
+        .toHaveAttribute('data-state', 'success');
       const saved = await window.evaluate(() => projectEditing.load(getActiveProjectId()));
       expect(saved.document.revision).toBe(before.document.revision + 1);
       expect(saved.graph.documentRevision).toBe(saved.document.revision);
@@ -90,7 +111,7 @@ test.describe('ranged transform editing', () => {
         params: { flipHorizontal: true, flipVertical: false, scale: 1.25 } });
       expect(recipe.steps.map(s => s.capability)).toEqual(mixed
         ? ['video.transform@1', 'video.color.adjust@1', 'subtitle.burn@1'] : ['video.transform@1']);
-      await submit(window, '下一步');
+      await submit(window, '下一步', { instruction: 'clarifying', timeline: 'waiting' });
       const context = (await readScenarioState()).translationCalls.at(-1).context;
       expect(context.revision).toBe(saved.document.revision); expect(context.operations[0]).toEqual(recipe.steps[0]);
       await window.getByTestId('request-status-summary').first().click();
@@ -107,7 +128,7 @@ test.describe('ranged transform editing', () => {
   test('malformed second step does not partially commit the transform', async ({ window }, testInfo) => {
     await openEditor(window, testInfo);
     const before = await window.evaluate(() => localStorage.getItem('srt_project_edit_state'));
-    await submit(window, '错误第二步');
+    await submit(window, '错误第二步', { instruction: 'failed', timeline: 'not_run' });
     expect(await window.evaluate(() => localStorage.getItem('srt_project_edit_state'))).toBe(before);
     await expect(window.locator('.tl-marker')).toHaveCount(0);
   });

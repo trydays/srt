@@ -181,3 +181,20 @@ test('invalid transform in second step leaves existing JSON and undo intact', as
   assert.equal(f.writes(), writes);
   assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'before' }), true);
 });
+
+test('intentional identical transform requests append independently and undo only the latest request', async () => {
+  const f = fixture(); f.init();
+  const step = { capability: 'video.transform@1', range: { start: 1, end: 3 },
+    params: { flipHorizontal: true, scale: 1.25 } };
+  const before = await applySteps(f, [step], 'first');
+  const repeated = await applySteps(f, [step], 'repeat', before.document.revision);
+  assert.equal(repeated.document.edits.length, 2);
+  assert.equal(repeated.document.revision, before.document.revision + 1);
+  assert.deepEqual(repeated.document.edits[0], before.document.edits[0]);
+  assert.deepEqual(repeated.document.edits[1].payload, before.document.edits[0].payload);
+  assert.deepEqual(repeated.document.edits.map(edit => edit.transactionId), ['first', 'repeat']);
+  assert.notEqual(repeated.document.edits[0].id, repeated.document.edits[1].id);
+  assert.equal(repeated.graph.nodes.filter(node => node.type === 'video.transform@1').length, 2);
+  assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: repeated.document.revision,
+    transactionId: 'repeat' }).document.edits, before.document.edits);
+});
