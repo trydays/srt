@@ -102,6 +102,12 @@ Grain and vignette each execute independently and combine with color through the
 
 ## Final Verification Record — 2026-09-08
 
+### Authorized real-AI follow-up (supersedes the pending gate below)
+
+User explicitly authorized the two real calls, GitHub backup and subsequent Cycle7. Prepared real harness `/tmp/srt-cycle6-acceptance.MwZVAY/run.cjs` ran once: PASS/exit0, exactly two actual Claude CLI translations (12.497s/20.073s), production default services, artificial data only. First ranged color/noise/vignette; second received exact context and added only text; undo/reload retained source effects. Real export after text undo: 640×360/24fps/4s H264+AAC, 6.266s. Grain correlation .948515–.950298, RMS retention .920621–.922846, absolute mean drift <=1.203706; outside samples zero error. Parent viewed preview/export PNGs and independent evidence audit approved. Fresh upload-preflight Node/media335/335, zero fail/skip, exit0; prior Electron63/63 not rerun or relabeled. No product/test changes. Native dialog, user footage and packaged release remain separate. Commit/push records then verify remote before Cycle7.
+
+### Original local acceptance record
+
 - All implementation and review tasks complete. Final tested code/test HEAD: `53dee81`; product code unchanged since `0b44335`. Task-scoped reviews and independent whole-cycle review `bdfc422..53dee81` approved with no outstanding findings.
 - Parent fresh final real-enabled Node/media suite: **335/335 PASS**, zero failures/skips, exit 0 (5.207 seconds). Parent fresh full Electron suite: **63/63 PASS**, exit 0 (3.2 minutes), including actual texture/export tests. Desktop artifacts: `/tmp/srt-cycle6-final.zHLxVC/e2e-final/`. Earlier 334/62 and 335/62 runs are not the final verification.
 - Production LOCAL acceptance: **PASS**, `/tmp/srt-cycle6-local.bAetFB/`. Exactly two fixed translation fixtures through the production parser and Electron IPC; production project/preview/export services and actual FFmpeg. Only the translation results and save-dialog destination were injected. No external AI calls.
