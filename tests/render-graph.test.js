@@ -1,6 +1,8 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createRenderGraphCompiler}=require('../src/render-graph');
+const {createCapabilityRegistry,createGroupRegistration,createSubtitleRegistration}=require('../src/edit-capabilities');
+const {normalizeParams:normalizeGroup}=require('../src/visual-group');
 const {SUBTITLE_STYLE}=require('../src/render-recipe');
 function document(){return {schemaVersion:1,projectId:'p',revision:0,timeline:{duration:8,canvas:{width:1280,height:720}},sources:[{id:'main-video',assetId:'asset',kind:'video',range:{start:0,end:8}}],edits:[{id:'e1',type:'subtitle.track@1',enabled:true,transactionId:'r',target:{kind:'source',id:'main-video'},order:0,range:{start:0,end:8},payload:{segments:[{id:'s',start:1,end:2,text:'hello'}],style:SUBTITLE_STYLE}}]};}
 test('compiles minimal linear graph and skips disabled edits',()=>{const compiler=createRenderGraphCompiler();const doc=document();const graph=compiler.compile(doc);assert.equal(graph.nodes.length,2);assert.equal(graph.outputs.video.nodeId,'node-e1');assert.equal(graph.outputs.audio.nodeId,'node-main-video');doc.edits[0].enabled=false;assert.equal(compiler.compile(doc).nodes.length,1);});
@@ -52,4 +54,19 @@ test('orders source effects, visual layers in edit order, then subtitles',()=>{
     {...base,id:'shape',order:1,type:'visual.shape.layer@1',range:{start:1,end:3},payload:{x:.1,y:.1,width:.3,height:.15,color:'#000000'}}];
   const graph=createRenderGraphCompiler().compile(doc);
   assert.deepEqual(graph.nodes.map(n=>n.id),['node-main-video','node-color','node-shape','node-text','node-e1']);
+});
+
+test('orders multiple groups by edit order before subtitles',()=>{
+  const doc=document(),base=doc.edits[0],payload=normalizeGroup({layers:[
+    {kind:'shape',params:{width:.2}}
+  ]},2);
+  doc.edits=[base,
+    {...base,id:'group-later',transactionId:'g',order:4,type:'visual.group.layer@1',range:{start:1,end:3},payload},
+    {...base,id:'group-first',transactionId:'g',order:2,type:'visual.group.layer@1',range:{start:1,end:3},payload}];
+  const registry=createCapabilityRegistry([createGroupRegistration(),createSubtitleRegistration()]);
+  const graph=createRenderGraphCompiler({capabilityRegistry:registry}).compile(doc);
+  assert.deepEqual(graph.nodes.map(n=>n.id),
+    ['node-main-video','node-group-first','node-group-later','node-e1']);
+  assert.deepEqual(graph.nodes.slice(1).map(n=>n.type),
+    ['visual.group@1','visual.group@1','visual.subtitle@1']);
 });

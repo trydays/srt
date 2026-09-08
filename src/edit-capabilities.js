@@ -9,10 +9,12 @@
     ? require('./video-transform') : root && root.SRTVideoTransform;
   var visualLayers = typeof module === 'object' && module.exports
     ? require('./visual-layers') : root && root.SRTVisualLayers;
-  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers);
+  var visualGroup = typeof module === 'object' && module.exports
+    ? require('./visual-group') : root && root.SRTVisualGroup;
+  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
@@ -67,6 +69,52 @@
     });
     seen.pop();
     return valid;
+  }
+
+  function matchesSchema(schema, value) {
+    if (!isPlainObject(schema)) return false;
+    if (Array.isArray(schema.oneOf)) {
+      return schema.oneOf.reduce(function(matches, option) {
+        return matches + (matchesSchema(option, value) ? 1 : 0);
+      }, 0) === 1;
+    }
+    if (Array.isArray(schema.enum) && schema.enum.indexOf(value) === -1) return false;
+    if (schema.type === 'boolean') return typeof value === 'boolean';
+    if (schema.type === 'string') {
+      return typeof value === 'string'
+        && (schema.minLength === undefined || value.length >= schema.minLength)
+        && (schema.maxLength === undefined || value.length <= schema.maxLength)
+        && (schema.pattern === undefined || new RegExp(schema.pattern).test(value));
+    }
+    if (schema.type === 'number') {
+      return typeof value === 'number' && Number.isFinite(value)
+        && (schema.minimum === undefined || value >= schema.minimum)
+        && (schema.maximum === undefined || value <= schema.maximum);
+    }
+    if (schema.type === 'array') {
+      return Array.isArray(value)
+        && (schema.minItems === undefined || value.length >= schema.minItems)
+        && (schema.maxItems === undefined || value.length <= schema.maxItems)
+        && isPlainObject(schema.items)
+        && value.every(function(item) { return matchesSchema(schema.items, item); });
+    }
+    if (schema.type === 'object') {
+      if (!isPlainObject(value) || !isPlainObject(schema.properties)
+          || schema.additionalProperties !== false) return false;
+      var required = Array.isArray(schema.required) ? schema.required : [];
+      if (required.some(function(name) {
+        return !Object.prototype.hasOwnProperty.call(value, name);
+      })) return false;
+      return Object.keys(value).every(function(name) {
+        return Object.prototype.hasOwnProperty.call(schema.properties, name)
+          && matchesSchema(schema.properties[name], value[name]);
+      });
+    }
+    return false;
+  }
+
+  function matchesParameterSchema(schema, value) {
+    return isDataOnly(value) && matchesSchema(schema, value);
   }
 
   function sameStyle(style) {
@@ -346,6 +394,74 @@
   function createShapeRegistration(){return createLayerRegistration('shape');}
   function createTextRegistration(){return createLayerRegistration('text');}
 
+  function groupDuration(range) {
+    return range.end - range.start;
+  }
+
+  function createGroupRegistration() {
+    return {
+      definition: {
+        schemaVersion: 1,
+        id: 'visual.group@1',
+        label: '动画图层',
+        description: '把矩形和文字组合为共享透明度与缩放动画的平面图层',
+        params: visualGroup.PARAMETERS,
+        range: { allowed: true, default: 'wholeTarget' }
+      },
+      editMode: 'append',
+      editType: 'visual.group.layer@1',
+      nodeType: 'visual.group@1',
+      graphStage: 'visualOverlay',
+      prepare: async function() { return {}; },
+      toEdit: function(_prepared, step) {
+        return {
+          type: 'visual.group.layer@1',
+          range: clone(step.range),
+          payload: visualGroup.normalizeParams(step.params, groupDuration(step.range))
+        };
+      },
+      toGraph: function(edit, context) {
+        return {
+          id: 'node-' + edit.id,
+          type: 'visual.group@1',
+          range: clone(edit.range),
+          inputs: [{ port: 'base', nodeId: context.videoHead }],
+          props: visualGroup.normalizeParams(edit.payload, groupDuration(edit.range))
+        };
+      },
+      toTimeline: function(edit) {
+        var params = visualGroup.normalizeParams(edit.payload, groupDuration(edit.range));
+        return {
+          editId: edit.id,
+          transactionId: edit.transactionId,
+          lane: 'visual',
+          range: clone(edit.range),
+          label: '动画图层',
+          summary: params.layers.length + ' 个元素'
+        };
+      },
+      preview: function(graph, time) {
+        return graph.nodes.filter(function(node) {
+          return node.type === 'visual.group@1' && time >= node.range.start && time < node.range.end;
+        }).map(function(node) {
+          var params = visualGroup.normalizeParams(node.props, groupDuration(node.range));
+          var frame = visualGroup.sample(params, node.range, time, 1, 1);
+          var sampled = clone(params);
+          sampled.opacity = frame.opacity;
+          sampled.scale = frame.scale;
+          return sampled;
+        });
+      },
+      toExport: function(node) {
+        return {
+          capability: 'visual.group@1',
+          range: clone(node.range),
+          params: visualGroup.normalizeParams(node.props, groupDuration(node.range))
+        };
+      }
+    };
+  }
+
   function completeRegistration(registration) {
     var definition = registration && registration.definition;
     return isPlainObject(registration) && isPlainObject(definition)
@@ -403,17 +519,7 @@
             || required.some(function(key){ return !Object.prototype.hasOwnProperty.call(step.params,key); })
             || parameterNames.some(function(key) {
               if (!Object.prototype.hasOwnProperty.call(properties, key)) return true;
-              var schema = properties[key];
-              var value = step.params[key];
-              if (schema.type === 'boolean') return typeof value !== 'boolean';
-              if (schema.type === 'string') return typeof value !== 'string'
-                || (schema.minLength !== undefined && value.length < schema.minLength)
-                || (schema.maxLength !== undefined && value.length > schema.maxLength)
-                || (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value));
-              return schema.type !== 'number' || typeof value !== 'number'
-                || !Number.isFinite(value)
-                || (schema.minimum !== undefined && value < schema.minimum)
-                || (schema.maximum !== undefined && value > schema.maximum);
+              return !matchesParameterSchema(properties[key], step.params[key]);
             })) {
           throw codedError('RECIPE_INVALID_PARAM');
         }
@@ -453,12 +559,15 @@
         return {
           kind: 'instruction',
           steps: validated.steps.map(function(step) {
+            var range = colorAdjustment.normalizeRange(step.range, duration);
             return {
               capability: step.capability,
               target: { kind: 'source', id: 'main-video' },
-              range: colorAdjustment.normalizeRange(step.range, duration),
+              range: range,
               params: step.capability === 'visual.shape@1' ? visualLayers.normalizeParams('shape',step.params,true)
-                : step.capability === 'visual.text@1' ? visualLayers.normalizeParams('text',step.params,true) : clone(step.params)
+                : step.capability === 'visual.text@1' ? visualLayers.normalizeParams('text',step.params,true)
+                  : step.capability === 'visual.group@1'
+                    ? visualGroup.normalizeParams(step.params, groupDuration(range)) : clone(step.params)
             };
           })
         };
@@ -473,6 +582,8 @@
     createSubtitleRegistration: createSubtitleRegistration,
     createShapeRegistration: createShapeRegistration,
     createTextRegistration: createTextRegistration,
+    createGroupRegistration: createGroupRegistration,
+    matchesParameterSchema: matchesParameterSchema,
     codedError: codedError,
     clone: clone,
     validateSubtitlePayload: validateSubtitlePayload

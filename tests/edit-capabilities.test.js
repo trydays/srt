@@ -10,6 +10,8 @@ const {
   createSubtitleRegistration,
   createShapeRegistration,
   createTextRegistration,
+  createGroupRegistration,
+  matchesParameterSchema,
   validateSubtitlePayload
 } = require('../src/edit-capabilities');
 const { PARAMETER_SCHEMA } = require('../src/color-adjustment');
@@ -70,6 +72,109 @@ test('normalizes and lowers independent visual layer capabilities', () => {
     assert.equal(registration.editMode, 'append'); assert.equal(registration.graphStage, 'visualOverlay');
     assert.equal(registration.toTimeline({id:'e',transactionId:'t',range:{start:1,end:3},payload:normalized.steps.shift().params}).lane, 'visual');
   }
+});
+
+test('keeps groups out of the default catalog and hides incomplete custom registrations', () => {
+  const defaults = createCapabilityRegistry();
+  assert.equal(defaults.get('visual.group@1'), null);
+  assert.equal(defaults.promptDefinitions().some(item => item.id === 'visual.group@1'), false);
+  const complete = createGroupRegistration();
+  assert.deepEqual(createCapabilityRegistry([complete]).promptDefinitions().map(item => item.id),
+    ['visual.group@1']);
+  for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport']) {
+    const incomplete = { ...complete };
+    delete incomplete[adapter];
+    assert.deepEqual(createCapabilityRegistry([incomplete]).promptDefinitions(), []);
+  }
+});
+
+test('matches prior scalar schemas plus only the declared nested schema forms', () => {
+  assert.equal(matchesParameterSchema({ type: 'number', minimum: 0, maximum: 1 }, .5), true);
+  assert.equal(matchesParameterSchema({ type: 'number', minimum: 0, maximum: 1 }, Infinity), false);
+  assert.equal(matchesParameterSchema({ type: 'string', minLength: 1, pattern: '^x+$' }, 'xx'), true);
+  assert.equal(matchesParameterSchema({ type: 'string', enum: ['shape'] }, 'text'), false);
+  assert.equal(matchesParameterSchema({ type: 'boolean' }, false), true);
+
+  const schema = createGroupRegistration().definition.params;
+  const value = { layers: [{ kind: 'text', params: { text: '标题' } }],
+    opacity: { keyframes: [{ time: 0, value: 0 }, { time: 1, value: 1, easing: 'ease-out' }] } };
+  assert.equal(matchesParameterSchema(schema, value), true);
+  assert.equal(matchesParameterSchema(schema, { ...value, constructor: 'no' }), false);
+  assert.equal(matchesParameterSchema(schema, { layers: Array.from({ length: 17 },
+    () => ({ kind: 'shape', params: { width: .2 } })) }), false);
+
+  let getterCalls = 0;
+  const executable = {};
+  Object.defineProperty(executable, 'layers', { enumerable: true, get() {
+    getterCalls += 1; return [];
+  } });
+  assert.equal(matchesParameterSchema(schema, executable), false);
+  assert.equal(getterCalls, 0);
+});
+
+test('normalizes group duration after range and lowers all canonical adapters', async () => {
+  const registration = createGroupRegistration();
+  const registry = createCapabilityRegistry([registration]);
+  const rawParams = {
+    layers: [
+      { kind: 'shape', params: { width: .4 } },
+      { kind: 'text', params: { text: '重点' } }
+    ],
+    opacity: { keyframes: [{ time: 0, value: 0 },
+      { time: 1, value: 1, easing: 'ease-out' }] }
+  };
+  const normalized = registry.normalizeRecipe({ kind: 'instruction', steps: [{
+    capability: 'visual.group@1', range: { start: 2, end: 4 }, params: rawParams
+  }] }, { duration: 8 }).steps[0];
+  assert.deepEqual(normalized.range, { start: 2, end: 4 });
+  assert.deepEqual(normalized.params, {
+    layers: [
+      { kind: 'shape', params: { x:.1,y:.1,width:.4,height:.15,color:'#000000' } },
+      { kind: 'text', params: { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' } }
+    ],
+    pivotX: .5, pivotY: .5,
+    opacity: { keyframes: [
+      { time: 0, value: 0, easing: 'linear' },
+      { time: 1, value: 1, easing: 'ease-out' }
+    ] },
+    scale: 1
+  });
+  assert.deepEqual(await registration.prepare(), {});
+  const edit = registration.toEdit({}, normalized, { duration: 8 });
+  assert.deepEqual(edit, { type: 'visual.group.layer@1', range: normalized.range,
+    payload: normalized.params });
+  const persisted = { id: 'group-edit', transactionId: 'request', ...edit };
+  const node = registration.toGraph(persisted, { videoHead: 'node-video', duration: 8 });
+  assert.deepEqual(node, { id: 'node-group-edit', type: 'visual.group@1',
+    range: normalized.range, inputs: [{ port: 'base', nodeId: 'node-video' }],
+    props: normalized.params });
+  assert.deepEqual(registration.toTimeline(persisted), {
+    editId: 'group-edit', transactionId: 'request', lane: 'visual', range: normalized.range,
+    label: '动画图层', summary: '2 个元素'
+  });
+  assert.deepEqual(registration.preview({ nodes: [node] }, 2.5), [{
+    ...normalized.params, opacity: .875, scale: 1
+  }]);
+  assert.deepEqual(registration.preview({ nodes: [node] }, 4), []);
+  assert.deepEqual(registration.toExport(node), {
+    capability: 'visual.group@1', range: normalized.range, params: normalized.params
+  });
+});
+
+test('rejects animation beyond explicit and default whole-video group ranges', () => {
+  const registry = createCapabilityRegistry([createGroupRegistration()]);
+  function recipe(range, time) {
+    const step = { capability: 'visual.group@1', params: {
+      layers: [{ kind: 'shape', params: { width: .2 } }],
+      opacity: { keyframes: [{ time: 0, value: 0 }, { time, value: 1 }] }
+    } };
+    if (range) step.range = range;
+    return { kind: 'instruction', steps: [step] };
+  }
+  assert.throws(() => registry.normalizeRecipe(recipe({ start: 2, end: 3 }, 1.01),
+    { duration: 8 }), { code: 'VISUAL_GROUP_INVALID' });
+  assert.throws(() => registry.normalizeRecipe(recipe(null, 8.01),
+    { duration: 8 }), { code: 'VISUAL_GROUP_INVALID' });
 });
 
 test('rejects unsupported registration routing metadata from the prompt catalog', function() {
@@ -389,6 +494,8 @@ test('loads the same registry in a browser without Node dependencies', function(
   vm.runInNewContext(colorSource, context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/video-transform.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-layers.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/keyframes.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-group.js'), 'utf8'), context);
   vm.runInNewContext(source, context);
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('subtitle.generate@1').definition.id, 'subtitle.generate@1');

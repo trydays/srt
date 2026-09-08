@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCapabilityRegistry } = require('../src/edit-capabilities');
+const { createCapabilityRegistry, createGroupRegistration } = require('../src/edit-capabilities');
+const { normalizeParams: normalizeGroup } = require('../src/visual-group');
 const {
   buildSubtitleRecipe,
   buildRenderRecipe,
@@ -245,4 +246,66 @@ test('accepts exact frozen layers between source effects and subtitles', () => {
   assert.throws(()=>validateRenderRecipe({version:1,steps:[text,colorStep()]}),{code:'EXPORT_INVALID_RECIPE'});
   assert.throws(()=>validateRenderRecipe({version:1,steps:[subtitle,shape]}),{code:'EXPORT_INVALID_RECIPE'});
   assert.throws(()=>validateRenderRecipe({version:1,steps:[{...text,params:{...text.params,path:'/tmp/x'}}]}),{code:'EXPORT_INVALID_RECIPE'});
+});
+
+function groupStep() {
+  return {
+    capability: 'visual.group@1',
+    range: { start: 1, end: 3 },
+    params: normalizeGroup({
+      layers: [
+        { kind: 'shape', params: { width: .4 } },
+        { kind: 'text', params: { text: '重点' } }
+      ],
+      opacity: { keyframes: [
+        { time: 0, value: 0 },
+        { time: 1, value: 1, easing: 'ease-out' }
+      ] }
+    }, 2)
+  };
+}
+
+test('accepts only canonical complete group params and deeply freezes them', () => {
+  const group = groupStep();
+  const recipe = validateRenderRecipe({ version: 1, steps: [group] });
+  assert.deepEqual(recipe.steps[0], group);
+  function assertFrozen(value) {
+    if (!value || typeof value !== 'object') return;
+    assert.ok(Object.isFrozen(value));
+    Object.values(value).forEach(assertFrozen);
+  }
+  assertFrozen(recipe);
+
+  const missingDefault = structuredClone(group);
+  delete missingDefault.params.pivotX;
+  const missingChildDefault = structuredClone(group);
+  delete missingChildDefault.params.layers[0].params.x;
+  const missingEasing = structuredClone(group);
+  delete missingEasing.params.opacity.keyframes[0].easing;
+  const extra = structuredClone(group);
+  extra.params.layers[1].constructor = 'no';
+  for (const step of [missingDefault, missingChildDefault, missingEasing, extra]) {
+    assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
+});
+
+test('builds a defensive group recipe through a custom graph registration', () => {
+  const step = groupStep();
+  const graph = {
+    schemaVersion: 1, projectId: 'p', documentRevision: 1, duration: 4,
+    nodes: [
+      { id: 'node-main-video', type: 'source.video@1', range: { start: 0, end: 4 },
+        inputs: [], props: { assetId: 'asset' } },
+      { id: 'node-group', type: 'visual.group@1', range: step.range,
+        inputs: [{ port: 'base', nodeId: 'node-main-video' }], props: step.params }
+    ],
+    outputs: { video: { nodeId: 'node-group', port: 'video' },
+      audio: { nodeId: 'node-main-video', port: 'audio' } }
+  };
+  const recipe = buildRenderRecipe(graph,
+    createCapabilityRegistry([createGroupRegistration()]));
+  assert.deepEqual(recipe.steps, [step]);
+  graph.nodes[1].props.layers[0].params.width = .8;
+  assert.equal(recipe.steps[0].params.layers[0].params.width, .4);
 });

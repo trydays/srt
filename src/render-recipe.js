@@ -8,10 +8,13 @@
   }, function() {
     return typeof module === 'object' && module.exports
       ? require('./visual-layers') : root.SRTVisualLayers;
+  }, function() {
+    return typeof module === 'object' && module.exports
+      ? require('./visual-group') : root.SRTVisualGroup;
   });
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTRenderRecipe = api;
-})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform, getVisualLayers) {
+})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform, getVisualLayers, getVisualGroup) {
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
@@ -112,6 +115,40 @@
     return {capability:step.capability,range:{start:step.range.start,end:step.range.end},params:params};
   }
 
+  function sameData(left, right) {
+    if (left === right) return true;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+        && left.every(function(value, index) { return sameData(value, right[index]); });
+    }
+    if (!isPlainObject(left) || !isPlainObject(right)) return false;
+    var leftKeys = Object.keys(left).sort(), rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every(function(key, index) {
+      return key === rightKeys[index] && sameData(left[key], right[key]);
+    });
+  }
+
+  function validateGroupStep(step) {
+    if (!hasOnlyKeys(step, ['capability', 'params', 'range']) || !isPlainObject(step.range)
+        || !hasOnlyKeys(step.range, ['end', 'start']) || !Number.isFinite(step.range.start)
+        || !Number.isFinite(step.range.end) || step.range.start < 0
+        || step.range.end <= step.range.start || !isPlainObject(step.params)) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    var params;
+    try {
+      params = getVisualGroup().normalizeParams(step.params, step.range.end - step.range.start);
+    } catch (_) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    if (!sameData(step.params, params)) throw codedError('EXPORT_INVALID_RECIPE');
+    return {
+      capability: 'visual.group@1',
+      range: { start: step.range.start, end: step.range.end },
+      params: params
+    };
+  }
+
   function validateRenderRecipe(recipe) {
     if (!isPlainObject(recipe) || !hasOnlyKeys(recipe, ['steps', 'version'])
         || recipe.version !== 1 || !Array.isArray(recipe.steps) || recipe.steps.length === 0) {
@@ -123,7 +160,8 @@
         throw codedError('EXPORT_INVALID_RECIPE');
       }
       if (step.capability !== 'video.color.adjust@1' && step.capability !== 'video.transform@1'
-          && step.capability !== 'visual.shape@1' && step.capability !== 'visual.text@1' && step.capability !== 'subtitle.burn@1') {
+          && step.capability !== 'visual.shape@1' && step.capability !== 'visual.text@1'
+          && step.capability !== 'visual.group@1' && step.capability !== 'subtitle.burn@1') {
         throw codedError('EXPORT_UNSUPPORTED_OPERATION');
       }
       var current = step.capability === 'subtitle.burn@1' ? 2
@@ -131,7 +169,8 @@
       if (current < stage || (current===2 && stage===2)) throw codedError('EXPORT_INVALID_RECIPE');
       stage=current;
       if(current===0) return validateSourceEffectStep(step);
-      if(current===1) return validateLayerStep(step);
+      if(current===1) return step.capability === 'visual.group@1'
+        ? validateGroupStep(step) : validateLayerStep(step);
       return validateSubtitleStep(step);
     });
     return freezeData({ version: 1, steps: steps });

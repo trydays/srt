@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createProjectEditing } = require('../src/project-editing');
 const { SUBTITLE_STYLE } = require('../src/render-recipe');
-const { createCapabilityRegistry, createSubtitleRegistration, createColorRegistration } = require('../src/edit-capabilities');
+const { createCapabilityRegistry, createSubtitleRegistration, createColorRegistration,
+  createGroupRegistration } = require('../src/edit-capabilities');
 const { createRenderGraphCompiler } = require('../src/render-graph');
 const facts = { duration: 8, canvas: { width: 1280, height: 720 }, source: { id: 'main-video', assetId: 'asset-1' } };
 const recipe = { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
@@ -217,4 +218,49 @@ test('invalid second visual step leaves persisted document and undo unchanged', 
   await assert.rejects(applySteps(f,[{capability:'visual.shape@1',params:{width:.4}},
     {capability:'visual.text@1',range:{start:2,end:2},params:{text:'x'}}],'bad'));
   assert.equal(f.raw(),before); assert.equal(f.editing.canUndo({projectId:'p1',transactionId:'bad'}),false);
+});
+
+function groupStep(range = { start: 1, end: 4 }, lastTime = 2) {
+  return { capability: 'visual.group@1', range, params: {
+    layers: [
+      { kind: 'shape', params: { x: .1, y: .1, width: .4, height: .25, color: '#000000' } },
+      { kind: 'text', params: { text: '重点', x: .12, y: .12, fontSize: .08, color: '#FFFFFF' } }
+    ],
+    opacity: { keyframes: [{ time: 0, value: 0 }, { time: lastTime, value: 1, easing: 'ease-out' }] },
+    scale: 1
+  } };
+}
+
+test('one flat group request persists nested frames and undoes as one transaction', async () => {
+  const registration = createGroupRegistration();
+  const registry = createCapabilityRegistry([registration]);
+  const f = fixture({ capabilityRegistry: registry }); f.init();
+  const applied = await applySteps(f, [groupStep()], 'group-request');
+  assert.equal(applied.document.revision, 1);
+  assert.equal(applied.document.edits.length, 1);
+  assert.equal(applied.document.edits[0].type, 'visual.group.layer@1');
+  assert.deepEqual(applied.document.edits[0].payload.opacity.keyframes, [
+    { time: 0, value: 0, easing: 'linear' },
+    { time: 2, value: 1, easing: 'ease-out' }
+  ]);
+  assert.deepEqual(applied.graph.nodes.map(node => node.type),
+    ['source.video@1', 'visual.group@1']);
+  const refreshed = createProjectEditing({ storage: f.storage, storageKey: 'edits',
+    capabilityRegistry: registry }).load('p1');
+  assert.deepEqual(refreshed.document, applied.document);
+  assert.deepEqual(refreshed.document.edits[0].payload.layers, groupStep().params.layers);
+  assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
+    transactionId: 'group-request' }).document.edits, []);
+});
+
+test('invalid later group leaves exact document and prior undo intact', async () => {
+  const registry = createCapabilityRegistry([createGroupRegistration()]);
+  const f = fixture({ capabilityRegistry: registry }); f.init();
+  await applySteps(f, [groupStep()], 'prior');
+  const raw = f.raw(), writes = f.writes();
+  await assert.rejects(applySteps(f, [groupStep(), groupStep({ start: 5, end: 6 }, 2)],
+    'invalid', 1), { code: 'VISUAL_GROUP_INVALID' });
+  assert.equal(f.raw(), raw);
+  assert.equal(f.writes(), writes);
+  assert.equal(f.editing.canUndo({ projectId: 'p1', transactionId: 'prior' }), true);
 });
