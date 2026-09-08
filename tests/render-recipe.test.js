@@ -235,3 +235,14 @@ test('rejects sparse step arrays instead of producing an empty filter chain', ()
       { code: 'EXPORT_INVALID_RECIPE' });
   }
 });
+
+test('accepts exact frozen layers between source effects and subtitles', () => {
+  const subtitle=buildSubtitleRecipe([{id:'s',start:0,end:1,text:'字幕'}]).steps[0];
+  const shape={capability:'visual.shape@1',range:{start:1,end:3},params:{x:.1,y:.1,width:.4,height:.25,color:'#000000'}};
+  const text={capability:'visual.text@1',range:{start:1,end:3},params:{text:'重点',x:.12,y:.12,fontSize:.08,color:'#FFFFFF'}};
+  const recipe=validateRenderRecipe({version:1,steps:[colorStep(),shape,text,subtitle]});
+  assert.deepEqual(recipe.steps,[colorStep(),shape,text,subtitle]); assert.ok(Object.isFrozen(recipe.steps[1].params));
+  assert.throws(()=>validateRenderRecipe({version:1,steps:[text,colorStep()]}),{code:'EXPORT_INVALID_RECIPE'});
+  assert.throws(()=>validateRenderRecipe({version:1,steps:[subtitle,shape]}),{code:'EXPORT_INVALID_RECIPE'});
+  assert.throws(()=>validateRenderRecipe({version:1,steps:[{...text,params:{...text.params,path:'/tmp/x'}}]}),{code:'EXPORT_INVALID_RECIPE'});
+});

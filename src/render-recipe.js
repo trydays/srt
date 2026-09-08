@@ -5,10 +5,13 @@
   }, function() {
     return typeof module === 'object' && module.exports
       ? require('./video-transform') : root.SRTVideoTransform;
+  }, function() {
+    return typeof module === 'object' && module.exports
+      ? require('./visual-layers') : root.SRTVisualLayers;
   });
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTRenderRecipe = api;
-})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform) {
+})(typeof window === 'undefined' ? null : window, function(getColorAdjustment, getVideoTransform, getVisualLayers) {
   var SUBTITLE_STYLE = Object.freeze({
     fontFamily: 'Heiti SC',
     fontSize: 16,
@@ -96,23 +99,39 @@
     };
   }
 
+  function validateLayerStep(step) {
+    if (!hasOnlyKeys(step,['capability','params','range']) || !isPlainObject(step.range)
+        || !hasOnlyKeys(step.range,['end','start']) || !Number.isFinite(step.range.start)
+        || !Number.isFinite(step.range.end) || step.range.start<0 || step.range.end<=step.range.start
+        || !isPlainObject(step.params)) throw codedError('EXPORT_INVALID_RECIPE');
+    var kind=step.capability==='visual.shape@1'?'shape':'text', params;
+    try { params=getVisualLayers().normalizeParams(kind,step.params,false); }
+    catch(_){ throw codedError('EXPORT_INVALID_RECIPE'); }
+    if (!hasOnlyKeys(step.params,Object.keys(kind==='shape'?getVisualLayers().SHAPE_PARAMETERS:getVisualLayers().TEXT_PARAMETERS).sort()))
+      throw codedError('EXPORT_INVALID_RECIPE');
+    return {capability:step.capability,range:{start:step.range.start,end:step.range.end},params:params};
+  }
+
   function validateRenderRecipe(recipe) {
     if (!isPlainObject(recipe) || !hasOnlyKeys(recipe, ['steps', 'version'])
         || recipe.version !== 1 || !Array.isArray(recipe.steps) || recipe.steps.length === 0) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
-    var hasSubtitle = false;
+    var stage = -1;
     var steps = Array.from(recipe.steps, function(step) {
       if (!isPlainObject(step) || typeof step.capability !== 'string') {
         throw codedError('EXPORT_INVALID_RECIPE');
       }
       if (step.capability !== 'video.color.adjust@1' && step.capability !== 'video.transform@1'
-          && step.capability !== 'subtitle.burn@1') {
+          && step.capability !== 'visual.shape@1' && step.capability !== 'visual.text@1' && step.capability !== 'subtitle.burn@1') {
         throw codedError('EXPORT_UNSUPPORTED_OPERATION');
       }
-      if (hasSubtitle) throw codedError('EXPORT_INVALID_RECIPE');
-      if (step.capability !== 'subtitle.burn@1') return validateSourceEffectStep(step);
-      hasSubtitle = true;
+      var current = step.capability === 'subtitle.burn@1' ? 2
+        : step.capability.indexOf('visual.') === 0 ? 1 : 0;
+      if (current < stage || (current===2 && stage===2)) throw codedError('EXPORT_INVALID_RECIPE');
+      stage=current;
+      if(current===0) return validateSourceEffectStep(step);
+      if(current===1) return validateLayerStep(step);
       return validateSubtitleStep(step);
     });
     return freezeData({ version: 1, steps: steps });

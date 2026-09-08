@@ -44,7 +44,10 @@ function capabilityLine(definition) {
       return name + '（type: ' + property.type
         + (property.minimum === undefined ? '' : ', minimum: ' + property.minimum)
         + (property.maximum === undefined ? '' : ', maximum: ' + property.maximum)
-        + ', default: ' + property.default
+        + (property.minLength === undefined ? '' : ', minLength: ' + property.minLength)
+        + (property.maxLength === undefined ? '' : ', maxLength: ' + property.maxLength)
+        + (property.pattern === undefined ? '' : ', pattern: ' + property.pattern)
+        + (property.default === undefined ? '' : ', default: ' + property.default)
         + ', description: ' + property.description + '）';
     }).join('；');
   }
@@ -104,6 +107,10 @@ function projectContextLines(context) {
       if (schema.type === 'number' && finiteNumber(value)
           && (schema.minimum === undefined || value >= schema.minimum)
           && (schema.maximum === undefined || value <= schema.maximum)) params[name] = value;
+      if (schema.type === 'string' && typeof value === 'string'
+          && (schema.minLength === undefined || value.length >= schema.minLength)
+          && (schema.maxLength === undefined || value.length <= schema.maxLength)
+          && (schema.pattern === undefined || new RegExp(schema.pattern).test(value))) params[name] = value;
     });
     var renderedRange = rangeText(operation.range);
     operationLines.push('- ' + (operationLines.length + 1) + '. ' + definition.id

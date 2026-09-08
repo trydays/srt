@@ -14,8 +14,8 @@
   function createRenderGraphCompiler(options) {
     var registry = options && options.capabilityRegistry || capabilities.createCapabilityRegistry();
     function stage(registration) {
-      if (!registration || ['sourceEffect', 'overlay'].indexOf(registration.graphStage) < 0) fail();
-      return registration.graphStage === 'sourceEffect' ? 0 : 1;
+      if (!registration || ['sourceEffect', 'visualOverlay', 'overlay'].indexOf(registration.graphStage) < 0) fail();
+      return {sourceEffect:0,visualOverlay:1,overlay:2}[registration.graphStage];
     }
     function validate(graph) {
       keys(graph, ['schemaVersion', 'projectId', 'documentRevision', 'duration', 'nodes', 'outputs']);

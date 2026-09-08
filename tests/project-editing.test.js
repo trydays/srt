@@ -198,3 +198,23 @@ test('intentional identical transform requests append independently and undo onl
   assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: repeated.document.revision,
     transactionId: 'repeat' }).document.edits, before.document.edits);
 });
+
+test('visual layers append atomically, survive refresh and undo as one request', async () => {
+  const f=fixture(); f.init(); const steps=[
+    {capability:'visual.shape@1',range:{start:1,end:3},params:{x:.1,y:.1,width:.4,height:.25,color:'#000000'}},
+    {capability:'visual.text@1',range:{start:1,end:3},params:{text:'重点',x:.12,y:.12,fontSize:.08,color:'#FFFFFF'}}
+  ];
+  const applied=await applySteps(f,steps,'layers');
+  assert.equal(applied.document.edits.length,2);
+  assert.deepEqual(applied.document.edits.map(e=>e.transactionId),['layers','layers']);
+  assert.deepEqual(f.editing.load('p1').document.edits,applied.document.edits);
+  assert.deepEqual(applied.graph.nodes.slice(1).map(n=>n.type),['visual.shape@1','visual.text@1']);
+  assert.deepEqual(f.editing.undo({projectId:'p1',expectedRevision:1,transactionId:'layers'}).document.edits,[]);
+});
+
+test('invalid second visual step leaves persisted document and undo unchanged', async () => {
+  const f=fixture(); f.init(); const before=f.raw();
+  await assert.rejects(applySteps(f,[{capability:'visual.shape@1',params:{width:.4}},
+    {capability:'visual.text@1',range:{start:2,end:2},params:{text:'x'}}],'bad'));
+  assert.equal(f.raw(),before); assert.equal(f.editing.canUndo({projectId:'p1',transactionId:'bad'}),false);
+});

@@ -7,10 +7,12 @@
     : root && root.SRTColorAdjustment;
   var videoTransform = typeof module === 'object' && module.exports
     ? require('./video-transform') : root && root.SRTVideoTransform;
-  var api = factory(renderRecipe, colorAdjustment, videoTransform);
+  var visualLayers = typeof module === 'object' && module.exports
+    ? require('./visual-layers') : root && root.SRTVisualLayers;
+  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
@@ -325,13 +327,32 @@
     };
   }
 
+  function createLayerRegistration(kind) {
+    var text = kind === 'text', capability = 'visual.' + kind + '@1';
+    return {
+      definition: { schemaVersion:1, id:capability, label:text?'静态文字':'矩形',
+        description:text?'添加固定字体的纯文本图层':'添加纯色矩形图层',
+        params:{type:'object',additionalProperties:false,properties:text?visualLayers.TEXT_PARAMETERS:visualLayers.SHAPE_PARAMETERS,
+          required:text?['text']:[]}, range:{allowed:true,default:'wholeTarget'} },
+      editMode:'append', editType:'visual.'+kind+'.layer@1', nodeType:capability, graphStage:'visualOverlay',
+      prepare:async function(){return{};},
+      toEdit:function(_prepared,step){return{type:'visual.'+kind+'.layer@1',range:clone(step.range),payload:visualLayers.normalizeParams(kind,step.params,true)};},
+      toGraph:function(edit,context){return{id:'node-'+edit.id,type:capability,range:clone(edit.range),inputs:[{port:'base',nodeId:context.videoHead}],props:visualLayers.normalizeParams(kind,edit.payload,false)};},
+      toTimeline:function(edit){return{editId:edit.id,transactionId:edit.transactionId,lane:'visual',range:clone(edit.range),label:text?'静态文字':'矩形',summary:text?edit.payload.text:edit.payload.color};},
+      preview:function(graph,time){return graph.nodes.filter(function(n){return n.type===capability&&time>=n.range.start&&time<n.range.end;}).map(function(n){return visualLayers.normalizeParams(kind,n.props,false);});},
+      toExport:function(node){return{capability:capability,range:clone(node.range),params:visualLayers.normalizeParams(kind,node.props,false)};}
+    };
+  }
+  function createShapeRegistration(){return createLayerRegistration('shape');}
+  function createTextRegistration(){return createLayerRegistration('text');}
+
   function completeRegistration(registration) {
     var definition = registration && registration.definition;
     return isPlainObject(registration) && isPlainObject(definition)
       && ['append', 'replaceByType'].indexOf(registration.editMode) !== -1
       && typeof registration.editType === 'string' && registration.editType
       && typeof registration.nodeType === 'string' && registration.nodeType
-      && ['sourceEffect', 'overlay'].indexOf(registration.graphStage) !== -1
+      && ['sourceEffect', 'visualOverlay', 'overlay'].indexOf(registration.graphStage) !== -1
       && definition.schemaVersion === 1 && typeof definition.id === 'string'
       && isPlainObject(definition.params) && definition.params.type === 'object'
       && definition.params.additionalProperties === false
@@ -345,7 +366,7 @@
 
   function createCapabilityRegistry(registrations) {
     var items = registrations === undefined
-      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration()]
+      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration(), createShapeRegistration(), createTextRegistration()]
       : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);
@@ -377,12 +398,18 @@
         if (!isPlainObject(step.params)) throw codedError('RECIPE_INVALID_PARAM');
         var properties = registration.definition.params.properties;
         var parameterNames = Object.keys(step.params);
+        var required = registration.definition.params.required || [];
         if ((Object.keys(properties).length > 0 && parameterNames.length === 0)
+            || required.some(function(key){ return !Object.prototype.hasOwnProperty.call(step.params,key); })
             || parameterNames.some(function(key) {
               if (!Object.prototype.hasOwnProperty.call(properties, key)) return true;
               var schema = properties[key];
               var value = step.params[key];
               if (schema.type === 'boolean') return typeof value !== 'boolean';
+              if (schema.type === 'string') return typeof value !== 'string'
+                || (schema.minLength !== undefined && value.length < schema.minLength)
+                || (schema.maxLength !== undefined && value.length > schema.maxLength)
+                || (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value));
               return schema.type !== 'number' || typeof value !== 'number'
                 || !Number.isFinite(value)
                 || (schema.minimum !== undefined && value < schema.minimum)
@@ -430,7 +457,8 @@
               capability: step.capability,
               target: { kind: 'source', id: 'main-video' },
               range: colorAdjustment.normalizeRange(step.range, duration),
-              params: clone(step.params)
+              params: step.capability === 'visual.shape@1' ? visualLayers.normalizeParams('shape',step.params,true)
+                : step.capability === 'visual.text@1' ? visualLayers.normalizeParams('text',step.params,true) : clone(step.params)
             };
           })
         };
@@ -443,6 +471,8 @@
     createColorRegistration: createColorRegistration,
     createTransformRegistration: createTransformRegistration,
     createSubtitleRegistration: createSubtitleRegistration,
+    createShapeRegistration: createShapeRegistration,
+    createTextRegistration: createTextRegistration,
     codedError: codedError,
     clone: clone,
     validateSubtitlePayload: validateSubtitlePayload

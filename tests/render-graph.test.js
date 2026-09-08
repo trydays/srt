@@ -46,3 +46,10 @@ test('rejects a registered source effect placed after an overlay in a supplied g
   graph.outputs.video.nodeId = graph.nodes[2].id;
   assert.throws(() => compiler.validate(graph));
 });
+test('orders source effects, visual layers in edit order, then subtitles',()=>{
+  const doc=document(),base=doc.edits[0];doc.edits=[base,colorEdit('color',9),
+    {...base,id:'text',order:2,type:'visual.text.layer@1',range:{start:1,end:3},payload:{text:'上层',x:.12,y:.12,fontSize:.05,color:'#FFFFFF'}},
+    {...base,id:'shape',order:1,type:'visual.shape.layer@1',range:{start:1,end:3},payload:{x:.1,y:.1,width:.3,height:.15,color:'#000000'}}];
+  const graph=createRenderGraphCompiler().compile(doc);
+  assert.deepEqual(graph.nodes.map(n=>n.id),['node-main-video','node-color','node-shape','node-text','node-e1']);
+});

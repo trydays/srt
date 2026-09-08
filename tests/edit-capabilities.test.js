@@ -8,6 +8,8 @@ const {
   createCapabilityRegistry,
   createColorRegistration,
   createSubtitleRegistration,
+  createShapeRegistration,
+  createTextRegistration,
   validateSubtitlePayload
 } = require('../src/edit-capabilities');
 const { PARAMETER_SCHEMA } = require('../src/color-adjustment');
@@ -21,7 +23,7 @@ test('exposes only registrations with every executable adapter and routing metad
 
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
-  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1']);
+  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1']);
   assert.equal(createCapabilityRegistry().promptDefinitions()[0].description,
     '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨');
   assert.equal(createCapabilityRegistry().get('subtitle.generate@1').definition.range.allowed, false);
@@ -52,6 +54,22 @@ test('exposes only registrations with every executable adapter and routing metad
     delete unroutable[field];
     assert.deepEqual(createCapabilityRegistry([unroutable]).promptDefinitions(), []);
   });
+});
+
+test('normalizes and lowers independent visual layer capabilities', () => {
+  const registry = createCapabilityRegistry();
+  const normalized = registry.normalizeRecipe({ kind: 'instruction', steps: [
+    { capability: 'visual.shape@1', range: { start: 1, end: 3 }, params: { width: .4 } },
+    { capability: 'visual.text@1', range: { start: 1, end: 3 }, params: { text: '重点' } }
+  ] }, { duration: 4 });
+  assert.deepEqual(normalized.steps.map(s => s.params), [
+    { x:.1,y:.1,width:.4,height:.15,color:'#000000' },
+    { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' }
+  ]);
+  for (const registration of [createShapeRegistration(), createTextRegistration()]) {
+    assert.equal(registration.editMode, 'append'); assert.equal(registration.graphStage, 'visualOverlay');
+    assert.equal(registration.toTimeline({id:'e',transactionId:'t',range:{start:1,end:3},payload:normalized.steps.shift().params}).lane, 'visual');
+  }
 });
 
 test('rejects unsupported registration routing metadata from the prompt catalog', function() {
@@ -370,6 +388,7 @@ test('loads the same registry in a browser without Node dependencies', function(
   const context = { window: { SRTRenderRecipe: { SUBTITLE_STYLE } } };
   vm.runInNewContext(colorSource, context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/video-transform.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-layers.js'), 'utf8'), context);
   vm.runInNewContext(source, context);
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('subtitle.generate@1').definition.id, 'subtitle.generate@1');
