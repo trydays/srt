@@ -41,7 +41,8 @@
       contexts[0].fillStyle = '#000'; contexts[0].fillRect(0, 0, width, height);
       contexts[0].drawImage(source, 0, 0, width, height);
       graph.nodes.forEach(function(node) {
-        if (node.type !== 'video.transform@1' && node.type !== 'video.color@1') return;
+        if (node.type !== 'video.transform@1' && node.type !== 'video.color@1'
+            && node.type !== 'video.noise@1' && node.type !== 'video.vignette@1') return;
         // The registry owns activation and parameter normalization; each node
         // retains its position in the common linear graph.
         var registration = window.editCapabilityRegistry.forNodeType(node.type);
@@ -57,10 +58,16 @@
           ctx.scale(params.flipHorizontal ? -1 : 1, params.flipVertical ? -1 : 1);
           ctx.drawImage(buffers[previous], 0, 0, width, height, 0, 0, g.scaledWidth, g.scaledHeight);
           ctx.restore();
-        } else {
+        } else if (node.type === 'video.color@1') {
           ctx.filter = filters[node.id];
           ctx.drawImage(buffers[previous], 0, 0);
           ctx.filter = 'none';
+        } else {
+          ctx.drawImage(buffers[previous], 0, 0);
+          var frame = ctx.getImageData(0, 0, width, height);
+          window.SRTVideoTexture.applyFrame(node.type === 'video.noise@1' ? 'noise' : 'vignette',
+            params, frame.data, width, height, time);
+          ctx.putImageData(frame, 0, 0);
         }
         // Every destination is the original frame size. Cropped pixels cannot
         // reappear in subsequent transforms; black margins enter later colors.
@@ -77,7 +84,7 @@
   var video = document.getElementById('previewVideo');
   var canvas = document.getElementById('previewSourceCanvas');
   var compositor = createCompositor(canvas, document.getElementById('previewColorFilter').parentNode);
-  var scheduled = null, suspended = false;
+  var scheduled = null, suspended = false, seeking = false, lastDecodedTime = null;
   var decodedFrames = typeof video.requestVideoFrameCallback === 'function';
 
   function stop() {
@@ -87,18 +94,24 @@
     scheduled = null;
   }
   function schedule() {
-    if (scheduled !== null || suspended || video.paused || video.ended) return;
+    if (scheduled !== null || suspended || seeking || video.paused || video.ended) return;
     if (decodedFrames) scheduled = video.requestVideoFrameCallback(function(_now, frame) {
-      scheduled = null; render(frame.mediaTime);
+      scheduled = null;
+      if (seeking) return;
+      lastDecodedTime = frame.mediaTime;
+      render(frame.mediaTime);
     });
     else scheduled = window.requestAnimationFrame(function() { scheduled = null; render(); });
   }
   function render(time) {
-    if (suspended || window.projectEditingState !== 'ready') {
+    if (suspended || seeking || window.projectEditingState !== 'ready') {
       stop(); compositor.clear(); return false;
     }
     var snapshot = window.projectEditing.load(getActiveProjectId());
-    if (!snapshot.graph.nodes.some(function(node) { return node.type === 'video.transform@1'; })) {
+    if (!snapshot.graph.nodes.some(function(node) {
+      return node.type === 'video.transform@1' || node.type === 'video.noise@1'
+        || node.type === 'video.vignette@1';
+    })) {
       stop(); compositor.clear(); return false;
     }
     video.style.filter = '';
@@ -108,7 +121,9 @@
     var width = video.videoWidth || snapshot.document.timeline.canvas.width;
     var height = video.videoHeight || snapshot.document.timeline.canvas.height;
     try {
-      compositor.render(video, snapshot.graph, Number.isFinite(time) ? time : video.currentTime, width, height);
+      var mediaTime = Number.isFinite(time) ? time
+        : (!video.paused && Number.isFinite(lastDecodedTime) ? lastDecodedTime : video.currentTime);
+      compositor.render(video, snapshot.graph, mediaTime, width, height);
     } catch (error) {
       // A decoded source can disappear during re-upload. Never leave its last
       // transformed frame covering the new source while metadata is pending.
@@ -117,10 +132,12 @@
     schedule(); return true;
   }
   function refresh() { window.colorPreviewController.render(); }
-  function reset() { stop(); compositor.clear(); }
+  function reset() { stop(); lastDecodedTime = null; compositor.clear(); }
   ['play', 'loadeddata', 'canplay'].forEach(function(event) { video.addEventListener(event, refresh); });
   ['pause', 'ended'].forEach(function(event) { video.addEventListener(event, function() { stop(); refresh(); }); });
-  ['loadstart', 'emptied', 'error', 'seeking'].forEach(function(event) { video.addEventListener(event, reset); });
+  ['loadstart', 'emptied', 'error'].forEach(function(event) { video.addEventListener(event, reset); });
+  video.addEventListener('seeking', function() { seeking = true; reset(); });
+  video.addEventListener('seeked', function() { seeking = false; lastDecodedTime = video.currentTime; refresh(); });
   window.addEventListener('pagehide', function() { suspended = true; reset(); });
   window.addEventListener('pageshow', function() { suspended = false; refresh(); });
   window.sourcePreviewController = { render: render };

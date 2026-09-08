@@ -6,7 +6,8 @@ const { CAPABILITY_SCHEMAS, getCapabilitySchema, buildPrompt, parseInstruction }
 test('exports only the current registry prompt catalog', () => {
   assert.deepEqual(CAPABILITY_SCHEMAS, createCapabilityRegistry().promptDefinitions());
   assert.deepEqual(CAPABILITY_SCHEMAS.map((definition) => definition.id), [
-    'subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1'
+    'subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'video.noise@1',
+    'video.vignette@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1'
   ]);
   assert.equal(getCapabilitySchema('subtitle.generate@1').range.allowed, false);
   assert.equal(getCapabilitySchema('video.color.adjust@1').range.allowed, true);
@@ -30,7 +31,7 @@ test('buildPrompt teaches typed color parameters, ranges and multi-step output w
   }
   assert.match(prompt, /顶层 range\.start\/end/);
   assert.match(prompt, /一个或多个步骤/);
-  assert.doesNotMatch(prompt, /color\.grade|fade\.|texture\.grain|vignette/);
+  assert.doesNotMatch(prompt, /color\.grade|fade\.|texture\.grain@1|(?:^|[^.])vignette@1/);
   assert.doesNotMatch(prompt, /冷色.*能力|淡入.*能力/);
   assert.doesNotMatch(prompt, /撤销/);
   assert.doesNotMatch(prompt, /冷色.*temperature|复古.*saturation|效果名.*参数/);
@@ -92,6 +93,9 @@ test('parseInstruction accepts the nested group schema and rejects unknown child
   ]) {
     const invalid = structuredClone(recipe); mutate(invalid.steps[0].params);
     assert.throws(() => parseInstruction(JSON.stringify(invalid)), { code: 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT' });
+  }
+  for (const id of ['video.noise@1', 'video.vignette@1']) {
+    assert.ok(CAPABILITY_SCHEMAS.some(schema => schema.id === id), id + ' is in the AI catalog');
   }
 });
 
@@ -177,6 +181,19 @@ test('buildPrompt serializes ordered applied operations using only declared scal
   assert.ok(context.indexOf('[1–3 秒]') < context.indexOf('[0–4 秒]'));
   assert.doesNotMatch(context, /secret|不允许|不得展开|unknown@1|未知操作|不应溢出|第501段/);
   assert.match(context, /第500段/);
+});
+
+test('texture schemas and canonical scalar state reach the next instruction context', () => {
+  const prompt = buildPrompt('继续', [], { operations: [
+    { capability: 'video.noise@1', range: { start: 0, end: 2 }, params: { amount: 0.4, seed: 9 } },
+    { capability: 'video.vignette@1', range: { start: 1, end: 3 }, params: { strength: 0.7, center: 0.2 } }
+  ] });
+  assert.match(prompt, /video\.noise@1.*"amount".*"required":\["amount"\]/);
+  assert.match(prompt, /video\.vignette@1.*"strength".*"required":\["strength"\]/);
+  const context = prompt.split('当前编辑上下文：')[1];
+  assert.match(context, /video\.noise@1.*\[0–2 秒\].*"amount":0.4/);
+  assert.match(context, /video\.vignette@1.*\[1–3 秒\].*"strength":0.7/);
+  assert.doesNotMatch(context, /seed|center/);
 });
 
 test('parseInstruction parses and trims a clarify turn', () => {

@@ -385,7 +385,8 @@
     return {
       definition: {
         schemaVersion: 1, id: capability, label: label,
-        description: noise ? '添加确定性的细颗粒画面效果' : '添加居中的圆形画面暗角',
+        description: noise ? '在视频源画面指定时间范围添加确定性细颗粒；amount 控制强度'
+          : '在视频源画面指定时间范围添加居中圆形暗角；strength 控制强度',
         params: { type: 'object', additionalProperties: false,
           properties: noise ? videoTexture.NOISE_PARAMETERS : videoTexture.VIGNETTE_PARAMETERS,
           required: [key] },
@@ -534,7 +535,9 @@
 
   function createCapabilityRegistry(registrations) {
     var items = registrations === undefined
-      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration(), createShapeRegistration(), createTextRegistration(), createGroupRegistration()]
+      ? [createSubtitleRegistration(), createColorRegistration(), createTransformRegistration(),
+        createNoiseRegistration(), createVignetteRegistration(), createShapeRegistration(),
+        createTextRegistration(), createGroupRegistration()]
       : registrations.slice();
     var byId = Object.create(null);
     var byEditType = Object.create(null);

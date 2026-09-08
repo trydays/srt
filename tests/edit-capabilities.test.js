@@ -39,8 +39,9 @@ test('texture registrations expose complete opt-in source-effect adapters', asyn
   }
 });
 
-test('texture capabilities stay out of default registry and incomplete opt-in definitions are hidden', () => {
-  assert.equal(createCapabilityRegistry().get('video.noise@1'), null);
+test('texture capabilities are enabled in the default registry and incomplete custom definitions are hidden', () => {
+  assert.equal(createCapabilityRegistry().get('video.noise@1').nodeType, 'video.noise@1');
+  assert.equal(createCapabilityRegistry().get('video.vignette@1').nodeType, 'video.vignette@1');
   for (const factory of [createNoiseRegistration, createVignetteRegistration]) {
     const complete = factory();
     for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport']) {
@@ -60,7 +61,8 @@ test('exposes only registrations with every executable adapter and routing metad
 
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
-  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1']);
+  }), ['subtitle.generate@1', 'video.color.adjust@1', 'video.transform@1', 'video.noise@1',
+    'video.vignette@1', 'visual.shape@1', 'visual.text@1', 'visual.group@1']);
   assert.equal(createCapabilityRegistry().promptDefinitions()[0].description,
     '为整段视频生成可编辑字幕；重新生成时替换现有字幕轨');
   assert.equal(createCapabilityRegistry().get('subtitle.generate@1').definition.range.allowed, false);
@@ -528,6 +530,7 @@ test('loads the same registry in a browser without Node dependencies', function(
   const context = { window: { SRTRenderRecipe: { SUBTITLE_STYLE } } };
   vm.runInNewContext(colorSource, context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/video-transform.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/video-texture.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-layers.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/keyframes.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-group.js'), 'utf8'), context);
@@ -539,7 +542,8 @@ test('loads the same registry in a browser without Node dependencies', function(
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('visual.group@1').definition.id, 'visual.group@1');
   const html = fs.readFileSync(path.join(__dirname, '../app/剪辑.html'), 'utf8');
-  const scripts = ['../src/visual-layers.js', '../src/keyframes.js', '../src/visual-group.js', '../src/edit-capabilities.js'];
+  const scripts = ['../src/video-texture.js', '../src/visual-layers.js', '../src/keyframes.js',
+    '../src/visual-group.js', '../src/edit-capabilities.js'];
   scripts.forEach((script, index) => {
     assert.ok(html.includes('src="' + script + '"'), script + ' loads in the editor');
     if (index) assert.ok(html.indexOf(scripts[index - 1]) < html.indexOf(script));

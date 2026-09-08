@@ -18,7 +18,7 @@ test('validates canonical texture steps and preserves source-effect order', () =
   ]) assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }), { code: 'EXPORT_INVALID_RECIPE' });
 });
 
-test('builds texture render steps only with an explicit texture registry', () => {
+test('builds texture render steps with explicit and enabled default registries', () => {
   const graph = { nodes: [
     { type: 'source.video@1' },
     { id: 'n', type: 'video.noise@1', range: { start: 0, end: 2 }, props: { amount: 0.4 } },
@@ -27,7 +27,8 @@ test('builds texture render steps only with an explicit texture registry', () =>
   const registry = createCapabilityRegistry([createNoiseRegistration(), createVignetteRegistration()]);
   assert.deepEqual(buildRenderRecipe(graph, registry).steps.map(step => step.capability),
     ['video.noise@1', 'video.vignette@1']);
-  assert.throws(() => buildRenderRecipe(graph, createCapabilityRegistry()), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+  assert.deepEqual(buildRenderRecipe(graph, createCapabilityRegistry()).steps.map(step => step.capability),
+    ['video.noise@1', 'video.vignette@1']);
 });
 
 test('render recipes retain texture-transform order before visuals and a single subtitle', () => {

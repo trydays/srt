@@ -8,7 +8,7 @@ const capabilities = require('../src/edit-capabilities');
 // Only browser surfaces are doubled: the controller, registry, geometry and
 // color matrices are the actual product modules. Real pixels live in E2E.
 function harness(options = {}) {
-  const created = [], pending = new Map(); let next = 0;
+  const created = [], pending = new Map(), textureTimes = []; let next = 0;
   function element(tag) {
     const handlers = {};
     const el = { tag, style: {}, hidden: true, children: [], width: 0, height: 0,
@@ -22,7 +22,9 @@ function harness(options = {}) {
       const calls = [];
       const ctx = { calls, save() {}, restore() {}, clearRect() {}, fillRect() {},
         translate(...args) { calls.push(['translate', ...args]); }, scale(...args) { calls.push(['scale', ...args]); },
-        drawImage(...args) { calls.push(['draw', ...args]); } };
+        drawImage(...args) { calls.push(['draw', ...args]); },
+        getImageData() { return { data: new Uint8ClampedArray(el.width * el.height * 4) }; },
+        putImageData(...args) { calls.push(['put', ...args]); } };
       el.getContext = () => ctx; created.push(el);
     }
     return el;
@@ -46,6 +48,12 @@ function harness(options = {}) {
     projectEditing: { load: () => snapshot }, projectEditingReady: Promise.resolve(),
     editCapabilityRegistry: capabilities.createCapabilityRegistry(),
     SRTVideoTransform: require('../src/video-transform'), SRTColorAdjustment: require('../src/color-adjustment'),
+    SRTVideoTexture: Object.assign({}, require('../src/video-texture'), {
+      applyFrame(kind, params, rgba, width, height, time) {
+        textureTimes.push(time);
+        return require('../src/video-texture').applyFrame(kind, params, rgba, width, height, time);
+      }
+    }),
     requestAnimationFrame(fn) { pending.set(++next, fn); return next; }, cancelAnimationFrame(id) { pending.delete(id); }
   });
   const context = vm.createContext({ window, document, getActiveProjectId: () => 'project' });
@@ -53,9 +61,29 @@ function harness(options = {}) {
     const filename = path.join(__dirname, '../app', file);
     if (fs.existsSync(filename)) vm.runInContext(fs.readFileSync(filename, 'utf8'), context);
   }
-  return { window, video, canvas, created, pending, setSnapshot(value) { snapshot = value; }, snapshot,
+  return { window, video, canvas, created, pending, textureTimes, setSnapshot(value) { snapshot = value; }, snapshot,
     frame(time) { const [id, fn] = pending.entries().next().value; pending.delete(id); fn(0, { mediaTime: time }); } };
 }
+
+test('texture-only preview keeps the last decoded timestamp while playing and suspends during seeks', () => {
+  const h = harness();
+  h.setSnapshot({ ...h.snapshot, graph: { nodes: [{ type: 'source.video@1' }, {
+    id: 'grain', type: 'video.noise@1', range: { start: 0, end: 4 }, props: { amount: 0.5 }
+  }] } });
+  h.video.paused = false; h.video.emit('play');
+  h.frame(1.25);
+  assert.equal(h.textureTimes.at(-1), 1.25);
+  h.video.currentTime = 1.5; h.video.emit('timeupdate');
+  assert.equal(h.textureTimes.at(-1), 1.25, 'timeupdate must not replace decoded media time');
+  const before = h.textureTimes.length;
+  h.video.emit('seeking');
+  assert.equal(h.pending.size, 0);
+  h.window.colorPreviewController.render();
+  assert.equal(h.textureTimes.length, before, 'seeking must not render a stale frame');
+  h.video.currentTime = 0.5; h.video.emit('seeked');
+  assert.equal(h.textureTimes.at(-1), 0.5);
+  assert.equal(h.canvas.hidden, false);
+});
 
 test('transform preview uses decoded frame mediaTime and exactly one cancellable loop', () => {
   const h = harness();
