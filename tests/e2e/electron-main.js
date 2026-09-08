@@ -94,6 +94,24 @@ const localCliService = {
         { capability: 'video.color.adjust@1', range: { start: 1, end: 3 }, params: { brightness: 0.2 } },
         { capability: 'subtitle.generate@1', params: {} }] : [transform] };
     }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'layer-transactions-success') {
+      if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
+      const first = [
+        { capability: 'visual.shape@1', range: { start: 1, end: 3 },
+          params: { x: .1, y: .1, width: .4, height: .25, color: '#112233' } },
+        { capability: 'visual.text@1', range: { start: 1, end: 3 },
+          params: { text: '<b>第一张</b>', x: .12, y: .12, fontSize: .08, color: '#FFFFFF' } }
+      ];
+      if (/错误第二步/.test(text)) return { kind: 'instruction', steps: [first[0],
+        { capability: 'visual.text@1', range: { start: 1, end: 3 }, params: { text: '   ' } }] };
+      if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
+      return { kind: 'instruction', steps: first.concat([
+        { capability: 'visual.shape@1', range: { start: 2, end: 4 },
+          params: { x: .3, y: .3, width: .4, height: .25, color: '#CC3322' } },
+        { capability: 'visual.text@1', range: { start: 2, end: 4 },
+          params: { text: '第二张', x: .32, y: .32, fontSize: .08, color: '#FFFFFF' } }
+      ]) };
+    }
     if (['color-transactions', 'color-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
       if (/下一步/.test(text)) return { kind: 'clarify', message: '请说明下一步编辑。' };
       const color = { capability: 'video.color.adjust@1', range: { start: 1, end: 3 },
@@ -135,7 +153,7 @@ if (!useProductionEnvironment) {
       exportStartCount += 1;
       state.exportRequests = (state.exportRequests || []).concat([request]);
       onProgress({ jobId: request.jobId, phase: 'rendering', percent: 42 });
-      if (['color-transactions-success', 'transform-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
+      if (['color-transactions-success', 'transform-transactions-success', 'layer-transactions-success'].includes(process.env.SRT_E2E_EFFECT_RESULT)) {
         return { jobId: request.jobId, status: 'completed', outputPath: request.outputPath };
       }
       if (exportStartCount === 1) {

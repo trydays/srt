@@ -36,7 +36,29 @@ function createMarkerDOM(item) {
   m.dataset.editId = item.editId;
   m.dataset.transactionId = item.transactionId;
   m.dataset.lane = item.lane;
+  if (item.editIds) m.dataset.editIds = item.editIds.join(',');
   return m;
+}
+
+function aggregateVisualTimelineItems(items) {
+  var visual = {};
+  items.forEach(function(item) {
+    if (item.lane !== 'visual') return;
+    var aggregate = visual[item.transactionId];
+    if (!aggregate) aggregate = visual[item.transactionId] = { editId: item.editId,
+      editIds: [], transactionId: item.transactionId, lane: 'visual', range: { start: item.range.start, end: item.range.end },
+      label: '静态图层', summary: '' };
+    aggregate.editIds.push(item.editId);
+    aggregate.range.start = Math.min(aggregate.range.start, item.range.start);
+    aggregate.range.end = Math.max(aggregate.range.end, item.range.end);
+    aggregate.summary = aggregate.editIds.length + ' 个元素';
+  });
+  var emitted = {};
+  return items.reduce(function(result, item) {
+    if (item.lane !== 'visual') { result.push(item); return result; }
+    if (!emitted[item.transactionId]) { result.push(visual[item.transactionId]); emitted[item.transactionId] = true; }
+    return result;
+  }, []);
 }
 
 function currentProjectContext() {
@@ -49,7 +71,7 @@ function currentProjectContext() {
 function renderMarkers(){
   var old = track.querySelectorAll('.tl-marker'); for(var i=0;i<old.length;i++)old[i].remove();
   if (!projectStateReady) return;
-  var items = window.projectEditing.timelineItems(activeProjectId);
+  var items = aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId));
   track.style.height = Math.max(80, 28 + items.length * 26) + 'px';
   items.forEach(function(item, index) {
     var marker = createMarkerDOM(item);
@@ -291,7 +313,7 @@ function refreshRequestCards() {
 function transactionResult(document, transactionId) {
   var edits = document.edits.filter(function(edit) { return edit.enabled && edit.transactionId === transactionId; });
   var subtitle = edits.find(function(edit) { return edit.type === 'subtitle.track@1'; });
-  var items = window.projectEditing.timelineItems(activeProjectId).filter(function(item) { return item.transactionId === transactionId; });
+  var items = aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId)).filter(function(item) { return item.transactionId === transactionId; });
   return { subtitleRequest: !!subtitle, resultCount: subtitle ? subtitle.payload.segments.length : 0,
     resultItemCount: items.length, resultSummary: items.map(function(item) { return item.label + ' · ' + item.summary; }).join('；') };
 }
