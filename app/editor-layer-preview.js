@@ -23,7 +23,7 @@
 
   var video = document.getElementById('previewVideo');
   var canvas = document.getElementById('previewLayerCanvas');
-  var scheduled = null, suspended = false;
+  var scheduled = null, suspended = false, lastDecodedTime = null;
   var decodedFrames = typeof video.requestVideoFrameCallback === 'function';
 
   function stop() {
@@ -38,14 +38,14 @@
     canvas.hidden = true;
   }
   function schedule() {
-    if (scheduled !== null || suspended || video.paused || video.ended) return;
+    if (scheduled !== null || suspended || video.paused || video.ended || video.seeking) return;
     if (decodedFrames) scheduled = video.requestVideoFrameCallback(function(_now, frame) {
-      scheduled = null; render(frame.mediaTime);
+      scheduled = null; lastDecodedTime = frame.mediaTime; render(frame.mediaTime);
     });
     else scheduled = root.requestAnimationFrame(function() { scheduled = null; render(video.currentTime); });
   }
   function render(time) {
-    if (suspended || root.projectEditingState !== 'ready') { stop(); clear(); return false; }
+    if (suspended || video.seeking || root.projectEditingState !== 'ready') { stop(); clear(); return false; }
     var snapshot = root.projectEditing.load(getActiveProjectId());
     if (!snapshot.graph.nodes.some(function(node) {
       return node.type === 'visual.shape@1' || node.type === 'visual.text@1';
@@ -56,17 +56,25 @@
     drawGraph(canvas, snapshot.graph, Number.isFinite(time) ? time : video.currentTime, width, height);
     schedule(); return true;
   }
-  function reset() { stop(); clear(); }
+  function refresh() {
+    if (decodedFrames && !video.paused && !video.ended) {
+      if (Number.isFinite(lastDecodedTime)) render(lastDecodedTime);
+      else schedule();
+      return;
+    }
+    render(video.currentTime);
+  }
+  function reset() { stop(); lastDecodedTime = null; clear(); }
   ['play', 'loadedmetadata', 'loadeddata', 'canplay', 'seeked', 'timeupdate'].forEach(function(event) {
-    video.addEventListener(event, function() { render(video.currentTime); });
+    video.addEventListener(event, refresh);
   });
   ['pause', 'ended'].forEach(function(event) {
     video.addEventListener(event, function() { stop(); render(video.currentTime); });
   });
   ['loadstart', 'emptied', 'error', 'seeking'].forEach(function(event) { video.addEventListener(event, reset); });
-  root.addEventListener('project-edit-state-changed', function() { render(video.currentTime); });
+  root.addEventListener('project-edit-state-changed', refresh);
   root.addEventListener('pagehide', function() { suspended = true; reset(); });
-  root.addEventListener('pageshow', function() { suspended = false; render(video.currentTime); });
-  root.layerPreviewController = { render: render };
-  root.projectEditingReady.then(function() { render(video.currentTime); });
+  root.addEventListener('pageshow', function() { suspended = false; refresh(); });
+  root.layerPreviewController = { render: refresh };
+  root.projectEditingReady.then(refresh);
 })(typeof window !== 'undefined' ? window : globalThis);

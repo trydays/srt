@@ -28,3 +28,12 @@ Status: DONE
 - Static shape/text layers only; no animation, images, templates, layer property panel, updates or reordering UI.
 - Electron translation is a scoped deterministic CLI fixture. The separate production actual-AI smoke remains Task 3/root ownership.
 - Browser and FFmpeg glyph antialiasing are not asserted byte-identical; the test checks real text ink in the predicted baseline region and shared geometry/order.
+
+## Review follow-up (2026-09-08)
+
+- RED: `node --test tests/layer-preview.test.js` — 2 passed, 2 failed. A decoded callback at `mediaTime=.99` correctly hid `[1,3)`, but `timeupdate` at `currentTime=1.01` exposed it without a new decoded frame. A `timeupdate` fired during seeking also redrew and restarted both decoded and animation-frame schedulers after the seeking reset.
+- Root cause: decoded playback lifecycle events bypassed the decoded timestamp, while neither `render` nor `schedule` guarded `video.seeking`.
+- Fix: retain the last decoded media time, route lifecycle/public refresh through it during decoded playback, and stop rendering or scheduling while seeking. Paused rendering and animation-frame fallback continue to use `video.currentTime`; source/load/page resets clear the retained time.
+- GREEN Node: `node --test tests/layer-preview.test.js tests/visual-layers.test.js` — 9 passed, 0 failed.
+- GREEN Electron: `./node_modules/.bin/playwright test tests/e2e/layer-edit-flow.spec.js --reporter=line --output=/tmp/srt-cycle4-task2-review-e2e-final` — 3 passed, 0 failed. The strengthened evidence asserts portrait canvas/video content rectangles match, edge pixels remain frame-clipped, literal text produces ink, and a visible subtitle physically overlaps a visual shape while remaining above it.
+- Focused Electron artifacts: `/tmp/srt-cycle4-task2-review-e2e-final`.

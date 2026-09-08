@@ -74,17 +74,54 @@ test.describe('static visual layer editing', () => {
         const pixel = sample(x, y);
         if (pixel[3] > 0 && (pixel[0] !== 17 || pixel[1] !== 34 || pixel[2] !== 51)) textInk++;
       }
-      SRTLayerPreview.drawGraph(canvas, graph, 2, 64, 96);
+      const video = document.getElementById('previewVideo');
+      Object.defineProperties(video, { videoWidth: { configurable: true, value: 64 },
+        videoHeight: { configurable: true, value: 96 }, currentTime: { configurable: true, value: 2 } });
+      layerPreviewController.render(2);
       const portrait = { width: canvas.width, height: canvas.height, first: sample(7, 10), clipped: sample(63, 95) };
-      const subtitle = document.getElementById('previewSubtitle'); subtitle.hidden = false; subtitle.textContent = '字幕在最上层';
+      const containRect = (element, intrinsicWidth, intrinsicHeight) => {
+        const bounds = element.getBoundingClientRect();
+        const scale = Math.min(bounds.width / intrinsicWidth, bounds.height / intrinsicHeight);
+        const width = intrinsicWidth * scale, height = intrinsicHeight * scale;
+        return { left: bounds.left + (bounds.width - width) / 2, top: bounds.top + (bounds.height - height) / 2, width, height };
+      };
+      const subtitle = document.getElementById('previewSubtitle');
+      subtitle.hidden = false; subtitle.textContent = '字幕在最上层';
+      subtitle.style.left = '50%'; subtitle.style.top = '38%'; subtitle.style.bottom = 'auto';
+      subtitle.style.transform = 'translate(-50%, -50%)';
+      const videoContent = containRect(video, 64, 96), canvasContent = containRect(canvas, canvas.width, canvas.height);
+      const subtitleRect = subtitle.getBoundingClientRect();
+      const secondShapeRect = { left: canvasContent.left + .3 * canvasContent.width,
+        top: canvasContent.top + .3 * canvasContent.height,
+        right: canvasContent.left + .7 * canvasContent.width,
+        bottom: canvasContent.top + .55 * canvasContent.height };
       return { states, portrait, textInk, text: graph.nodes.find(node => node.type === 'visual.text@1').props.text,
+        videoContent, canvasContent, subtitleRect: { left: subtitleRect.left, top: subtitleRect.top,
+          right: subtitleRect.right, bottom: subtitleRect.bottom }, secondShapeRect,
+        frameOverflow: getComputedStyle(document.getElementById('previewArea')).overflow,
         z: [getComputedStyle(canvas).zIndex, getComputedStyle(subtitle).zIndex] };
     });
     expect(evidence.states['0.999'].hidden).toBe(true); expect(evidence.states['1'].hidden).toBe(false);
     expect(evidence.states['2'].overlap.slice(0, 3)).toEqual([204, 51, 34]);
     expect(evidence.states['3'].first[3]).toBe(0); expect(evidence.states['3.999'].hidden).toBe(false); expect(evidence.states['4'].hidden).toBe(true);
-    expect(evidence.portrait).toMatchObject({ width: 64, height: 96 }); expect(evidence.textInk).toBeGreaterThan(0);
+    expect(evidence.portrait).toMatchObject({ width: 64, height: 96 });
+    expect(evidence.portrait.first.slice(0, 3)).toEqual([17, 34, 51]);
+    expect(evidence.portrait.clipped[3]).toBe(0); expect(evidence.textInk).toBeGreaterThan(0);
     expect(evidence.text).toBe('<b>第一张</b>'); expect(Number(evidence.z[0])).toBeLessThan(Number(evidence.z[1]));
+    expect(evidence.frameOverflow).toBe('hidden');
+    expect(evidence.canvasContent.left).toBeCloseTo(evidence.videoContent.left, 4);
+    expect(evidence.canvasContent.top).toBeCloseTo(evidence.videoContent.top, 4);
+    expect(evidence.canvasContent.width).toBeCloseTo(evidence.videoContent.width, 4);
+    expect(evidence.canvasContent.height).toBeCloseTo(evidence.videoContent.height, 4);
+    expect(evidence.subtitleRect.right).toBeGreaterThan(evidence.secondShapeRect.left);
+    expect(evidence.subtitleRect.left).toBeLessThan(evidence.secondShapeRect.right);
+    expect(evidence.subtitleRect.bottom).toBeGreaterThan(evidence.secondShapeRect.top);
+    expect(evidence.subtitleRect.top).toBeLessThan(evidence.secondShapeRect.bottom);
+    const withSubtitle = await window.locator('#previewArea').screenshot();
+    await window.locator('#previewSubtitle').evaluate(element => { element.hidden = true; });
+    const withoutSubtitle = await window.locator('#previewArea').screenshot();
+    expect(withSubtitle.equals(withoutSubtitle)).toBe(false);
+    await window.locator('#previewSubtitle').evaluate(element => { element.hidden = false; });
     const screenshot = await window.locator('#previewArea').screenshot({ path: testInfo.outputPath('layer-preview.png') });
     await testInfo.attach('layer-preview', { body: screenshot, contentType: 'image/png' });
   });
