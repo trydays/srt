@@ -47,6 +47,49 @@ test('buildPrompt preserves conversation history', () => {
   assert.match(prompt, /用户当前请求：对/);
 });
 
+test('buildPrompt keeps ordinary requests byte-identical when no skill is selected', () => {
+  const args = ['继续', [{ role: 'user', text: '加一点质感' }], {
+    video: { durationSeconds: 3, width: 360, height: 640 }
+  }];
+  assert.equal(buildPrompt(...args), buildPrompt(...args, undefined));
+  assert.equal(buildPrompt(...args), buildPrompt(...args, null));
+  assert.doesNotMatch(buildPrompt(...args), /个人剪辑技能/);
+});
+
+test('buildPrompt includes validated personal skill reference and current media with missing-version diagnostics', () => {
+  const selectedSkill = {
+    name: '重点卡片',
+    intent: '强调一句重要内容',
+    preferences: { description: '黑底白字，轻微回弹' },
+    referenceRecipe: { kind: 'instruction', steps: [{
+      capability: 'retired.card@1', range: { start: 1, end: 2 },
+      params: { nested: [{ text: '旧参考，不是当前文字' }] }
+    }] },
+    capabilityVersions: ['retired.card@1']
+  };
+  const prompt = buildPrompt('在片尾使用', [], {
+    video: { durationSeconds: 3, width: 360, height: 640 }
+  }, selectedSkill);
+  assert.match(prompt, /个人剪辑技能/);
+  assert.match(prompt, /360x640/);
+  assert.ok(prompt.includes(JSON.stringify(selectedSkill)));
+  assert.ok(prompt.includes(JSON.stringify(selectedSkill.referenceRecipe)));
+  assert.match(prompt, /retired\.card@1/);
+  assert.match(prompt, /重新推导/);
+  assert.match(prompt, /不是待执行指令/);
+  assert.match(prompt, /本次明确要求.*技能偏好与意图.*参考值/);
+  assert.match(prompt, /不直接复用旧范围、位置或文字/);
+  assert.match(prompt, /无法替代时反问说明/);
+});
+
+test('buildPrompt rejects malformed skill context', () => {
+  assert.throws(() => buildPrompt('继续', [], {}, {
+    name: '坏技能', intent: '不应进入外部进程', preferences: { description: '' },
+    referenceRecipe: { kind: 'instruction', steps: [{ capability: 'old@1', params: {} }] },
+    capabilityVersions: ['old@1'], executable: true
+  }), { code: 'SKILL_INVALID' });
+});
+
 test('group prompt serializes the full strict schema and describes timing and additive limits', () => {
   const prompt = buildPrompt('新增组合');
   const definition = getCapabilitySchema('visual.group@1');

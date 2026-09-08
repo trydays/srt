@@ -21,7 +21,7 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.match(preloadSource, /getLocalCliState: \(\) => ipcRenderer\.invoke\('local-cli:get-state'\)/);
   assert.match(preloadSource, /rescanLocalCli: \(\) => ipcRenderer\.invoke\('local-cli:rescan'\)/);
   assert.match(preloadSource, /selectLocalCli: \(id\) => ipcRenderer\.invoke\('local-cli:select', id\)/);
-  assert.match(preloadSource, /translateInstruction:\s*\(text, history, context\)\s*=>\s*ipcRenderer\.invoke\('local-cli:translate-instruction',\s*\{ text, history, context \}\)/);
+  assert.match(preloadSource, /translateInstruction:\s*\(text, history, context, skill\)\s*=>\s*ipcRenderer\.invoke\('local-cli:translate-instruction',\s*\{ text, history, context, skill \}\)/);
   assert.equal(preloadSource.includes('translateLocalCliEffect'), false);
   assert.equal(preloadSource.includes('translateSubtitleOrFadeIn'), false);
   assert.match(preloadSource, /generateSubtitles: \(request\) => ipcRenderer\.invoke\('subtitles:generate', request\)/);
@@ -30,6 +30,51 @@ test('main and preload expose only narrow local CLI operations', () => {
   assert.equal(preloadSource.includes('subtitle:exec'), false);
   assert.equal(preloadSource.includes('readFile'), false);
   assert.equal(preloadSource.includes('writeFile'), false);
+});
+
+test('main forwards the optional personal skill context to the local CLI service', () => {
+  const script = `
+    const { EventEmitter } = require('node:events');
+    const Module = require('node:module');
+    const handlers = new Map();
+    const app = new EventEmitter();
+    app.isPackaged = false;
+    app.getPath = () => '/isolated-user-data';
+    app.whenReady = () => new Promise(() => {});
+    app.quit = () => {};
+    class BrowserWindow { static fromWebContents() { return null; } }
+    const electron = { app, BrowserWindow, dialog: {},
+      ipcMain: { handle(name, handler) { handlers.set(name, handler); } } };
+    const originalLoad = Module._load;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'electron') return electron;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    const received = [];
+    require(${JSON.stringify(mainPath)}).startApplication({
+      environmentModule: { detectEnvironment() {}, describeInstall() {}, installTool() {}, getExportTools() {} },
+      localCliService: {
+        getState() {}, rescan() {}, select() {},
+        translateInstruction(...args) { received.push(args); return { kind: 'clarify', message: 'ok' }; }
+      },
+      subtitleService: { generate() {} },
+      videoExportService: { start() {}, cancel() {} },
+      showSaveDialog() {}
+    });
+    const skill = { name: '技能', intent: '意图', preferences: { description: '' },
+      referenceRecipe: { kind: 'instruction', steps: [{ capability: 'old@1', params: {} }] },
+      capabilityVersions: ['old@1'] };
+    handlers.get('local-cli:translate-instruction')({}, {
+      text: '继续', history: [], context: { revision: 1 }, skill
+    }).then(() => process.stdout.write('FORWARDED=' + JSON.stringify(received) + '\\n'));
+  `;
+  assert.deepEqual(runMainProbe(script, 'FORWARDED'), [[
+    '继续', [], { revision: 1 }, {
+      name: '技能', intent: '意图', preferences: { description: '' },
+      referenceRecipe: { kind: 'instruction', steps: [{ capability: 'old@1', params: {} }] },
+      capabilityVersions: ['old@1']
+    }
+  ]]);
 });
 
 test('preload exposes only the narrow video export bridge', () => {

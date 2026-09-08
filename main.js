@@ -273,7 +273,9 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       const request = payload && typeof payload === 'object' ? payload : {};
       return {
         ok: true,
-        instruction: await activeLocalCliService.translateInstruction(request.text, request.history, request.context)
+        instruction: await activeLocalCliService.translateInstruction(
+          request.text, request.history, request.context, request.skill
+        )
       };
     } catch (error) {
       return publicFailure(error, 'LOCAL_CLI_TRANSLATION_FAILED');
