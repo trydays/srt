@@ -103,6 +103,8 @@ const localCliService = {
       if (/错误第二步/.test(text)) return { kind: 'instruction', steps: [noise,
         { capability: 'video.vignette@1', params: { strength: 2 } }] };
       if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
+      if (/新增矩形/.test(text)) return { kind: 'instruction', steps: [{ capability: 'visual.shape@1',
+        range: { start: 0, end: 3 }, params: { x: .2, y: .2, width: .4, height: .4, color: '#12CC56' } }] };
       if (/新增文字/.test(text)) return { kind: 'instruction', steps: [{ capability: 'visual.text@1',
         range: { start: 0, end: 3 }, params: { text: '纹理之上', x: .1, y: .1, fontSize: .08 } }] };
       return { kind: 'instruction', steps: [color, noise, vignette] };

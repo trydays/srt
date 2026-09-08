@@ -158,6 +158,59 @@ test.describe('grain and vignette desktop editing', () => {
     expect(evidence.overlayPixel).toEqual([18, 52, 86, 255]);
   });
 
+  test('the real editor DOM composites an opaque visual above active source grain', async ({ window }, testInfo) => {
+    await openPlayableEditor(window, testInfo);
+    await submit(window, '调亮并添加颗粒和暗角');
+    await submit(window, '新增矩形');
+    await seekAndPixels(window, 1.25);
+    await expect(window.locator('#previewSourceCanvas')).toBeVisible();
+    await expect(window.locator('#previewLayerCanvas')).toBeVisible();
+    const intrinsic = await window.evaluate(() => {
+      const source = document.getElementById('previewSourceCanvas').getContext('2d');
+      const layer = document.getElementById('previewLayerCanvas').getContext('2d');
+      return { source: Array.from(source.getImageData(38, 25, 1, 1).data),
+        layer: Array.from(layer.getImageData(38, 25, 1, 1).data) };
+    });
+    expect(intrinsic.layer).toEqual([18, 204, 86, 255]);
+    expect(intrinsic.source).not.toEqual(intrinsic.layer);
+    const box = await window.locator('#previewArea').evaluate(element => {
+      const rect = element.getBoundingClientRect(); return { width: rect.width, height: rect.height };
+    });
+    let active, baseline, original;
+    try {
+      active = await window.locator('#previewArea').screenshot({ path: testInfo.outputPath('texture-opaque-overlay.png') });
+      await window.locator('#previewSourceCanvas').evaluate(canvas => { canvas.hidden = true; });
+      baseline = await window.locator('#previewArea').screenshot({ path: testInfo.outputPath('texture-opaque-baseline.png') });
+      await window.locator('#previewLayerCanvas').evaluate(canvas => { canvas.hidden = true; });
+      original = await window.locator('#previewArea').screenshot({ path: testInfo.outputPath('texture-opaque-original.png') });
+    } finally {
+      await window.evaluate(() => {
+        document.getElementById('previewSourceCanvas').hidden = false;
+        document.getElementById('previewLayerCanvas').hidden = false;
+      });
+    }
+    const composite = await window.evaluate(async ({ active, baseline, original, box }) => {
+      async function pixel(data, position) {
+        const image = new Image(); image.src = 'data:image/png;base64,' + data; await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+        const contentHeight = box.height, contentWidth = contentHeight * 96 / 64;
+        const left = (box.width - contentWidth) / 2;
+        const x = Math.round((left + contentWidth * position) / box.width * image.width);
+        const y = Math.round(contentHeight * position / box.height * image.height);
+        return Array.from(context.getImageData(x, y, 1, 1).data);
+      }
+      return { activeInside: await pixel(active, .4), baselineInside: await pixel(baseline, .4),
+        originalInside: await pixel(original, .4), activeOutside: await pixel(active, .8),
+        baselineOutside: await pixel(baseline, .8) };
+    }, { active: active.toString('base64'), baseline: baseline.toString('base64'),
+      original: original.toString('base64'), box });
+    expect(composite.activeInside).toEqual(composite.baselineInside);
+    expect(composite.baselineInside).not.toEqual(composite.originalInside);
+    expect(composite.activeOutside).not.toEqual(composite.baselineOutside);
+    await testInfo.attach('texture-opaque-overlay', { body: active, contentType: 'image/png' });
+  });
+
   test('one compact transaction persists, supplies typed context, adds overlay, and undo is atomic', async ({ window, readScenarioState }, testInfo) => {
     await openPlayableEditor(window, testInfo);
     const before = await window.evaluate(() => projectEditing.load(getActiveProjectId()));

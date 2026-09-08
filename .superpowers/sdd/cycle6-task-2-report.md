@@ -103,3 +103,15 @@ env -u FORCE_COLOR -u NO_COLOR SRT_REAL_EXPORT=1 \
 ```
 
 Result: **5/5 passed** in 17.3s. After explicitly including the source-noise node in the opaque-overlay graph, its focused pixel case also passed **1/1** in 3.3s. No full suite was rerun in this follow-up because the controller requested focused verification and reserved final full-suite acceptance for the root task.
+
+### Opaque DOM composition follow-up
+
+The final scoped review requested proof from the real editor's composed DOM rather than detached layer pixels. The scenario fixture now returns a normal `visual.shape@1` instruction. The test applies source grain and the opaque shape through normal project/controller paths, confirms both real preview canvases are visible, and captures three `#previewArea` PNGs:
+
+- source and layer visible;
+- source hidden with the same layer visible;
+- source and layer hidden, revealing the original video.
+
+At a point inside the shape, the first two PNG pixels are byte-for-byte equal. The layer-visible baseline differs from the original-video control. Outside the shape, the source-visible and source-hidden pixels differ. Together these zero-tolerance controls prove that source grain is displayed while the opaque layer remains above it; no platform screenshot color value or codec tolerance is hardcoded.
+
+Focused item result: **1/1 passed** in 4.0s. Complete texture spec result: **6/6 passed** in 21.0s. This follow-up changed tests/fixture/report only and did not call AI or modify product code.
