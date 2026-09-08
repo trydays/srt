@@ -133,9 +133,10 @@
   }
   function refresh() { window.colorPreviewController.render(); }
   function reset() { stop(); lastDecodedTime = null; compositor.clear(); }
+  function resetSource() { seeking = false; reset(); }
   ['play', 'loadeddata', 'canplay'].forEach(function(event) { video.addEventListener(event, refresh); });
   ['pause', 'ended'].forEach(function(event) { video.addEventListener(event, function() { stop(); refresh(); }); });
-  ['loadstart', 'emptied', 'error'].forEach(function(event) { video.addEventListener(event, reset); });
+  ['loadstart', 'emptied', 'error'].forEach(function(event) { video.addEventListener(event, resetSource); });
   video.addEventListener('seeking', function() { seeking = true; reset(); });
   video.addEventListener('seeked', function() { seeking = false; lastDecodedTime = video.currentTime; refresh(); });
   window.addEventListener('pagehide', function() { suspended = true; reset(); });

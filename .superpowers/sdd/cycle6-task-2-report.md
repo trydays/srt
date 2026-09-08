@@ -79,3 +79,27 @@ Result at the complete-suite checkpoint: **61/61 passed** in 3.0m. The focused s
 ## Issues / concerns
 
 None. No AI service was called and nothing was pushed.
+
+## Independent review closure
+
+The independent scoped review found two Important items; both are closed in the follow-up commit.
+
+1. **Interrupted seek latch on source replacement:** added a VM regression for `seeking -> emptied -> loadeddata` without an old-source `seeked`. RED was 4/5 with the new source still hidden. Source-reset events now clear the seek latch before the existing reset; GREEN is 5/5.
+2. **Desktop acceptance detail:** strengthened the real playable-media spec to assert grain pixels change during natural playback, the ended frame remains stable, an opaque visual-layer pixel is unchanged by source grain, texture/color order matches independent RGB expectations in both landscape and portrait geometry, the first request has compact history and three timeline projections, and undoing only the newest text survives reload with the three source edits intact.
+
+Focused review verification:
+
+```sh
+env -u FORCE_COLOR -u NO_COLOR node --test tests/source-preview.test.js
+```
+
+Result: **5/5 passed**.
+
+```sh
+env -u FORCE_COLOR -u NO_COLOR SRT_REAL_EXPORT=1 \
+  SRT_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg \
+  SRT_FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe \
+  npx playwright test tests/e2e/texture-edit-flow.spec.js
+```
+
+Result: **5/5 passed** in 17.3s. After explicitly including the source-noise node in the opaque-overlay graph, its focused pixel case also passed **1/1** in 3.3s. No full suite was rerun in this follow-up because the controller requested focused verification and reserved final full-suite acceptance for the root task.

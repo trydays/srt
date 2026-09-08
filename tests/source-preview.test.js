@@ -85,6 +85,20 @@ test('texture-only preview keeps the last decoded timestamp while playing and su
   assert.equal(h.canvas.hidden, false);
 });
 
+test('a source replacement releases an interrupted seek latch for the new decoded stream', () => {
+  const h = harness();
+  h.setSnapshot({ ...h.snapshot, graph: { nodes: [{ type: 'source.video@1' }, {
+    id: 'grain', type: 'video.noise@1', range: { start: 0, end: 4 }, props: { amount: 0.5 }
+  }] } });
+  h.video.paused = false; h.video.emit('play'); h.frame(1.25);
+  h.video.emit('seeking');
+  assert.equal(h.pending.size, 0);
+  h.video.emit('emptied');
+  h.video.readyState = 2; h.video.currentTime = 0; h.video.emit('loadeddata');
+  assert.equal(h.canvas.hidden, false, 'the new decoded source can render without an old seeked event');
+  assert.equal(h.pending.size, 1, 'the new decoded stream owns exactly one callback');
+});
+
 test('transform preview uses decoded frame mediaTime and exactly one cancellable loop', () => {
   const h = harness();
   assert.ok(h.window.sourcePreviewController, 'the source compositor must be installed');

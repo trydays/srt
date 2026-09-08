@@ -23,6 +23,13 @@ function vignetteReference(rgba, width, height, strength) {
   }
 }
 
+function brightnessReference(rgba, brightness) {
+  const offset = brightness * 63.75 * 255 / 219;
+  for (let i = 0; i < rgba.length; i += 4) for (let c = 0; c < 3; c++) {
+    rgba[i + c] = Math.min(255, Math.max(0, Math.floor(rgba[i + c] + offset + .5)));
+  }
+}
+
 async function openPlayableEditor(window, testInfo) {
   const ffmpeg = process.env.SRT_FFMPEG_PATH;
   expect(ffmpeg).toBeTruthy();
@@ -72,15 +79,27 @@ test.describe('grain and vignette desktop editing', () => {
     const corner = p => p.slice(0, 3).reduce((a, b) => a + b, 0);
     expect(corner(late)).toBeLessThan(corner(early));
     await window.evaluate(() => document.getElementById('previewVideo').play());
-    await expect.poll(() => window.evaluate(() => document.getElementById('previewVideo').currentTime)).toBeGreaterThan(1.25);
-    await window.evaluate(() => document.getElementById('previewVideo').pause());
+    await expect.poll(() => window.evaluate(() => document.getElementById('previewVideo').currentTime)).toBeGreaterThan(1.4);
+    const playing = await window.evaluate(() => Array.from(document.getElementById('previewSourceCanvas')
+      .getContext('2d').getImageData(0, 0, 96, 64).data));
+    expect(playing).not.toEqual(late);
+    await window.evaluate(() => { const v = document.getElementById('previewVideo'); v.pause(); v.currentTime = 3.75; v.playbackRate = 4; });
+    await window.evaluate(() => new Promise(resolve => {
+      const video = document.getElementById('previewVideo'); video.addEventListener('ended', resolve, { once: true }); video.play();
+    }));
+    const ended = await window.evaluate(() => Array.from(document.getElementById('previewSourceCanvas')
+      .getContext('2d').getImageData(0, 0, 96, 64).data));
+    await window.waitForTimeout(250);
+    const afterEnded = await window.evaluate(() => Array.from(document.getElementById('previewSourceCanvas')
+      .getContext('2d').getImageData(0, 0, 96, 64).data));
+    expect(afterEnded).toEqual(ended);
     await expect(window.locator('#previewSourceCanvas')).toBeVisible();
   });
 
   test('ordered compositor produces independent landscape and portrait pixels', async ({ window }, testInfo) => {
     await openPlayableEditor(window, testInfo);
     const evidence = await window.evaluate(() => {
-      const results = [];
+      const results = [], orders = [];
       for (const [width, height] of [[6, 4], [4, 6]]) {
         const source = document.createElement('canvas'); source.width = width; source.height = height;
         const sctx = source.getContext('2d'); sctx.fillStyle = 'rgb(80,120,160)'; sctx.fillRect(0, 0, width, height);
@@ -95,18 +114,24 @@ test.describe('grain and vignette desktop editing', () => {
         compositor.render(source, graph, 1.25, width, height);
         results.push({ width, height, pixels: Array.from(output.getContext('2d').getImageData(0, 0, width, height).data) });
       }
-      const orderSource = document.createElement('canvas'); orderSource.width = 6; orderSource.height = 4;
-      orderSource.getContext('2d').fillRect(0, 0, 6, 4);
-      const renderOrder = nodes => {
+      const renderOrder = (nodes, width, height) => {
+        const orderSource = document.createElement('canvas'); orderSource.width = width; orderSource.height = height;
+        orderSource.getContext('2d').fillRect(0, 0, width, height);
         const output = document.createElement('canvas');
         SRTSourcePreview.createCompositor(output, document.getElementById('previewColorFilter').parentNode)
-          .render(orderSource, { nodes }, 1.25, 6, 4);
-        return Array.from(output.getContext('2d').getImageData(0, 0, 6, 4).data);
+          .render(orderSource, { nodes }, 1.25, width, height);
+        return Array.from(output.getContext('2d').getImageData(0, 0, width, height).data);
       };
       const color = { id: 'c', type: 'video.color@1', range: { start: 0, end: 2 },
         props: { temperature: 0, brightness: .1, saturation: 1, contrast: 1 } };
       const noise = { id: 'o', type: 'video.noise@1', range: { start: 0, end: 2 }, props: { amount: 1 } };
-      return { results, noiseThenColor: renderOrder([noise, color]), colorThenNoise: renderOrder([color, noise]) };
+      for (const [width, height] of [[6, 4], [4, 6]]) orders.push({ width, height,
+        noiseThenColor: renderOrder([noise, color], width, height),
+        colorThenNoise: renderOrder([color, noise], width, height) });
+      const overlay = document.createElement('canvas');
+      SRTLayerPreview.drawGraph(overlay, { nodes: [noise, { id: 'shape', type: 'visual.shape@1',
+        range: { start: 0, end: 2 }, props: { x: 0, y: 0, width: .5, height: .5, color: '#123456' } }] }, 1.25, 6, 4);
+      return { results, orders, overlayPixel: Array.from(overlay.getContext('2d').getImageData(1, 1, 1, 1).data) };
     });
     for (const item of evidence.results) {
       const expected = new Uint8ClampedArray(item.width * item.height * 4);
@@ -120,7 +145,17 @@ test.describe('grain and vignette desktop editing', () => {
       vignetteReference(flipped, item.width, item.height, .5);
       expect(item.pixels).toEqual(Array.from(flipped));
     }
-    expect(evidence.noiseThenColor).not.toEqual(evidence.colorThenNoise);
+    for (const item of evidence.orders) {
+      const original = new Uint8ClampedArray(item.width * item.height * 4);
+      for (let i = 3; i < original.length; i += 4) original[i] = 255;
+      const noiseThenColor = original.slice(); noiseReference(noiseThenColor, item.width, item.height, 1.25, 1);
+      brightnessReference(noiseThenColor, .1);
+      const colorThenNoise = original.slice(); brightnessReference(colorThenNoise, .1);
+      noiseReference(colorThenNoise, item.width, item.height, 1.25, 1);
+      expect(item.noiseThenColor).toEqual(Array.from(noiseThenColor));
+      expect(item.colorThenNoise).toEqual(Array.from(colorThenNoise));
+    }
+    expect(evidence.overlayPixel).toEqual([18, 52, 86, 255]);
   });
 
   test('one compact transaction persists, supplies typed context, adds overlay, and undo is atomic', async ({ window, readScenarioState }, testInfo) => {
@@ -132,6 +167,11 @@ test.describe('grain and vignette desktop editing', () => {
       'video.noise.adjustment@1', 'video.vignette.adjustment@1']);
     expect(new Set(saved.document.edits.map(e => e.transactionId)).size).toBe(1);
     expect(saved.graph.documentRevision).toBe(saved.document.revision);
+    await expect(window.getByTestId('request-status-card')).toHaveCount(1);
+    await expect(window.getByTestId('request-status-card').first()).toHaveClass(/is-collapsed/);
+    await expect(window.locator('.tl-marker')).toHaveCount(3);
+    expect(await window.locator('.tl-marker').allTextContents()).toEqual([
+      expect.stringContaining('调色'), expect.stringContaining('画面颗粒'), expect.stringContaining('画面暗角')]);
     await window.reload(); await window.waitForFunction(() => window.projectEditingState === 'ready');
     expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()))).toEqual(saved);
     await submit(window, '新增文字');
@@ -145,6 +185,9 @@ test.describe('grain and vignette desktop editing', () => {
     await window.getByTestId('request-status-summary').nth(1).click();
     await window.getByRole('button', { name: '撤销本次编辑', exact: true }).click();
     expect((await window.evaluate(() => projectEditing.load(getActiveProjectId()))).document.edits).toHaveLength(3);
+    await window.reload(); await window.waitForFunction(() => window.projectEditingState === 'ready');
+    expect((await window.evaluate(() => projectEditing.load(getActiveProjectId()))).document.edits)
+      .toEqual(saved.document.edits);
     const raw = await window.evaluate(() => localStorage.getItem('srt_project_edit_state'));
     await submit(window, '错误第二步', 'failed');
     expect(await window.evaluate(() => localStorage.getItem('srt_project_edit_state'))).toBe(raw);
