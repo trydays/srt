@@ -29,12 +29,15 @@ try {
 }
 
 function createWindow(onClose) {
+  const appIcon = path.join(__dirname, 'app', 'assets', 'srt-icon.png');
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(appIcon);
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     minWidth: 900,
     minHeight: 600,
     title: '三天remotion',
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,

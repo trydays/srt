@@ -39,9 +39,12 @@
       "src/**/*",
       "package.json"
     ],
+    "mac": {
+      "icon": "app/assets/srt-icon.icns"
+    },
     "win": {
       "target": "zip",
-      "icon": null
+      "icon": "app/assets/srt-icon.ico"
     }
   },
   "devDependencies": {
