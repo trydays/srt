@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { buildPrompt, parseInstruction } = require('./instruction-capabilities');
+const { translateCodex } = require('./codex-translation');
 
 const CLI_DEFINITIONS = [
   { id: 'codex', label: 'Codex CLI', command: 'codex' },
@@ -13,7 +14,7 @@ const CLI_DEFINITIONS = [
 const TRANSLATION_TIMEOUT_MS = 60000;
 
 const EFFECT_ARGS = {
-  codex: (prompt) => ['exec', prompt],
+  codex: (prompt) => ['exec', '--json', prompt],
   claude: (prompt) => ['-p', prompt],
   gemini: (prompt) => ['-p', prompt]
 };
@@ -47,6 +48,9 @@ function createDefaultRun(execFile, platform, env) {
 
 function createDefaultTranslate(execFile) {
   return function translate(file, args) {
+    if (args[0] === 'exec' && args[1] === '--json') {
+      return translateCodex(execFile, file, args, TRANSLATION_TIMEOUT_MS);
+    }
     return new Promise((resolve, reject) => {
       const child = execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
         if (error) reject(error);

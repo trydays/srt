@@ -87,7 +87,7 @@ const localCliService = {
             // Keep only process metadata, never CLI auth, prompts or reasoning logs.
             if (args[0] !== '--version') (state.realCliProcesses ||= []).push({
               file,command:args[0],timeout:options.timeout,durationMs:Date.now()-processStarted,
-              code:error?.code ?? 0,killed:!!error?.killed,signal:error?.signal ?? null,
+              code:error ? (error.code ?? null) : 0,killed:!!error?.killed,signal:error?.signal ?? null,
               stdoutBytes:Buffer.byteLength(stdout || ''),stderrBytes:Buffer.byteLength(stderr || '')
             });
             callback(error,stdout,stderr);

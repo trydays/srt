@@ -27,17 +27,18 @@ test.describe('real selected CLI + local ASR + formal Remotion', () => {
   test('extracts spoken keypoints without creating subtitles, renders and undoes atomically', async ({window,readScenarioState},testInfo) => {
     const source=testInfo.outputPath('speech-source.mp4');
     const ffmpeg='/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg';
-    // Original audio is the analysis input. The neutral background deliberately
-    // excludes the reference video's burned-in cards from evidence of new work.
-    await run(ffmpeg,['-v','error','-f','lavfi','-i','color=c=0x20252F:s=1280x720:r=30:d=35',
-      '-i',process.env.SRT_REAL_KEYPOINT_SOURCE,'-map','0:v:0','-map','1:a:0','-t','35',
-      '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',source]);
+    await run(ffmpeg, ['-v', 'error', '-i', process.env.SRT_REAL_KEYPOINT_SOURCE,
+      '-map', '0:v:0', '-map', '0:a:0', '-t', '35',
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source]);
     const {selectedCliId}=JSON.parse(await fs.readFile(path.join(process.env.SRT_REAL_KEYPOINT_USER_DATA,'local-cli.json'),'utf8'));
     expect(['codex','claude']).toContain(selectedCliId);
     await window.getByTestId(`local-cli-${selectedCliId}`).click(); await window.getByTestId('continue').click();
     await window.getByTestId('video-input').setInputFiles(source); await window.getByTestId('start-editing').click();
     await expect(window.locator('#remotionPreview')).toHaveAttribute('data-state','ready');
     await window.locator('.input-editor').fill('提炼整段视频口播中的关键观点，在对应讲述位置弹出重点文字。每个要点用醒目的大标题、简短说明和小标签组成，白色粗体，轻阴影，淡入并略微放大，结束淡出。放左右两侧，避开底部字幕区域，不生成字幕轨。只根据口播提炼，不要编造。');
+    const before=await window.evaluate(()=>projectEditing.load(getActiveProjectId()));
+    await fs.writeFile(testInfo.outputPath('before.json'),JSON.stringify(before,null,2));
     await window.locator('#generateBtn').click();
     const card=window.getByTestId('request-status-card').last();
     await expect(card.getByTestId('timeline-status')).toHaveAttribute('data-state','success',{timeout:180000});
@@ -49,17 +50,31 @@ test.describe('real selected CLI + local ASR + formal Remotion', () => {
     expect(snapshot.document.edits.every(edit=>edit.type==='visual.group.layer@1')).toBe(true);
     expect(new Set(snapshot.document.edits.map(edit=>edit.transactionId)).size).toBe(1);
     expect(snapshot.document.edits.every(edit=>edit.range.start>=0 && edit.range.end<=35.1)).toBe(true);
+    await fs.writeFile(testInfo.outputPath('applied.json'),JSON.stringify(snapshot,null,2));
+    const recipePath=testInfo.outputPath('real-ai-recipe.json');
+    await fs.writeFile(recipePath,JSON.stringify({
+      edits:snapshot.document.edits,
+      transcript:state.translationCalls[1].context.transcript
+    },null,2));
+    await testInfo.attach('real-ai-recipe',{path:recipePath,contentType:'application/json'});
+    const callsBeforeReload=state.translationCalls.length;
+    await window.reload();
+    await expect(window.locator('#remotionPreview')).toHaveAttribute('data-state','ready');
+    expect((await readScenarioState()).translationCalls.length).toBe(callsBeforeReload);
+    expect(await window.evaluate(()=>projectEditing.load(getActiveProjectId()).document.edits))
+      .toEqual(snapshot.document.edits);
     const middle=snapshot.document.edits[0].range.start + (snapshot.document.edits[0].range.end-snapshot.document.edits[0].range.start)/2;
     await window.evaluate(t=>editorPlayback.seekSeconds(t),middle);
     await window.locator('#remotionPreview').screenshot({path:testInfo.outputPath('real-keypoints.png')});
     await window.getByTestId('video-export-button').click();
     await expect(window.getByTestId('video-export-status')).toHaveText('导出完成',{timeout:180000});
     const kept=testInfo.outputPath('real-keypoints.mp4'); await fs.copyFile(state.exportOutputPath,kept);
-    await testInfo.attach('real-ai-recipe',{body:Buffer.from(JSON.stringify({edits:snapshot.document.edits,
-      transcript:state.translationCalls[1].context.transcript},null,2)),contentType:'application/json'});
     await testInfo.attach('real-keypoints',{path:kept,contentType:'video/mp4'});
     await window.getByTestId('request-status-summary').last().click();
     await window.getByTestId('subtitle-undo').last().click();
     await expect.poll(()=>window.evaluate(()=>projectEditing.load(getActiveProjectId()).document.edits.length)).toBe(0);
+    const undone=await window.evaluate(()=>projectEditing.load(getActiveProjectId()));
+    expect(undone.document.edits).toEqual(before.document.edits);
+    await fs.writeFile(testInfo.outputPath('undone.json'),JSON.stringify(undone,null,2));
   });
 });

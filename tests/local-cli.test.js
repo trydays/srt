@@ -3,6 +3,33 @@ const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
 const { createLocalCliService } = require('../src/local-cli');
 
+test('Codex completes from JSONL and reaps a process that ignores termination', async () => {
+  let child;
+  let closed = false;
+  const service = createLocalCliService({
+    platform: 'darwin', env: { PATH: '/bin' }, homeDir: '', userDataDir: '/prefs',
+    fsApi: fakeFs(['/bin/codex']), run: async () => ({ exitCode: 0 }),
+    execFile: (_file, args, options, callback) => {
+      assert.deepEqual(args.slice(0, 2), ['exec', '--json']);
+      child = childProcess.execFile(process.execPath, ['-e', `
+        process.on('SIGTERM', () => {});
+        process.stdin.resume();
+        process.stdin.on('end', () => {
+          console.log(JSON.stringify({type:'item.completed', item:{type:'agent_message',text:'{"kind":"clarify","message":"完成"}'}}));
+          console.log(JSON.stringify({type:'turn.completed'}));
+          setInterval(() => {}, 1000);
+        });
+      `], { ...options, timeout: 1500, killSignal: 'SIGKILL' }, callback);
+      child.on('close', () => { closed = true; });
+      return child;
+    }
+  });
+  await service.select('codex');
+  assert.deepEqual(await service.translateInstruction('连接测试'), { kind: 'clarify', message: '完成' });
+  assert.equal(closed, true);
+  assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+});
+
 function fakeFs(files) {
   const entries = new Set(files);
   let preference = null;
@@ -204,8 +231,8 @@ test('forwards conversation history into the generated prompt', async () => {
     { role: 'assistant', text: '你想要字幕还是淡入？' }
   ]);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].args[1], /做个效果/);
-  assert.match(calls[0].args[1], /你想要字幕还是淡入？/);
+  assert.match(calls[0].args.at(-1), /做个效果/);
+  assert.match(calls[0].args.at(-1), /你想要字幕还是淡入？/);
 });
 
 test('forwards unified project context into the generated prompt', async () => {
@@ -226,14 +253,14 @@ test('forwards unified project context into the generated prompt', async () => {
     subtitleTotal: 1
   });
   assert.equal(calls.length, 1);
-  assert.match(calls[0].args[1], /当前 revision：3/);
-  assert.match(calls[0].args[1], /视频总时长：75 秒/);
-  assert.match(calls[0].args[1], /视频分辨率：1280x720/);
-  assert.match(calls[0].args[1], /播放头位置：12 秒/);
-  assert.match(calls[0].args[1], /1\. edit-1，subtitle\.track@1，范围 \[0–75 秒\]/);
-  assert.match(calls[0].args[1], /字幕轨（共 1 段）/);
-  assert.match(calls[0].args[1], /第1段 \[2–5 秒\]：大家好/);
-  assert.doesNotMatch(calls[0].args[1], /不要重复/);
+  assert.match(calls[0].args.at(-1), /当前 revision：3/);
+  assert.match(calls[0].args.at(-1), /视频总时长：75 秒/);
+  assert.match(calls[0].args.at(-1), /视频分辨率：1280x720/);
+  assert.match(calls[0].args.at(-1), /播放头位置：12 秒/);
+  assert.match(calls[0].args.at(-1), /1\. edit-1，subtitle\.track@1，范围 \[0–75 秒\]/);
+  assert.match(calls[0].args.at(-1), /字幕轨（共 1 段）/);
+  assert.match(calls[0].args.at(-1), /第1段 \[2–5 秒\]：大家好/);
+  assert.doesNotMatch(calls[0].args.at(-1), /不要重复/);
 });
 
 test('forwards a validated fourth-argument skill into the actual generated prompt', async () => {
@@ -253,9 +280,9 @@ test('forwards a validated fourth-argument skill into the actual generated promp
     video: { durationSeconds: 3, width: 360, height: 640 }
   }, skill);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].args[1], /个人剪辑技能/);
-  assert.match(calls[0].args[1], /360x640/);
-  assert.ok(calls[0].args[1].includes(JSON.stringify(skill)));
+  assert.match(calls[0].args.at(-1), /个人剪辑技能/);
+  assert.match(calls[0].args.at(-1), /360x640/);
+  assert.ok(calls[0].args.at(-1).includes(JSON.stringify(skill)));
 });
 
 test('rejects invalid skill context before invoking the translation process', async () => {
@@ -321,7 +348,7 @@ test('translate closes stdin so a CLI waiting for EOF can respond', async () => 
   });
 });
 
-test('waits up to 60s for a local CLI translation response', async () => {
+test('retains the 60s deadline for a legacy CLI translation', async () => {
   const calls = [];
   const execFile = (file, args, options, callback) => {
     calls.push({ file, args, options });
@@ -345,12 +372,12 @@ for (const [name, ending, expectedCode] of [
   test(`does not accept valid stdout after a real CLI ${name}`, async () => {
     const service = createLocalCliService({
       platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
-      fsApi: fakeFs(['/bin/codex']), run: async () => ({ exitCode: 0 }),
+      fsApi: fakeFs(['/bin/claude']), run: async () => ({ exitCode: 0 }),
       execFile: (_file, _args, options, callback) => childProcess.execFile(process.execPath, ['-e',
         `process.stdin.resume();process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({kind:'clarify',message:'not a successful invocation'}));${ending};})`
       ], { ...options, timeout: 500 }, callback)
     });
-    await service.select('codex');
+    await service.select('claude');
     await assert.rejects(service.translateInstruction('连接测试'), { code: expectedCode });
   });
 }
