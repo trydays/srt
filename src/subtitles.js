@@ -60,7 +60,7 @@ function createSubtitleService({
     }
   }
 
-  async function generate({ videoPath } = {}) {
+  async function generate({ videoPath, includeTiming = false } = {}) {
     if (typeof videoPath !== 'string' || !pathApi.isAbsolute(videoPath)) {
       throw codedError('VIDEO_PATH_UNAVAILABLE');
     }
@@ -83,7 +83,8 @@ function createSubtitleService({
     let result;
     try {
       result = await run(managedPython, [
-        transcriberPath, '--model-dir', modelDir, '--video', videoPath
+        transcriberPath, '--model-dir', modelDir, '--video', videoPath,
+        ...(includeTiming === true ? ['--include-timing'] : [])
       ], {
         timeout: 300000,
         maxBuffer: 4 * 1024 * 1024,
@@ -92,6 +93,22 @@ function createSubtitleService({
       });
     } catch (_) {
       throw codedError('SUBTITLE_TRANSCRIPTION_FAILED');
+    }
+    if (includeTiming === true) {
+      let payload;
+      try { payload = JSON.parse(result.stdout); }
+      catch { throw codedError('SUBTITLE_INVALID_OUTPUT'); }
+      if (!payload || Object.keys(payload).sort().join(',') !== 'segments,timingSegments') {
+        throw codedError('SUBTITLE_INVALID_OUTPUT');
+      }
+      const segments = parseSegments(JSON.stringify(payload.segments));
+      const timingSegments = parseSegments(JSON.stringify(payload.timingSegments));
+      if (timingSegments.some((part, index) =>
+        !segments.some(segment => part.start >= segment.start && part.end <= segment.end) ||
+        (index > 0 && part.start < timingSegments[index - 1].end))) {
+        throw codedError('SUBTITLE_INVALID_OUTPUT');
+      }
+      return { segments, timingSegments };
     }
     return { segments: parseSegments(result.stdout) };
   }

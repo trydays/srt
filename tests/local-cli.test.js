@@ -48,6 +48,28 @@ function fakeFs(files) {
   };
 }
 
+for (const cli of ['codex', 'claude']) {
+  test(`${cli} child receives the current system proxy and supplied environment`, async () => {
+    const env = { PATH: '/bin', SRT_ENV_TEST: 'preserved' };
+    const service = createLocalCliService({
+      platform: 'darwin', env, homeDir: '', userDataDir: '/prefs',
+      fsApi: fakeFs([`/bin/${cli}`]), run: async () => ({ exitCode: 0 }),
+      readSystemProxy: async () => 'HTTPEnable : 1\nHTTPProxy : 127.0.0.1\nHTTPPort : 8877\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 8877',
+      execFile: (_file, _args, options, callback) => childProcess.execFile(process.execPath, ['-e', `
+        const reply = JSON.stringify({kind:'clarify',message:[process.env.HTTPS_PROXY,process.env.HTTP_PROXY,process.env.SRT_ENV_TEST].join('|')});
+        if (${JSON.stringify(cli)} === 'codex') {
+          console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:reply}}));
+          console.log(JSON.stringify({type:'turn.completed'}));
+        } else console.log(reply);
+      `], options, callback)
+    });
+    await service.select(cli);
+    assert.equal((await service.translateInstruction('连接测试')).message,
+      'http://127.0.0.1:8877|http://127.0.0.1:8877|preserved');
+    assert.equal(env.HTTPS_PROXY, undefined);
+  });
+}
+
 function fakeTranslator(result) {
   const calls = [];
   return {

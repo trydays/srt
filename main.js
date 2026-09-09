@@ -409,7 +409,8 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   ipcMain.handle('subtitles:generate', async (_event, request) => {
     try {
       const result = await activeSubtitleService.generate(request);
-      return { ok: true, segments: result.segments };
+      return { ok: true, segments: result.segments,
+        ...(result.timingSegments ? { timingSegments: result.timingSegments } : {}) };
     } catch (error) {
       return publicFailure(error, 'SUBTITLE_TRANSCRIPTION_FAILED');
     }

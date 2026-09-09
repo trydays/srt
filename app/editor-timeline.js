@@ -432,13 +432,13 @@ async function translateAndApply(text, record, card) {
     var source = appliedSegments;
     var sourceKind = 'applied-subtitles';
     if (!source.length) {
-      var recognized = await window.srtAPI.generateSubtitles({ videoPath: frozenVideoPath });
+      var recognized = await window.srtAPI.generateSubtitles({ videoPath: frozenVideoPath, includeTiming: true });
       if (!recognized || recognized.ok !== true || !Array.isArray(recognized.segments)) {
         updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
           error: subtitleErrorMessage(recognized && recognized.errorCode) });
         return;
       }
-      source = recognized.segments;
+      source = recognized.timingSegments || recognized.segments;
       sourceKind = 'speech-recognition';
     }
     try {

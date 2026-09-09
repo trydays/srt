@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { buildPrompt, parseInstruction } = require('./instruction-capabilities');
 const { translateCodex } = require('./codex-translation');
+const { resolveCliEnv } = require('./cli-proxy-env');
 
 const CLI_DEFINITIONS = [
   { id: 'codex', label: 'Codex CLI', command: 'codex' },
@@ -47,12 +48,12 @@ function createDefaultRun(execFile, platform, env) {
 }
 
 function createDefaultTranslate(execFile) {
-  return function translate(file, args) {
+  return function translate(file, args, env) {
     if (args[0] === 'exec' && args[1] === '--json') {
-      return translateCodex(execFile, file, args, TRANSLATION_TIMEOUT_MS);
+      return translateCodex(execFile, file, args, TRANSLATION_TIMEOUT_MS, env);
     }
     return new Promise((resolve, reject) => {
-      const child = execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+      const child = execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true, env }, (error, stdout) => {
         if (error) reject(error);
         else resolve(stdout);
       });
@@ -95,7 +96,8 @@ function createLocalCliService({
   fsApi = fs.promises,
   run,
   execFile = childProcess.execFile,
-  translate
+  translate,
+  readSystemProxy
 }) {
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const preferencePath = pathApi.join(userDataDir, 'local-cli.json');
@@ -196,7 +198,8 @@ function createLocalCliService({
     const prompt = buildPrompt(text, history, context, skill);
     let output;
     try {
-      output = await translateEffectOutput(selectedCli.file, argsFactory(prompt));
+      const executionEnv = await resolveCliEnv(env, platform, readSystemProxy);
+      output = await translateEffectOutput(selectedCli.file, argsFactory(prompt), executionEnv);
     } catch (error) {
       throw instructionTranslationError(error);
     }

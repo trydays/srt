@@ -1,7 +1,7 @@
 const { StringDecoder } = require('node:string_decoder');
 
 // Codex's turn.completed is the completion boundary; process exit is cleanup.
-function translateCodex(execFile, file, args, timeoutMs) {
+function translateCodex(execFile, file, args, timeoutMs, env = process.env) {
   return new Promise((resolve, reject) => {
     const decoder = new StringDecoder('utf8');
     let pending = '';
@@ -12,7 +12,7 @@ function translateCodex(execFile, file, args, timeoutMs) {
     let deadline;
     const failure = () => new Error('Codex completion protocol failed');
     const child = execFile(file, args, {
-      timeout: 0, maxBuffer: 1024 * 1024, windowsHide: true
+      timeout: 0, maxBuffer: 1024 * 1024, windowsHide: true, env
     }, () => {});
 
     function finish(error) {

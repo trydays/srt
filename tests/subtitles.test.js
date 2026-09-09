@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createSubtitleService } = require('../src/subtitles');
 
+test('analysis mode preserves subtitles and returns finer timing', async () => {
+  const segments = [{ start: 0, end: 8, text: '第一点。第二点。' }];
+  const timingSegments = [{ start: 0.3, end: 2, text: '第一点。' }, { start: 4, end: 7, text: '第二点。' }];
+  const fixture = createFixture({ stdout: JSON.stringify({ segments, timingSegments }) });
+  assert.deepEqual(await fixture.service.generate({ videoPath: '/videos/talk.mp4', includeTiming: true }),
+    { segments, timingSegments });
+  assert.ok(fixture.calls[1].args.includes('--include-timing'));
+});
+
 function createFixture({
   stdout = '[]',
   runtimeError = null,
