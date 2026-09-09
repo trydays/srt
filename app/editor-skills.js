@@ -130,9 +130,9 @@
     }).join('、');
   }
 
-  function selectSkill(record) {
+  function selectSkill(record, official) {
     if (requestLocked()) return;
-    selected = skills.contextFromSkill(record);
+    selected = official ? skills.normalizeSkillContext(record.context) : skills.contextFromSkill(record);
     lastFocus = null;
     closeDialog(bankDialog);
     if (!editorEl.textContent.trim()) editorEl.textContent = '使用「' + selected.name + '」';
@@ -141,16 +141,21 @@
     refresh();
   }
 
-  function createSkillItem(record) {
+  function createSkillItem(record, official) {
     var item = document.createElement('article');
     item.className = 'skill-item';
-    item.dataset.testid = 'personal-skill-item';
+    item.dataset.testid = official ? 'official-skill-item' : 'personal-skill-item';
     item.dataset.skillId = record.id;
     var head = document.createElement('div');
     head.className = 'skill-item__head';
     var title = document.createElement('div');
     title.className = 'skill-item__name';
     title.textContent = record.name;
+    if (official) {
+      var badge = document.createElement('small');
+      badge.textContent = ' · 官方模板';
+      title.appendChild(badge);
+    }
     var actions = document.createElement('div');
     actions.className = 'skill-item__actions';
     var view = document.createElement('button');
@@ -162,14 +167,15 @@
     remove.type = 'button'; remove.className = 'skill-button'; remove.dataset.testid = 'skill-delete'; remove.textContent = '删除';
     var details = document.createElement('div');
     details.className = 'skill-item__details'; details.hidden = true;
-    appendDetail(details, '剪辑意图', record.intent);
-    appendDetail(details, '偏好', record.preferences.description || '未填写');
-    appendDetail(details, '效果', effectSummary(record));
+    var detailRecord = official ? record.context : record;
+    appendDetail(details, '剪辑意图', detailRecord.intent);
+    appendDetail(details, '偏好', detailRecord.preferences.description || '未填写');
+    appendDetail(details, '效果', official ? '根据当前视频重新提炼内容与时间；修改后的效果可另存为个人技能。' : effectSummary(record));
     view.addEventListener('click', function() {
       details.hidden = !details.hidden;
       view.textContent = details.hidden ? '查看' : '收起';
     });
-    use.addEventListener('click', function() { selectSkill(record); });
+    use.addEventListener('click', function() { selectSkill(record, official); });
     remove.addEventListener('click', function() {
       if (!window.confirm('确定删除技能「' + record.name + '」吗？')) return;
       try {
@@ -179,7 +185,8 @@
         showError(bankError, storageErrorMessage(error));
       }
     });
-    actions.appendChild(view); actions.appendChild(use); actions.appendChild(remove);
+    actions.appendChild(view); actions.appendChild(use);
+    if (!official) actions.appendChild(remove);
     head.appendChild(title); head.appendChild(actions);
     item.appendChild(head); item.appendChild(details);
     return item;
@@ -188,10 +195,12 @@
   function renderBank() {
     bankList.replaceChildren();
     showError(bankError, '');
+    var officialTemplates = skills.listOfficialTemplates();
+    officialTemplates.forEach(function(record) { bankList.appendChild(createSkillItem(record, true)); });
     try {
       var records = store.list();
       records.forEach(function(record) { bankList.appendChild(createSkillItem(record)); });
-      bankEmpty.hidden = records.length > 0;
+      bankEmpty.hidden = records.length + officialTemplates.length > 0;
     } catch (error) {
       bankEmpty.hidden = true;
       showError(bankError, storageErrorMessage(error));

@@ -1,4 +1,4 @@
-/* === shared.js — 三天remotion 共享脚本 === */
+/* === shared.js — 三天 remotion 共享脚本 === */
 
 /* ── Chip 选中 ── */
 function setActiveChip(container, clickedEl, selector) {
@@ -138,7 +138,7 @@ function renderTabs() {
   var onHome = isHomePage();
   var html = '<div class="wtab is-pinned' + (onHome ? ' is-active' : '')
     + '" onclick="location.href=\'主页.html\'"><button class="wtab__main" type="button">'
-    + '<span class="wtab__label">三 三天remotion</span></button></div>';
+    + '<span class="wtab__label">三 三天 remotion</span></button></div>';
   for (var i = 0; i < projects.length; i++) {
     var project = projects[i];
     var active = !onHome && project.id === activeId;

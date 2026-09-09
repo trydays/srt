@@ -125,17 +125,19 @@
     if (!hasExactKeys(value, CONTEXT_KEYS)
         || !validText(value.name, 60, false) || value.name !== value.name.trim()
         || !validText(value.intent, 4000, false)) invalid();
-    var reference = validateReference(value.referenceRecipe);
+    var reference = value.referenceRecipe === null ? null : validateReference(value.referenceRecipe);
+    if (reference === null && (!Array.isArray(value.capabilityVersions) || value.capabilityVersions.length)) invalid();
     return {
       name: value.name,
       intent: value.intent,
       preferences: normalizePreferences(value.preferences),
       referenceRecipe: reference,
-      capabilityVersions: validateVersions(value.capabilityVersions, reference)
+      capabilityVersions: reference === null ? [] : validateVersions(value.capabilityVersions, reference)
     };
   }
 
   function validateRecord(value) {
+    if (!value || value.referenceRecipe === null) invalid();
     if (!hasExactKeys(value, RECORD_KEYS) || value.schemaVersion !== 1
         || typeof value.id !== 'string' || !value.id
         || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)
@@ -299,7 +301,21 @@
     return { list: list, get: get, save: save, remove: remove };
   }
 
+  function listOfficialTemplates() {
+    var name = '口播要点自动卡片';
+    return [{
+      id: 'official-keypoint-cards-v1', name: name,
+      context: {
+        name: name,
+        intent: '分析当前视频的带时间语音原文，自动提炼关键要点并定位对应时段，在合适位置叠加卡片或大标题说明标签。没有完整原文时先申请 transcript。要点数量、文字和起止时间根据当前视频重新推导，不照搬旧视频，不按时长均分。',
+        preferences: { description: '沿用粉色半透明毛玻璃圆角卡片、柔和发光边缘、淡入淡出，以及清晰的大标题和简短说明标签。按内容选择卡片或标题，避免遮挡主体。仅使用当前可执行能力；没有可用嵌入素材时不虚构素材地址。' },
+        referenceRecipe: null, capabilityVersions: []
+      }
+    }];
+  }
+
   return {
+    listOfficialTemplates: listOfficialTemplates,
     createPersonalSkillStore: createPersonalSkillStore,
     referenceFromTransaction: referenceFromTransaction,
     normalizeSkillContext: normalizeSkillContext,

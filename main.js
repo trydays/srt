@@ -36,7 +36,7 @@ function createWindow(onClose) {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: '三天remotion',
+    title: '三天 remotion',
     icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {

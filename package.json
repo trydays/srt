@@ -1,7 +1,7 @@
 {
   "name": "srt",
   "version": "1.0.0",
-  "description": "三天remotion — AI 视频剪辑桌面应用",
+  "description": "三天 remotion — AI 视频剪辑桌面应用",
   "main": "main.js",
   "scripts": {
     "build:remotion": "node scripts/build-remotion.mjs",
@@ -18,10 +18,10 @@
     "test:e2e:real-mac": "SRT_REAL_MAC_SMOKE=1 playwright test tests/e2e/real-mac-smoke.spec.js"
   },
   "license": "MIT",
-  "author": "三天remotion",
+  "author": "三天 remotion",
   "build": {
     "appId": "com.srt.three-days-remotion",
-    "productName": "三天remotion",
+    "productName": "三天 remotion",
     "directories": {
       "output": "dist"
     },
