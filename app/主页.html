@@ -127,6 +127,7 @@
     :root { --pvw-drift: 8px; }
   </style>
   <script src="shared.js"></script>
+  <script src="../src/project-delete.js"></script>
 </head>
 <body>
 
@@ -282,6 +283,7 @@
 
     /* Recent projects — from localStorage */
     var recentGrid = document.getElementById('recentGrid');
+    function renderRecentProjects() {
     var projects = getProjects();
     if (projects.length > 0) {
       var html = '';
@@ -304,6 +306,30 @@
     } else {
       recentGrid.innerHTML = '<div class="recent-empty">暂无项目，导入一段视频开始</div>';
     }
+    Array.from(recentGrid.querySelectorAll('.pcard')).forEach(function(card) {
+      var wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      card.replaceWith(wrapper);
+      wrapper.appendChild(card);
+      card.style.width = '100%';
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '删除';
+      remove.dataset.testid = 'delete-project';
+      remove.style.cssText = 'position:absolute;right:10px;top:10px;padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-panel);color:var(--text);cursor:pointer';
+      remove.addEventListener('click', function() {
+        var project = getProjectById(card.dataset.projectId);
+        if (!project || !window.confirm('删除项目「' + project.name + '」？项目编辑记录和字幕将被删除，无法撤销；原始视频和已导出视频不会删除。')) return;
+        try {
+          window.SRTProjectDelete.deleteProject(localStorage, project.id);
+          renderRecentProjects();
+          renderTabs();
+        } catch (_) { window.alert('项目删除未完成，请检查本地存储后重试。'); }
+      });
+      wrapper.appendChild(remove);
+    });
+    }
+    renderRecentProjects();
 
     /* Drop zone */
     var dz = document.getElementById('dropZone');
