@@ -11,9 +11,9 @@ function getDur(){return videoDuration||200}
 function pctToTime(pct){return formatDur(pct*getDur())}
 function renderPlayhead(pct){var pad=16;playhead.style.left=(pad+pct*(trackWidth()-pad*2))+'px';tlCur.textContent=pctToTime(pct)}
 /* Seek video from playhead */
-function seekVideo(pct){if(videoDuration)videoEl.currentTime=pct*videoDuration;renderPlayhead(pct)}
+function seekVideo(pct){if(videoDuration)editorPlayback.seekSeconds(pct*videoDuration);renderPlayhead(pct)}
 /* Update playhead from video */
-videoEl.addEventListener('timeupdate',function(){if(!dragging&&videoDuration)renderPlayhead(videoEl.currentTime/videoDuration)});
+editorPlayback.subscribe(function(state){if(!dragging&&videoDuration)renderPlayhead(state.currentTime/videoDuration)});
 
 track.addEventListener('mousedown',function(e){dragging=true;seekVideo(posToPct(e.clientX));e.preventDefault()});
 document.addEventListener('mousemove',function(e){if(!dragging)return;seekVideo(posToPct(e.clientX))});
@@ -65,7 +65,7 @@ function aggregateVisualTimelineItems(items) {
 
 function currentProjectContext() {
   var context = window.projectEditing.aiContext(activeProjectId);
-  context.playheadSeconds = Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0;
+  context.playheadSeconds = editorPlayback.getState().currentTime;
   return context;
 }
 

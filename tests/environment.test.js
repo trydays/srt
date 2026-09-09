@@ -57,7 +57,13 @@ function makeFixture(overrides) {
       if (result === undefined) throw commandError('ENOENT');
       return result;
     },
-    getBundledTools: () => options.bundled || {}
+    getBundledTools: () => options.bundled || {},
+    probeRemotionRuntime: async () => options.remotionRuntime || {
+      packages: { status: 'ready', reason: 'ok', version: '4.0.522' },
+      playerBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/player.js' },
+      rendererBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/render' },
+      browser: { status: 'ready', reason: 'ok', path: '/app/chrome-headless-shell' }
+    }
   };
   fixture.calls = calls;
   return fixture;
@@ -358,14 +364,80 @@ test('硬件阈值和架构按三级策略评估', async () => {
   assert.deepEqual([unsupported.hardware.chip.status, unsupported.hardware.chip.reason], ['missing', 'unsupported']);
 });
 
-test('模式只由各自所需的兼容工具决定', async () => {
+test('应用内置 Remotion 运行时不把系统 Node 或 npm 当成前提', async () => {
   const report = await createEnvironmentModule(macFixture({
     versions: { ffmpeg: '8.0.1', node: '18.0.0', npm: '11.17.0', python3: '3.12.4' },
     whisper: false
   })).detectEnvironment();
   assert.deepEqual(report.modes.ffmpeg, { status: 'ready', reason: 'ok', blockers: [] });
-  assert.deepEqual(report.modes.remotion, { status: 'limited', reason: 'incompatible', blockers: ['node'] });
+  assert.deepEqual(report.modes.remotion, { status: 'missing', reason: 'ffprobe_missing', blockers: ['mediaProbe'] });
   assert.deepEqual(report.modes.subtitles, { status: 'missing', reason: 'absent', blockers: ['whisper'] });
+});
+
+test('仅有系统 Node 和 npm 不会把缺少 Remotion 包的环境误报为就绪', async () => {
+  const report = await createEnvironmentModule(macFixture({
+    versions: { node: '22.18.0', npm: '10.9.3' },
+    remotionRuntime: {
+      packages: { status: 'missing', reason: 'remotion_packages_missing' },
+      playerBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/player.js' },
+      rendererBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/render' },
+      browser: { status: 'ready', reason: 'ok', path: '/app/chrome-headless-shell' }
+    }
+  })).detectEnvironment();
+
+  assert.equal(report.tools.node.status, 'ready');
+  assert.equal(report.tools.npm.status, 'ready');
+  assert.deepEqual(report.modes.remotion, {
+    status: 'missing', reason: 'remotion_packages_missing', blockers: ['packages', 'mediaProbe']
+  });
+});
+
+test('Remotion 分别报告缺少 Player 构建、renderer 构建和渲染浏览器', async () => {
+  const cases = [
+    ['playerBundle', 'remotion_player_bundle_missing', 'missing'],
+    ['rendererBundle', 'remotion_renderer_bundle_missing', 'missing'],
+    ['browser', 'remotion_browser_missing', 'missing'],
+    ['browser', 'remotion_browser_unusable', 'limited']
+  ];
+  for (const [component, reason, status] of cases) {
+    const runtime = {
+      packages: { status: 'ready', reason: 'ok', version: '4.0.522' },
+      playerBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/player.js' },
+      rendererBundle: { status: 'ready', reason: 'ok', path: '/app/remotion-built/render' },
+      browser: { status: 'ready', reason: 'ok', path: '/app/chrome-headless-shell' }
+    };
+    runtime[component] = { status, reason };
+    const report = await createEnvironmentModule(macFixture({
+      versions: { ffmpeg: '9.0.1' },
+      remotionRuntime: runtime,
+      commandResults: { 'ffprobe -version': 'ffprobe version 9.0.1' }
+    })).detectEnvironment();
+    assert.equal(report.modes.remotion.status, status);
+    assert.equal(report.modes.remotion.reason, reason);
+    assert.ok(report.modes.remotion.blockers.includes(component));
+  }
+});
+
+test('Remotion 使用普通 ffprobe 就绪，不受旧字幕滤镜要求限制', async () => {
+  const fixture = macFixture({
+    versions: { ffmpeg: '9.0.1' },
+    commandResults: {
+      'ffmpeg -hide_banner -filters': 'Filters:\n ... scale V->V',
+      'ffmpeg -hide_banner -encoders': ' V..... h264_videotoolbox',
+      'ffmpeg -hide_banner -muxers': ' E mp4 MP4',
+      'ffprobe -version': 'ffprobe version 9.0.1'
+    }
+  });
+  const environment = createEnvironmentModule(fixture);
+  const report = await environment.detectEnvironment();
+
+  assert.equal(report.modes.subtitleExport.reason, 'subtitle_filter_missing');
+  assert.deepEqual(report.modes.remotion, { status: 'ready', reason: 'ok', blockers: [] });
+  assert.deepEqual(await environment.getRemotionTools(), {
+    ffprobePath: 'ffprobe',
+    browserExecutable: '/app/chrome-headless-shell',
+    bundlePath: '/app/remotion-built/render'
+  });
 });
 
 test('Python 按平台顺序选择候选项，Whisper 仅由托管环境决定', async () => {

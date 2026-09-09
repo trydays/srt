@@ -20,7 +20,13 @@ if (!environmentPage) {
     unsupported: '当前系统或硬件不支持',
     subtitle_filter_missing: '当前 FFmpeg 缺少 ass 字幕滤镜',
     encoder_missing: '当前 FFmpeg 缺少 MP4 所需的编码能力',
-    ffprobe_missing: '未找到与 FFmpeg 配合使用的 ffprobe'
+    ffprobe_missing: '未找到与 FFmpeg 配合使用的 ffprobe',
+    remotion_packages_missing: '应用的 Remotion 渲染包不完整，请重新安装应用',
+    remotion_versions_incoherent: '应用的 Remotion 渲染包版本不一致，请重新安装应用',
+    remotion_player_bundle_missing: '缺少 Remotion 预览构建，请重新准备应用资源',
+    remotion_renderer_bundle_missing: '缺少 Remotion 导出构建，请重新准备应用资源',
+    remotion_browser_missing: '缺少本地 Remotion 渲染浏览器，请重新准备应用资源',
+    remotion_browser_unusable: '本地 Remotion 渲染浏览器无法启动，请重新安装应用'
   };
   var TOOL_DEFINITIONS = [
     { id: 'ffmpeg', label: 'FFmpeg', description: '视频编解码引擎' },
@@ -36,6 +42,13 @@ if (!environmentPage) {
     { id: 'subtitles', label: '语音字幕', description: '语音识别与字幕生成' }
   ];
   var INSTALL_TARGETS = { ffmpeg: 'ffmpeg', node: 'node', npm: 'node', python: 'python', whisper: 'whisper' };
+  var BLOCKER_LABELS = {
+    packages: 'Remotion 包',
+    playerBundle: 'Remotion 预览构建',
+    rendererBundle: 'Remotion 导出构建',
+    browser: 'Remotion 渲染浏览器',
+    mediaProbe: '媒体探测工具'
+  };
   var detectionGeneration = 0;
   var pendingInstall = null;
   var currentReport = null;
@@ -370,6 +383,7 @@ if (!environmentPage) {
   }
 
   function installToolLabel(toolId) {
+    if (BLOCKER_LABELS[toolId]) return BLOCKER_LABELS[toolId];
     for (var i = 0; i < TOOL_DEFINITIONS.length; i++) {
       if (TOOL_DEFINITIONS[i].id === toolId) return TOOL_DEFINITIONS[i].label;
     }

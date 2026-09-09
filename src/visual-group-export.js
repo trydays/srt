@@ -8,6 +8,12 @@ function fail() {
   throw error;
 }
 
+function unsupported() {
+  const error = new Error('EXPORT_UNSUPPORTED_OPERATION');
+  error.code = 'EXPORT_UNSUPPORTED_OPERATION';
+  throw error;
+}
+
 function plain(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     && Object.getPrototypeOf(value) === Object.prototype;
@@ -76,6 +82,8 @@ function buildGroupFilter(step, stepIndex, media) {
     const geometry = visualLayers.geometry(layer.kind, layer.params,
       media.displayWidth, media.displayHeight);
     if (layer.kind === 'shape') {
+      if (geometry.cornerRadius !== 0 || geometry.borderWidth !== 0
+          || geometry.fillOpacity !== 1) unsupported();
       branch.push(`drawbox=x=${geometry.x}:y=${geometry.y}:w=${geometry.width}:h=${geometry.height}:color=0x${geometry.color.slice(1)}:t=fill:replace=1`);
       return;
     }

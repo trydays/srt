@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('srtAPI', {
     ipcRenderer.invoke('local-cli:translate-instruction', { text, history, context, skill }),
   generateSubtitles: (request) => ipcRenderer.invoke('subtitles:generate', request),
   resolveVideoSource: (videoPath) => ipcRenderer.invoke('video:resolve-source', videoPath),
+  getRemotionState: () => ipcRenderer.invoke('remotion:state'),
+  prepareRemotionPreview: (request) => ipcRenderer.invoke('remotion:prepare-preview', request),
+  releaseRemotionPreview: (sessionId) => ipcRenderer.invoke('remotion:release-preview', sessionId),
   startVideoExport: (request) => ipcRenderer.invoke('video-export:start', request),
   cancelVideoExport: (jobId) => ipcRenderer.invoke('video-export:cancel', jobId),
   onVideoExportProgress: (callback) => {

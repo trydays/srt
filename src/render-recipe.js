@@ -117,8 +117,14 @@
     var kind=step.capability==='visual.shape@1'?'shape':'text', params;
     try { params=getVisualLayers().normalizeParams(kind,step.params,false); }
     catch(_){ throw codedError('EXPORT_INVALID_RECIPE'); }
-    if (!hasOnlyKeys(step.params,Object.keys(kind==='shape'?getVisualLayers().SHAPE_PARAMETERS:getVisualLayers().TEXT_PARAMETERS).sort()))
+    var expectedKeys=Object.keys(kind==='shape'?getVisualLayers().SHAPE_PARAMETERS:getVisualLayers().TEXT_PARAMETERS).sort();
+    var legacyShapeKeys=['color','height','width','x','y'];
+    var legacyShape=kind==='shape' && hasOnlyKeys(step.params,legacyShapeKeys);
+    if (!hasOnlyKeys(step.params,expectedKeys)
+        && !legacyShape)
       throw codedError('EXPORT_INVALID_RECIPE');
+    if (legacyShape) params={x:step.params.x,y:step.params.y,width:step.params.width,
+      height:step.params.height,color:step.params.color};
     return {capability:step.capability,range:{start:step.range.start,end:step.range.end},params:params};
   }
 
@@ -148,7 +154,16 @@
     } catch (_) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
-    if (!sameData(step.params, params)) throw codedError('EXPORT_INVALID_RECIPE');
+    var comparable=step.params;
+    if (Array.isArray(step.params.layers)) {
+      comparable=Object.assign({},step.params,{layers:step.params.layers.map(function(layer){
+        if (!isPlainObject(layer) || layer.kind!=='shape' || !isPlainObject(layer.params)
+            || !hasOnlyKeys(layer.params,['color','height','width','x','y'])) return layer;
+        return {kind:'shape',params:Object.assign({},layer.params,{cornerRadius:0,borderWidth:0,
+          borderColor:'#FFFFFF',fillOpacity:1})};
+      })});
+    }
+    if (!sameData(comparable, params)) throw codedError('EXPORT_INVALID_RECIPE');
     return {
       capability: 'visual.group@1',
       range: { start: step.range.start, end: step.range.end },

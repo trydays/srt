@@ -60,6 +60,7 @@
     else scheduled = root.requestAnimationFrame(function() { scheduled = null; render(video.currentTime); });
   }
   function render(time) {
+    if (root.remotionPreviewController && root.remotionPreviewController.isActive()) { stop(); clear(); return false; }
     if (suspended || video.seeking || root.projectEditingState !== 'ready') { stop(); clear(); return false; }
     var snapshot = root.projectEditing.load(getActiveProjectId());
     if (!snapshot.graph.nodes.some(isVisualNode)) { stop(); clear(); return false; }

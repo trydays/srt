@@ -70,6 +70,7 @@
       VIDEO_PATH_UNAVAILABLE: '当前视频路径不可用',
       EXPORT_BUSY: '已有视频正在导出',
       EXPORT_UNSUPPORTED_OPERATION: '当前编辑暂不支持导出',
+      REMOTION_GRAPH_UNSUPPORTED: '当前编辑暂不支持导出',
       EXPORT_RUNTIME_NOT_READY: '导出工具尚未准备好',
       EXPORT_INVALID_RECIPE: '当前字幕无法导出',
       EXPORT_TARGET_EXISTS: '目标文件已存在',
@@ -123,7 +124,7 @@
       showState('请先应用字幕修改');
       return;
     }
-    var recipe;
+    var recipe, snapshot, engine = 'legacy';
     var projectId = getActiveProjectId();
     var videoPath = window.currentProjectVideoPath;
     waitingForProject = true;
@@ -145,10 +146,21 @@
         showState('请先应用字幕修改');
         return;
       }
-      var snapshot = window.projectEditing.load(projectId);
-      recipe = window.SRTRenderRecipe.buildRenderRecipe(
-        snapshot.graph,
-        window.editCapabilityRegistry
+      snapshot = window.projectEditing.load(projectId);
+      if (window.remotionPreviewController) engine = await window.remotionPreviewController.ensure(snapshot);
+      if (getActiveProjectId() !== projectId || window.currentProjectVideoPath !== videoPath ||
+          window.projectEditing.load(projectId).document.revision !== snapshot.document.revision) {
+        showState('项目已变化，请重新导出'); return;
+      }
+      if (window.timelineController.isRequestInFlight()) {
+        showState('当前编辑仍在处理中'); return;
+      }
+      if (window.subtitleController.hasPendingChanges()) {
+        window.subtitleController.openAfter(null);
+        showState('请先应用字幕修改'); return;
+      }
+      if (engine !== 'remotion') recipe = window.SRTRenderRecipe.buildRenderRecipe(
+        snapshot.graph, window.editCapabilityRegistry
       );
     } catch (error) {
       showState(exportErrorMessage(error && error.code));
@@ -164,11 +176,13 @@
     freezeEditor();
     showState('准备导出', { cancellable: true });
     try {
-      var result = await window.srtAPI.startVideoExport({
+      var request = {
         jobId: currentJobId,
-        videoPath: videoPath,
-        recipe: recipe
-      });
+        videoPath: videoPath
+      };
+      if (engine === 'remotion') { request.engine = engine; request.snapshot = snapshot; }
+      else request.recipe = recipe;
+      var result = await window.srtAPI.startVideoExport(request);
       if (!result || result.jobId !== currentJobId) return;
       if (result.status === 'completed') {
         showState('导出完成', { outputPath: result.outputPath });

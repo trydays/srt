@@ -13,15 +13,17 @@
     ? require('./visual-group') : root && root.SRTVisualGroup;
   var videoTexture = typeof module === 'object' && module.exports
     ? require('./video-texture') : root && root.SRTVideoTexture;
-  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture);
+  var remotionSupport = typeof module === 'object' && module.exports
+    ? require('./remotion-support') : root && root.SRTRemotionSupport;
+  var api = factory(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture, remotionSupport);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SRTEditCapabilities = api;
-})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture) {
+})(typeof window === 'undefined' ? null : window, function(renderRecipe, colorAdjustment, videoTransform, visualLayers, visualGroup, videoTexture, remotionSupport) {
   'use strict';
 
   var SUBTITLE_STYLE = renderRecipe && renderRecipe.SUBTITLE_STYLE;
   var REQUIRED_ADAPTERS = [
-    'prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport'
+    'prepare', 'toEdit', 'toGraph', 'toTimeline'
   ];
 
   function codedError(code, message) {
@@ -550,6 +552,10 @@
       if (typeof registration.nodeType === 'string') byNodeType[registration.nodeType] = registration;
     });
 
+    function executableRegistration(registration) {
+      return completeRegistration(registration) && remotionSupport.supportsNodeType(registration.nodeType);
+    }
+
     function validateRecipe(recipe) {
       if (!isDataOnly(recipe) || !isPlainObject(recipe) || Object.keys(recipe).length !== 2
           || !hasOnlyKeys(recipe, ['kind', 'steps']) || recipe.kind !== 'instruction'
@@ -563,7 +569,7 @@
           throw codedError('RECIPE_INVALID');
         }
         var registration = byId[step.capability];
-        if (!registration || !completeRegistration(registration)) {
+        if (!registration || !executableRegistration(registration)) {
           throw codedError('RECIPE_UNSUPPORTED_CAPABILITY');
         }
         if (!isPlainObject(step.params)) throw codedError('RECIPE_INVALID_PARAM');
@@ -600,7 +606,7 @@
       forEditType: function(type) { return byEditType[type] || null; },
       forNodeType: function(type) { return byNodeType[type] || null; },
       promptDefinitions: function() {
-        return items.filter(completeRegistration).map(function(registration) {
+        return items.filter(executableRegistration).map(function(registration) {
           return clone(registration.definition);
         });
       },

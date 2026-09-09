@@ -8,6 +8,7 @@ const { createEnvironmentModule } = require('../../src/environment');
 const { createProductionEnvironment } = require('../../src/environment/node-adapter');
 const { startApplication } = require('../../main');
 const useProductionEnvironment = process.env.SRT_E2E_REAL_MAC === '1';
+const useRemotion = process.env.SRT_E2E_REMOTION !== '0';
 let state;
 let baseEnvironment;
 
@@ -32,6 +33,9 @@ if (useProductionEnvironment) {
 
 state.detectionCount = 0;
 state.installMethodCount = 0;
+const realRemotionEnvironment = useRemotion ? createProductionEnvironment({
+  targetPath: userDataDir, userDataDir
+}) : null;
 const environmentModule = {
   detectEnvironment: (...args) => {
     state.detectionCount += 1;
@@ -42,7 +46,11 @@ const environmentModule = {
     state.installMethodCount += 1;
     return baseEnvironment.installTool(...args);
   },
-  getExportTools: (...args) => baseEnvironment.getExportTools(...args)
+  getExportTools: (...args) => useRemotion ? Promise.resolve({
+    ffmpegPath: process.env.SRT_FFMPEG_PATH || '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg',
+    ffprobePath: process.env.SRT_FFPROBE_PATH || '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe'
+  }) : baseEnvironment.getExportTools(...args),
+  getRemotionTools: (...args) => (realRemotionEnvironment || baseEnvironment).getRemotionTools(...args)
 };
 const localCliStates = process.env.SRT_E2E_LOCAL_CLI === 'two'
   ? [{ id: 'codex', label: 'Codex CLI' }, { id: 'claude', label: 'Claude Code' }]
@@ -66,6 +74,12 @@ const localCliService = {
   },
   async translateInstruction(text, history, context, skill) {
     state.translationCalls = (state.translationCalls || []).concat([{ text, history, context, skill }]);
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'remotion-card-style-flow') {
+      return require('./remotion-card-style-recipe')(text, context);
+    }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'remotion-source-effects-flow') {
+      return require('./remotion-source-recipe')(text, context);
+    }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'invalid') {
       const error = new Error('Invalid local CLI instruction output');
       error.code = 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT';
@@ -131,6 +145,23 @@ const localCliService = {
         { ...second, params: { ...second.params, scale: { keyframes: [{ time: 0, value: 1 }, { time: 0, value: 2 }] } } }] };
       if (/仅字幕/.test(text)) return { kind: 'instruction', steps: [{ capability: 'subtitle.generate@1', params: {} }] };
       return { kind: 'instruction', steps: /新增/.test(text) ? [second] : /两个/.test(text) ? [group, second] : [group] };
+    }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'remotion-subtitles-flow') {
+      return { kind: 'instruction', steps: [
+        { capability: 'visual.shape@1', range: { start: .5, end: 3.5 },
+          params: { x: .08, y: .12, width: .36, height: .24, color: '#17B890' } },
+        { capability: 'visual.text@1', range: { start: .5, end: 3.5 },
+          params: { text: '独立文字\n第二行', x: .11, y: .17, fontSize: .04, color: '#FFFFFF' } },
+        { capability: 'visual.group@1', range: { start: 1, end: 3.5 }, params: {
+          layers: [
+            { kind: 'shape', params: { x: .52, y: .18, width: .38, height: .26, color: '#CC3322' } },
+            { kind: 'text', params: { text: '组合动画', x: .58, y: .27, fontSize: .035, color: '#FFFFFF' } }
+          ], pivotX: .71, pivotY: .31,
+          opacity: { keyframes: [{ time: 0, value: 0 }, { time: .5, value: 1 }] },
+          scale: { keyframes: [{ time: 0, value: .6 }, { time: .5, value: 1, easing: 'back-out' }] }
+        } },
+        { capability: 'subtitle.generate@1', params: {} }
+      ] };
     }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'personal-skill-transactions') {
       if (/慢速执行/.test(text)) await new Promise(resolve => setTimeout(resolve, 150));
@@ -249,6 +280,42 @@ if (!useProductionEnvironment) {
   };
 }
 app.__srtE2EState = state;
+let remotionExportService;
+if (useRemotion) {
+  let service;
+  const getService = () => {
+    if (service) return service;
+    const renderer = require('@remotion/renderer');
+    const tracedRenderer = { ...renderer };
+    ['openBrowser', 'selectComposition', 'renderMedia'].forEach(method => {
+      tracedRenderer[method] = async (...args) => {
+        try { return await renderer[method](...args); }
+        catch (error) {
+          state.remotionErrors = (state.remotionErrors || []).concat([{ method, message: error.message, stack: error.stack }]);
+          throw error;
+        }
+      };
+    });
+    service = require('../../src/remotion-export').createRemotionExportService({
+      getExportTools: () => environmentModule.getRemotionTools(), renderer: tracedRenderer
+    });
+    return service;
+  };
+  remotionExportService = {
+    async start(request, onProgress) {
+      state.exportRequests = (state.exportRequests || []).concat([structuredClone(request)]);
+      const result = await getService().start(request, onProgress);
+      state.exportResults = (state.exportResults || []).concat([result]);
+      return result;
+    },
+    cancel(jobId) {
+      state.exportCancels = (state.exportCancels || []).concat([jobId]);
+      return getService().cancel(jobId);
+    }
+  };
+}
 startApplication({ environmentModule, localCliService, subtitleService,
+  ...(process.env.SRT_E2E_REMOTION === 'default' ? {} : { remotionEnabled: useRemotion }),
+  ...(remotionExportService ? { remotionExportService } : {}),
   showSaveDialog,
   ...(useProductionEnvironment ? {} : { videoExportService }) });

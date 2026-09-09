@@ -306,6 +306,106 @@ function createEnvironmentModule(dependencies) {
     return strongestFailure;
   }
 
+  async function probeMediaTools() {
+    const bundled = bundledTool('ffmpeg', () => true);
+    let installedFallback = null;
+    let strongestFailure = null;
+    for (const candidate of exportCandidates(bundled)) {
+      let ffmpeg;
+      try {
+        const output = await dependencies.run(candidate.command, ['-version'], runOptions);
+        ffmpeg = evaluatedTool(
+          candidate.command,
+          candidate.source,
+          output && output.stdout !== undefined ? output.stdout : output,
+          () => true
+        );
+      } catch (error) {
+        const reason = errorReason(error);
+        const failure = {
+          ffmpeg: blankTool(candidate.command, candidate.source, reason),
+          mode: { status: 'missing', reason, blockers: ['mediaProbe'] }
+        };
+        if (!strongestFailure || reason === 'probe_error') strongestFailure = failure;
+        continue;
+      }
+      if (!ffmpeg.compatible) {
+        if (!installedFallback) {
+          installedFallback = {
+            ffmpeg,
+            mode: { status: 'limited', reason: 'probe_error', blockers: ['mediaProbe'] }
+          };
+        }
+        continue;
+      }
+      const ffprobe = await probeFfprobe(candidate.command);
+      if (ffprobe.ready) {
+        return {
+          ffmpeg,
+          ffprobePath: ffprobe.ffprobePath,
+          mode: { status: 'ready', reason: 'ok', blockers: [] }
+        };
+      }
+      const failure = {
+        ffmpeg,
+        mode: { status: ffprobe.reason === 'ffprobe_missing' ? 'missing' : 'limited', reason: ffprobe.reason, blockers: ['mediaProbe'] }
+      };
+      if (!installedFallback || ffprobe.reason === 'probe_error') installedFallback = failure;
+    }
+    return installedFallback || strongestFailure || {
+      ffmpeg: blankTool('ffmpeg', 'system', 'absent'),
+      mode: { status: 'missing', reason: 'absent', blockers: ['mediaProbe'] }
+    };
+  }
+
+  async function probeRemotionRuntime() {
+    if (typeof dependencies.probeRemotionRuntime !== 'function') {
+      return {
+        packages: { status: 'missing', reason: 'remotion_packages_missing' },
+        playerBundle: { status: 'missing', reason: 'remotion_player_bundle_missing' },
+        rendererBundle: { status: 'missing', reason: 'remotion_renderer_bundle_missing' },
+        browser: { status: 'missing', reason: 'remotion_browser_missing' }
+      };
+    }
+    try {
+      return await dependencies.probeRemotionRuntime();
+    } catch (_) {
+      return {
+        packages: { status: 'missing', reason: 'probe_error' },
+        playerBundle: { status: 'missing', reason: 'probe_error' },
+        rendererBundle: { status: 'missing', reason: 'probe_error' },
+        browser: { status: 'missing', reason: 'probe_error' }
+      };
+    }
+  }
+
+  function remotionMode(runtime, mediaTools) {
+    return mode({
+      packages: runtime.packages,
+      playerBundle: runtime.playerBundle,
+      rendererBundle: runtime.rendererBundle,
+      browser: runtime.browser,
+      mediaProbe: mediaTools.mode
+    });
+  }
+
+  async function getRemotionTools() {
+    const [runtime, mediaTools] = await Promise.all([
+      probeRemotionRuntime(),
+      probeMediaTools()
+    ]);
+    if (remotionMode(runtime, mediaTools).status !== 'ready') {
+      const error = new Error('Remotion 渲染运行环境未就绪');
+      error.code = 'EXPORT_RUNTIME_NOT_READY';
+      throw error;
+    }
+    return {
+      ffprobePath: mediaTools.ffprobePath,
+      browserExecutable: runtime.browser.path,
+      bundlePath: runtime.rendererBundle.path
+    };
+  }
+
   async function getExportTools() {
     const result = await probeExportTools();
     if (result && result.mode.status === 'ready') {
@@ -508,9 +608,11 @@ function createEnvironmentModule(dependencies) {
             { program: 'cmd.exe', args: ['/d', '/s', '/c', 'npm', '--version'], command: 'npm' }
           ]
         : 'npm';
-    const [graphics, exportTools, node, npm, python] = await Promise.all([
+    const [graphics, exportTools, mediaTools, remotionRuntime, node, npm, python] = await Promise.all([
       probeGraphics(),
       probeExportTools(),
+      probeMediaTools(),
+      probeRemotionRuntime(),
       probeTool('node', nodePrograms, ['--version'], (version) => versionAtLeast(version, 20, 0)),
       probeTool('npm', npmPrograms, ['--version'], () => true),
       probePython()
@@ -526,7 +628,7 @@ function createEnvironmentModule(dependencies) {
       modes: {
         ffmpeg: mode({ ffmpeg }),
         subtitleExport: exportTools.mode,
-        remotion: mode({ node, npm }),
+        remotion: remotionMode(remotionRuntime, mediaTools),
         subtitles: mode({ python, whisper })
       },
       canContinue: true
@@ -609,7 +711,7 @@ function createEnvironmentModule(dependencies) {
     }
   }
 
-  return { detectEnvironment, getExportTools, describeInstall, installTool };
+  return { detectEnvironment, getExportTools, getRemotionTools, describeInstall, installTool };
 }
 
 module.exports = { createEnvironmentModule };

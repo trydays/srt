@@ -216,6 +216,14 @@ test('builds an ordered source-timestamp group branch with exact shared geometry
   assert.doesNotMatch(filter, /color=.+:s=|setpts|trim=/);
 });
 
+test('legacy group FFmpeg path rejects non-neutral child shape styles', () => {
+  const step = groupRecipe().steps[0];
+  step.params.layers[0].params.cornerRadius = .1;
+  assert.throws(() => buildGroupFilter(step, 3, {
+    displayWidth: 320, displayHeight: 240, sampleAspectRatio: '4/3'
+  }), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+});
+
 test('returns only fixed relative filenames and literal nonempty group lines', () => {
   const step = groupRecipe().steps[0];
   step.params.layers[1].params.text = "第一行 % : ' [safe]\n\n第三行\\N {$HOME}";

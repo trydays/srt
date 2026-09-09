@@ -270,6 +270,14 @@ function createScenarioDependencies(name) {
     },
     run,
     getBundledTools: () => ({}),
+    // Fixed environment-page scenario, not a claim about the host's renderer.
+    // Real Remotion desktop cases resolve their tools through the production adapter.
+    probeRemotionRuntime: async () => ({
+      packages: { status: 'ready', reason: 'ok', version: '4.0.522' },
+      playerBundle: { status: 'ready', reason: 'ok', path: '/scenario/player.js' },
+      rendererBundle: { status: 'ready', reason: 'ok', path: '/scenario/render' },
+      browser: { status: 'ready', reason: 'ok', path: '/scenario/chrome' }
+    }),
     tokenFactory: () => `e2e-confirmation-${++state.confirmationCount}`
   };
 

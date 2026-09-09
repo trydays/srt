@@ -44,7 +44,7 @@ test('texture capabilities are enabled in the default registry and incomplete cu
   assert.equal(createCapabilityRegistry().get('video.vignette@1').nodeType, 'video.vignette@1');
   for (const factory of [createNoiseRegistration, createVignetteRegistration]) {
     const complete = factory();
-    for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport']) {
+    for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline']) {
       const broken = { ...complete }; delete broken[adapter];
       assert.deepEqual(createCapabilityRegistry([broken]).promptDefinitions(), []);
     }
@@ -55,9 +55,9 @@ const { SUBTITLE_STYLE } = require('../src/render-recipe');
 
 const mediaFacts = { duration: 8 };
 
-test('exposes only registrations with every executable adapter and routing metadata', function() {
+test('exposes only registrations with every core adapter and routing metadata', function() {
   const complete = createSubtitleRegistration();
-  const adapters = ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport'];
+  const adapters = ['prepare', 'toEdit', 'toGraph', 'toTimeline'];
 
   assert.deepEqual(createCapabilityRegistry().promptDefinitions().map(function(item) {
     return item.id;
@@ -102,7 +102,7 @@ test('normalizes and lowers independent visual layer capabilities', () => {
     { capability: 'visual.text@1', range: { start: 1, end: 3 }, params: { text: '重点' } }
   ] }, { duration: 4 });
   assert.deepEqual(normalized.steps.map(s => s.params), [
-    { x:.1,y:.1,width:.4,height:.15,color:'#000000' },
+    { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1 },
     { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' }
   ]);
   for (const registration of [createShapeRegistration(), createTextRegistration()]) {
@@ -118,11 +118,64 @@ test('enables executable groups in the default catalog and hides incomplete cust
   const complete = createGroupRegistration();
   assert.deepEqual(createCapabilityRegistry([complete]).promptDefinitions().map(item => item.id),
     ['visual.group@1']);
-  for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline', 'preview', 'toExport']) {
+  for (const adapter of ['prepare', 'toEdit', 'toGraph', 'toTimeline']) {
     const incomplete = { ...complete };
     delete incomplete[adapter];
     assert.deepEqual(createCapabilityRegistry([incomplete]).promptDefinitions(), []);
   }
+});
+
+test('a supported core-only adapter applies without legacy preview or export methods', async () => {
+  const registration = createColorRegistration();
+  delete registration.preview;
+  delete registration.toExport;
+  const registry = createCapabilityRegistry([registration]);
+  assert.deepEqual(registry.promptDefinitions().map(item => item.id), ['video.color.adjust@1']);
+  const values = new Map();
+  const { createProjectEditing } = require('../src/project-editing');
+  const editing = createProjectEditing({ capabilityRegistry: registry,
+    storage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) } });
+  editing.initializeProject({ projectId: 'core-only', mediaFacts: {
+    duration: 4, canvas: { width: 320, height: 240 }, source: { id: 'main-video', assetId: 'video' }
+  } });
+  const result = await editing.applyRecipe({ projectId: 'core-only', expectedRevision: 0, requestId: 'request',
+    recipe: { kind: 'instruction', steps: [{ capability: 'video.color.adjust@1', params: { brightness: .3 } }] } });
+  assert.equal(result.graph.nodes[1].type, 'video.color@1');
+  assert.equal(result.graph.nodes[1].props.brightness, .3);
+  assert.equal(editing.timelineItems('core-only')[0].lane, 'video-effect');
+});
+
+test('renderer-unsupported registrations stay readable but are neither advertised nor executed', async () => {
+  const registration = createColorRegistration();
+  registration.nodeType = 'video.unsupported-test@1';
+  const toGraph = registration.toGraph;
+  registration.toGraph = (...args) => ({ ...toGraph(...args), type: registration.nodeType });
+  const registry = createCapabilityRegistry([registration]);
+  assert.equal(registry.get(registration.definition.id), registration);
+  assert.equal(registry.forNodeType(registration.nodeType), registration);
+  assert.deepEqual(registry.promptDefinitions(), []);
+  const { createProjectEditing } = require('../src/project-editing');
+  const values = new Map();
+  const editing = createProjectEditing({ capabilityRegistry: registry,
+    storage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) } });
+  editing.initializeProject({ projectId: 'unsupported', mediaFacts: {
+    duration: 4, canvas: { width: 320, height: 240 }, source: { id: 'main-video', assetId: 'video' }
+  } });
+  const before = editing.load('unsupported');
+  let prepared = false;
+  registration.prepare = async () => { prepared = true; return {}; };
+  await assert.rejects(editing.applyRecipe({ projectId: 'unsupported', expectedRevision: 0, requestId: 'rejected',
+    recipe: { kind: 'instruction', steps: [{ capability: registration.definition.id, params: { brightness: .3 } }] }
+  }), { code: 'RECIPE_UNSUPPORTED_CAPABILITY' });
+  assert.equal(prepared, false);
+  assert.deepEqual(editing.load('unsupported'), before);
+  // Renderer availability does not restrict validation of an already stored edit.
+  const map = JSON.parse(values.get('srt_project_edit_state'));
+  map.unsupported.document.edits.push({ id: 'old', transactionId: 'old-request', type: registration.editType,
+    target: { kind: 'source', id: 'main-video' }, range: { start: 0, end: 4 },
+    payload: { temperature: 0, brightness: .3, contrast: 1, saturation: 1 }, order: 0, enabled: true });
+  values.set('srt_project_edit_state', JSON.stringify(map));
+  assert.equal(editing.load('unsupported').graph.nodes[1].type, registration.nodeType);
 });
 
 test('matches prior scalar schemas plus only the declared nested schema forms', () => {
@@ -166,7 +219,7 @@ test('normalizes group duration after range and lowers all canonical adapters', 
   assert.deepEqual(normalized.range, { start: 2, end: 4 });
   assert.deepEqual(normalized.params, {
     layers: [
-      { kind: 'shape', params: { x:.1,y:.1,width:.4,height:.15,color:'#000000' } },
+      { kind: 'shape', params: { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1 } },
       { kind: 'text', params: { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' } }
     ],
     pivotX: .5, pivotY: .5,
@@ -534,6 +587,7 @@ test('loads the same registry in a browser without Node dependencies', function(
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-layers.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/keyframes.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visual-group.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/remotion-support.js'), 'utf8'), context);
   vm.runInNewContext(source, context);
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('subtitle.generate@1').definition.id, 'subtitle.generate@1');
@@ -541,9 +595,10 @@ test('loads the same registry in a browser without Node dependencies', function(
     .get('video.color.adjust@1').definition.id, 'video.color.adjust@1');
   assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry()
     .get('visual.group@1').definition.id, 'visual.group@1');
+  assert.equal(context.window.SRTEditCapabilities.createCapabilityRegistry().promptDefinitions().length, 8);
   const html = fs.readFileSync(path.join(__dirname, '../app/剪辑.html'), 'utf8');
   const scripts = ['../src/video-texture.js', '../src/visual-layers.js', '../src/keyframes.js',
-    '../src/visual-group.js', '../src/edit-capabilities.js'];
+    '../src/visual-group.js', '../src/remotion-support.js', '../src/edit-capabilities.js'];
   scripts.forEach((script, index) => {
     assert.ok(html.includes('src="' + script + '"'), script + ' loads in the editor');
     if (index) assert.ok(html.indexOf(scripts[index - 1]) < html.indexOf(script));

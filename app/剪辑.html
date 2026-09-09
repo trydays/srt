@@ -78,6 +78,11 @@
     .preview{width:100%;max-width:800px;aspect-ratio:16/9;background:#000;border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;overflow:hidden;box-shadow:var(--shadow-xs);flex-shrink:0}
     .preview video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none}
     .preview.has-video video{display:block}
+    #remotionPreview{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1}
+    #remotionPreview[hidden]{display:none}
+    #previewArea[data-render-engine="remotion"]>#previewVideo{display:none}
+    #remotionPreviewMessage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:3;color:var(--text-muted);font-size:12px;background:var(--bg-panel)}
+    #remotionPreviewMessage[hidden]{display:none}
     #previewSourceCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1}
     #previewSourceCanvas[hidden]{display:none}
     #previewLayerCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:2}
@@ -314,6 +319,8 @@
       <div class="ws-scroll">
         <div class="preview" id="previewArea" data-od-id="video-preview">
           <video id="previewVideo" playsinline></video>
+          <div id="remotionPreview" data-state="idle" hidden></div>
+          <div id="remotionPreviewMessage" role="status" hidden></div>
           <canvas id="previewSourceCanvas" aria-hidden="true" hidden></canvas>
           <canvas id="previewLayerCanvas" data-testid="preview-layer-canvas" aria-hidden="true" hidden></canvas>
           <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
@@ -386,6 +393,7 @@
 
   <script src="shared.js"></script>
   <script src="components-data.js"></script>
+  <script src="editor-playback.js"></script>
   <script src="editor-core.js"></script>
   <script src="../src/render-recipe.js"></script>
   <script src="../src/color-adjustment.js"></script>
@@ -394,9 +402,12 @@
   <script src="../src/visual-layers.js"></script>
   <script src="../src/keyframes.js"></script>
   <script src="../src/visual-group.js"></script>
+  <script src="../src/remotion-support.js"></script>
   <script src="../src/edit-capabilities.js"></script>
   <script src="../src/personal-skills.js"></script>
   <script src="../src/render-graph.js"></script>
+  <script src="../src/remotion-input.js"></script>
+  <script src="remotion-built/player.js"></script>
   <script src="../src/project-editing.js"></script>
   <script src="subtitle-draft-state.js"></script>
   <script src="editor-project-editing.js"></script>

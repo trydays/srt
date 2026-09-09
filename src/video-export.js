@@ -50,6 +50,9 @@ function buildVideoFilters(recipe, media) {
         + `enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`);
     } else if (step.capability === 'visual.shape@1') {
       const g=visualLayers.geometry('shape',step.params,media.displayWidth,media.displayHeight);
+      if (g.cornerRadius !== 0 || g.borderWidth !== 0 || g.fillOpacity !== 1) {
+        throw codedError('EXPORT_UNSUPPORTED_OPERATION');
+      }
       filters.push(`drawbox=x=${g.x}:y=${g.y}:w=${g.width}:h=${g.height}:color=0x${g.color.slice(1)}:t=fill:enable='gte(t,${step.range.start})*lt(t,${step.range.end})'`);
     } else if (step.capability === 'visual.text@1') {
       const g=visualLayers.geometry('text',step.params,media.displayWidth,media.displayHeight);

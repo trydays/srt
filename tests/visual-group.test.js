@@ -19,7 +19,11 @@ test('canonicalizes one flat ordered group with shared defaults and animations',
   ] } });
   const canonical = group.normalizeParams(input, 2);
   assert.deepEqual(canonical, {
-    layers: input.layers,
+    layers: [
+      { kind: 'shape', params: { ...input.layers[0].params, cornerRadius: 0,
+        borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1 } },
+      input.layers[1]
+    ],
     pivotX: .5,
     pivotY: .5,
     opacity: { keyframes: [

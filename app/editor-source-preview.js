@@ -104,6 +104,7 @@
     else scheduled = window.requestAnimationFrame(function() { scheduled = null; render(); });
   }
   function render(time) {
+    if (window.remotionPreviewController && window.remotionPreviewController.isActive()) { stop(); compositor.clear(); return false; }
     if (suspended || seeking || window.projectEditingState !== 'ready') {
       stop(); compositor.clear(); return false;
     }

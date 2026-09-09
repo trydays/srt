@@ -136,6 +136,104 @@ function observeAutomaticStart(scenario) {
   return Number(match[1]);
 }
 
+test('default export accepts Remotion snapshots and rejects old recipe routes before opening a dialog', () => {
+  const script = `
+    const { EventEmitter } = require('node:events');
+    const Module = require('node:module');
+    const handlers = new Map();
+    const app = new EventEmitter();
+    app.isPackaged = false; app.getPath = () => '/isolated-user-data';
+    app.whenReady = () => new Promise(() => {}); app.quit = () => {};
+    class BrowserWindow { static fromWebContents() { return null; } }
+    const electron = { app, BrowserWindow, dialog: {},
+      ipcMain: { handle(name, handler) { handlers.set(name, handler); } } };
+    const originalLoad = Module._load;
+    Module._load = function(request, parent, isMain) {
+      return request === 'electron' ? electron : originalLoad.call(this, request, parent, isMain);
+    };
+    const received = [], legacy = []; let dialogs = 0;
+    require(${JSON.stringify(mainPath)}).startApplication({
+      environmentModule: { detectEnvironment() {}, describeInstall() {}, installTool() {}, getExportTools() {} },
+      localCliService: { getState() {}, rescan() {}, select() {}, translateInstruction() {} },
+      subtitleService: { generate() {} },
+      videoExportService: { start(value) { legacy.push(value); return {status:'failed'}; }, cancel() {} },
+      remotionExportService: { start(value) { received.push(value); return { jobId:value.jobId,status:'completed',outputPath:value.outputPath }; }, cancel() {} },
+      showSaveDialog: async () => { dialogs++; return { canceled:false,filePath:'/tmp/remotion-probe-result.mp4' }; }
+    });
+    const sender = new EventEmitter(); sender.id=1; sender.isDestroyed=()=>false; sender.send=()=>{};
+    const snapshot={document:{revision:7},graph:{documentRevision:7}};
+    handlers.get('video-export:start')({sender}, {jobId:'r1',videoPath:'/tmp/source.mp4',engine:'remotion',snapshot})
+      .then(async result => {
+        const rejected = [];
+        for (const engine of [undefined, 'legacy']) rejected.push(await handlers.get('video-export:start')(
+          {sender}, {jobId:'old-route',videoPath:'/tmp/source.mp4',engine,recipe:{}}));
+        process.stdout.write('REMOTION_ROUTE='+JSON.stringify({result,received,legacy,rejected,dialogs})+'\\n');
+      });
+  `;
+  const value = runMainProbe(script, 'REMOTION_ROUTE');
+  assert.equal(value.result.status, 'completed');
+  assert.equal(value.legacy.length, 0);
+  assert.equal(value.received.length, 1);
+  assert.deepEqual(value.received[0].snapshot, { document: { revision: 7 }, graph: { documentRevision: 7 } });
+  assert.equal(value.dialogs, 1);
+  assert.deepEqual(value.rejected.map(result => result.errorCode),
+    ['EXPORT_UNSUPPORTED_OPERATION', 'EXPORT_UNSUPPORTED_OPERATION']);
+});
+
+test('preview accepts only local regular files and only the newest overlapping request retains its session', () => {
+  const script = `
+    const {EventEmitter}=require('node:events'), Module=require('node:module');
+    const handlers=new Map(), app=new EventEmitter();
+    app.isPackaged=false; app.getPath=()=>'/isolated-user-data'; app.whenReady=()=>new Promise(()=>{}); app.quit=()=>{};
+    class BrowserWindow {static fromWebContents(){return null;}}
+    const electron={app,BrowserWindow,dialog:{},ipcMain:{handle(n,f){handlers.set(n,f);}}};
+    const closed=[]; let count=0, probes=0;
+    const original=Module._load;
+    Module._load=function(request,parent,isMain){
+      if(request==='electron') return electron;
+      if(request==='./src/remotion-assets') return {createRenderAssetSession:async()=>{
+        const id=++count; return {assets:{p:{src:'http://127.0.0.1:9000/'+id}},close:async()=>closed.push(id)};
+      }};
+      if(request==='./src/remotion-export') return {readMediaFacts:async()=>{probes++;return {width:640,height:360,duration:4,fps:24,hasAudio:false};}};
+      return original.call(this,request,parent,isMain);
+    };
+    const fs=require('node:fs'), path=require('node:path'), os=require('node:os');
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'srt-preview-race-test-'));
+    const videoPath=path.join(dir,'video.mp4'); fs.writeFileSync(videoPath,'test');
+    const document={schemaVersion:1,projectId:'p',revision:0,timeline:{duration:4,canvas:{width:640,height:360}},
+      sources:[{id:'main-video',assetId:'p',kind:'video',range:{start:0,end:4}}],edits:[]};
+    const graph=require(${JSON.stringify(path.join(projectRoot, 'src/render-graph'))}).createRenderGraphCompiler().compile(document);
+    require(${JSON.stringify(mainPath)}).startApplication({
+      environmentModule:{getRemotionTools:async()=>({ffprobePath:'/fake/probe'}),
+        getExportTools:async()=>{throw new Error('old FFmpeg filters must not gate preview');},
+        detectEnvironment(){},describeInstall(){},installTool(){}},
+      localCliService:{},subtitleService:{},videoExportService:{},showSaveDialog(){}
+    });
+    const sender=new EventEmitter(); sender.id=1; sender.isDestroyed=()=>false;
+    const prepare=handlers.get('remotion:prepare-preview');
+    Promise.all([prepare({sender},{videoPath,snapshot:{document,graph}}),prepare({sender},{videoPath,snapshot:{document,graph}})])
+      .then(async results=>{
+        const beforeRelease=closed.slice();
+        await handlers.get('remotion:release-preview')({sender},results[1].sessionId);
+        const invalid=[];
+        for(const invalidPath of ['https://example.invalid/video.mp4',dir]) {
+          invalid.push(await prepare({sender},{videoPath:invalidPath,snapshot:{document,graph}}));
+        }
+        fs.rmSync(dir,{recursive:true,force:true});
+        process.stdout.write('PREVIEW_RACE='+JSON.stringify({ok:results.map(r=>r.ok),beforeRelease,closed,invalid,probes})+'\\n');
+      });
+  `;
+  const value = runMainProbe(script, 'PREVIEW_RACE');
+  assert.deepEqual(value.ok, [false, true]);
+  assert.deepEqual(value.beforeRelease, [1]);
+  assert.deepEqual(value.closed, [1, 2]);
+  assert.deepEqual(value.invalid, [
+    { ok: false, errorCode: 'EXPORT_INVALID_MEDIA' },
+    { ok: false, errorCode: 'EXPORT_INVALID_MEDIA' }
+  ]);
+  assert.equal(value.probes, 2);
+});
+
 function runMainProbe(probeSource, marker) {
   const result = spawnSync(process.execPath, ['-e', probeSource], {
     cwd: projectRoot,
@@ -222,6 +320,7 @@ test('video export normalizes fulfilled service failure codes to the public allo
       getState() {}, rescan() {}, select() {}, translateInstruction() {}
     };
     require(${JSON.stringify(mainPath)}).startApplication({
+      remotionEnabled: false,
       environmentModule: inertEnvironment,
       localCliService: inertLocalCli,
       subtitleService: { generate() {} },

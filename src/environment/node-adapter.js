@@ -8,6 +8,9 @@ const { createEnvironmentModule } = require('./index');
 
 const DEFAULT_MAX_BUFFER = 1024 * 1024;
 const TERMINATION_CLEANUP_MS = 100;
+const REMOTION_PACKAGES = [
+  'remotion', '@remotion/player', '@remotion/renderer', '@remotion/bundler'
+];
 
 function runnerError(message, code, reason, stdout, stderr) {
   const error = new Error(message);
@@ -239,7 +242,164 @@ function inspectBundledTools(bundledRoot, platform = process.platform, fsApi = f
   return tools;
 }
 
-function createProductionEnvironment({ targetPath, userDataDir, bundledRoot } = {}) {
+function regularNonemptyFile(filePath, fsApi = fs) {
+  try {
+    const stat = fsApi.lstatSync(filePath);
+    return stat.isFile() && !stat.isSymbolicLink() && stat.size > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function inspectRemotionPackages(appRoot, {
+  fsApi = fs,
+  resolvePackage = (request) => require.resolve(request, { paths: [appRoot] })
+} = {}) {
+  const versions = [];
+  try {
+    for (const packageName of REMOTION_PACKAGES) {
+      const packageFile = resolvePackage(`${packageName}/package.json`);
+      const stat = fsApi.lstatSync(packageFile);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        return { status: 'missing', reason: 'remotion_packages_missing', version: null };
+      }
+      const manifest = JSON.parse(fsApi.readFileSync(packageFile, 'utf8'));
+      if (!manifest || typeof manifest.version !== 'string' || !manifest.version) {
+        return { status: 'missing', reason: 'remotion_packages_missing', version: null };
+      }
+      versions.push(manifest.version);
+    }
+  } catch (_) {
+    return { status: 'missing', reason: 'remotion_packages_missing', version: null };
+  }
+  if (new Set(versions).size !== 1) {
+    return { status: 'limited', reason: 'remotion_versions_incoherent', version: null };
+  }
+  return { status: 'ready', reason: 'ok', version: versions[0] };
+}
+
+function inspectRemotionBundles(appRoot, fsApi = fs) {
+  const playerPath = path.join(appRoot, 'app', 'remotion-built', 'player.js');
+  const rendererPath = path.join(appRoot, 'app', 'remotion-built', 'render');
+  const rendererReady = regularNonemptyFile(path.join(rendererPath, 'index.html'), fsApi)
+    && regularNonemptyFile(path.join(rendererPath, 'bundle.js'), fsApi);
+  return {
+    playerBundle: regularNonemptyFile(playerPath, fsApi)
+      ? { status: 'ready', reason: 'ok', path: playerPath }
+      : { status: 'missing', reason: 'remotion_player_bundle_missing' },
+    rendererBundle: rendererReady
+      ? { status: 'ready', reason: 'ok', path: rendererPath }
+      : { status: 'missing', reason: 'remotion_renderer_bundle_missing' }
+  };
+}
+
+function resolveInstalledRemotionBrowser(appRoot, {
+  fsApi = fs,
+  platform = process.platform,
+  arch = process.arch,
+  resolvePackage = (request) => require.resolve(request, { paths: [appRoot] }),
+  loadBrowserFetcher = (modulePath) => require(modulePath)
+} = {}) {
+  try {
+    const rendererPackage = resolvePackage('@remotion/renderer/package.json');
+    const fetcherPath = path.join(path.dirname(rendererPackage), 'dist', 'browser', 'BrowserFetcher.js');
+    const fetcher = loadBrowserFetcher(fetcherPath);
+    const platformKey = platform === 'darwin'
+      ? arch === 'arm64' ? 'mac-arm64' : 'mac-x64'
+      : platform === 'linux'
+        ? arch === 'arm64' ? 'linux-arm64' : 'linux64'
+        : platform === 'win32' && arch === 'x64' ? 'win64' : null;
+    if (!platformKey) return null;
+    const dependencyRoot = path.resolve(path.dirname(rendererPackage), '..', '..');
+    const cacheRoot = path.join(dependencyRoot, '.remotion', 'chrome-headless-shell');
+    const executableName = platformKey === 'win64'
+      ? 'chrome-headless-shell.exe'
+      : platformKey === 'linux-arm64' ? 'headless_shell' : 'chrome-headless-shell';
+    const executablePath = path.join(
+      cacheRoot, platformKey, `chrome-headless-shell-${platformKey}`, executableName
+    );
+    const versionPath = path.join(cacheRoot, 'VERSION');
+    if (!regularNonemptyFile(executablePath, fsApi) || !regularNonemptyFile(versionPath, fsApi)) return null;
+    const actualVersion = fsApi.readFileSync(versionPath, 'utf8').trim();
+    return {
+      path: executablePath,
+      version: actualVersion,
+      compatible: actualVersion === fetcher.TESTED_VERSION
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function createRemotionBrowserProbe({
+  run = createNodeRunner(childProcess.spawn, process.env, process.platform),
+  makeTempDir = () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-remotion-browser-')),
+  removeTempDir = (directory) => fs.promises.rm(directory, { recursive: true, force: true })
+} = {}) {
+  return async function probeBrowser(browserExecutable, { timeoutMs = 10000 } = {}) {
+    const profileDirectory = await makeTempDir();
+    try {
+      const output = await run(browserExecutable, [
+        '--headless',
+        '--disable-gpu',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--no-first-run',
+        '--dump-dom',
+        `--user-data-dir=${profileDirectory}`,
+        'data:text/html,%3Ctitle%3Esrt-remotion-probe%3C%2Ftitle%3E'
+      ], { timeoutMs, maxBuffer: 1024 * 1024 });
+      const stdout = String(output && output.stdout !== undefined ? output.stdout : output || '');
+      if (!stdout.includes('<title>srt-remotion-probe</title>')) {
+        throw new Error('Remotion browser did not render the local probe');
+      }
+    } finally {
+      await removeTempDir(profileDirectory);
+    }
+  };
+}
+
+async function inspectRemotionRuntime({
+  appRoot,
+  fsApi = fs,
+  resolvePackage,
+  inspectPackages,
+  inspectBundles,
+  resolveBrowser,
+  probeBrowser
+} = {}) {
+  const root = path.resolve(appRoot || path.join(__dirname, '..', '..'));
+  const packageOptions = { fsApi, ...(resolvePackage ? { resolvePackage } : {}) };
+  const packages = inspectPackages
+    ? inspectPackages()
+    : inspectRemotionPackages(root, packageOptions);
+  const bundles = inspectBundles
+    ? inspectBundles()
+    : inspectRemotionBundles(root, fsApi);
+  const browserResolver = resolveBrowser
+    || (() => resolveInstalledRemotionBrowser(root, packageOptions));
+  const candidate = browserResolver();
+  let browser;
+  if (!candidate || !candidate.path || !regularNonemptyFile(candidate.path, fsApi)) {
+    browser = { status: 'missing', reason: 'remotion_browser_missing' };
+  } else if (!candidate.compatible) {
+    browser = { status: 'limited', reason: 'remotion_browser_unusable', path: candidate.path };
+  } else {
+    try {
+      const browserProbe = probeBrowser || createRemotionBrowserProbe();
+      await browserProbe(candidate.path, { timeoutMs: 10000 });
+      browser = {
+        status: 'ready', reason: 'ok', path: candidate.path,
+        ...(candidate.version ? { version: candidate.version } : {})
+      };
+    } catch (_) {
+      browser = { status: 'limited', reason: 'remotion_browser_unusable', path: candidate.path };
+    }
+  }
+  return { packages, ...bundles, browser };
+}
+
+function createProductionEnvironment({ targetPath, userDataDir, bundledRoot, appRoot } = {}) {
   const bundledTools = inspectBundledTools(bundledRoot, process.platform);
   const windowsNodeDir = process.platform === 'win32'
     ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs')
@@ -257,12 +417,16 @@ function createProductionEnvironment({ targetPath, userDataDir, bundledRoot } = 
     },
     run: createNodeRunner(childProcess.spawn, process.env, process.platform),
     tokenFactory: crypto.randomUUID,
-    getBundledTools: () => bundledTools
+    getBundledTools: () => bundledTools,
+    probeRemotionRuntime: () => inspectRemotionRuntime({ appRoot })
   });
 }
 
 module.exports = {
   createNodeRunner,
+  createRemotionBrowserProbe,
   createProductionEnvironment,
-  inspectBundledTools
+  inspectBundledTools,
+  inspectRemotionRuntime,
+  resolveInstalledRemotionBrowser
 };

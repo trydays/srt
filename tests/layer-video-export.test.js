@@ -14,6 +14,12 @@ test('builds controlled half-open shape and text filters',()=>{
   assert.match(filter,/textfile=layer-1-0\.txt:expansion=none:fontsize=29:x=77:y=72:y_align=baseline/);
   assert.match(filter,/textfile=layer-1-2\.txt/); assert.doesNotMatch(filter,/重点|%\{x\}/);
 });
+test('legacy standalone FFmpeg path rejects non-neutral shape styles',()=>{
+  const styled={version:1,steps:[{...recipe.steps[0],params:{...recipe.steps[0].params,
+    cornerRadius:.1,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1}}]};
+  assert.throws(()=>buildVideoFilters(styled,{displayWidth:640,displayHeight:360,sampleAspectRatio:'1/1'}),
+    {code:'EXPORT_UNSUPPORTED_OPERATION'});
+});
 
 function child(stdout,before){const c=new EventEmitter();c.stdout=new PassThrough();c.stderr=new PassThrough();c.kill=()=>{};setImmediate(async()=>{if(stdout)c.stdout.write(stdout);if(before)await before();c.emit('close',0,null);});return c;}
 test('writes literal UTF-8 text files inside the render task directory',async(t)=>{

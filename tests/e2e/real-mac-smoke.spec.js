@@ -18,6 +18,8 @@ test.describe('current Mac read-only smoke', () => {
     expect(report.hardware.graphics.metal).toBe(true);
     expect(report.hardware.graphics.supported).toBe(true);
     expect(report.hardware.graphics.reason).not.toBe('probe_error');
+    expect(report.modes.remotion).toEqual({ status: 'ready', reason: 'ok', blockers: [] });
+    await expect(window.getByTestId('mode-remotion')).toHaveAttribute('data-status', 'ready');
 
     const state = await readScenarioState();
     expect(state.environmentKind).toBe('production');

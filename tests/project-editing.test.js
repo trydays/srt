@@ -269,6 +269,43 @@ test('visual layers append atomically, survive refresh and undo as one request',
   assert.deepEqual(f.editing.undo({projectId:'p1',expectedRevision:1,transactionId:'layers'}).document.edits,[]);
 });
 
+test('styled shapes persist and undo while loading legacy shapes leaves stored bytes unchanged', async () => {
+  const legacy = fixture();
+  legacy.init();
+  await applySteps(legacy, [{ capability: 'visual.shape@1', range: { start: 0, end: 1 },
+    params: { x: .1, y: .1, width: .4, height: .25, color: '#000000' } }], 'old');
+  await applySteps(legacy, [groupStep()], 'old-group', 1);
+  const stored = JSON.parse(legacy.raw());
+  const oldPayloads = [stored.p1.document.edits[0].payload,
+    stored.p1.document.edits[1].payload.layers[0].params,
+    stored.p1.undoStack[0].edits[0].payload];
+  for (const payload of oldPayloads) {
+    for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity']) delete payload[name];
+  }
+  legacy.storage.setItem('edits', JSON.stringify(stored));
+  const bytes = legacy.raw();
+  const reloaded = createProjectEditing({ storage: legacy.storage, storageKey: 'edits' });
+  const loaded = reloaded.load('p1');
+  assert.equal(legacy.raw(), bytes);
+  assert.deepEqual(loaded.document.edits[0].payload,
+    { x: .1, y: .1, width: .4, height: .25, color: '#000000' });
+  assert.deepEqual(loaded.document.edits[1].payload.layers[0].params,
+    { x: .1, y: .1, width: .4, height: .25, color: '#000000' });
+  assert.deepEqual(reloaded.undo({ projectId: 'p1', expectedRevision: 2,
+    transactionId: 'old-group' }).document.edits[0].payload,
+    { x: .1, y: .1, width: .4, height: .25, color: '#000000' });
+
+  const f = fixture(); f.init();
+  const params = { x:.1, y:.1, width:.4, height:.25, color:'#101820',
+    cornerRadius:.1, borderWidth:.02, borderColor:'#268AFF', fillOpacity:.75 };
+  const applied = await applySteps(f, [{ capability: 'visual.shape@1',
+    range: { start: 1, end: 3 }, params }], 'styled');
+  assert.deepEqual(f.editing.load('p1').document, applied.document);
+  assert.deepEqual(applied.document.edits[0].payload, params);
+  assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
+    transactionId: 'styled' }).document.edits, []);
+});
+
 test('invalid second visual step leaves persisted document and undo unchanged', async () => {
   const f=fixture(); f.init(); const before=f.raw();
   await assert.rejects(applySteps(f,[{capability:'visual.shape@1',params:{width:.4}},
@@ -304,7 +341,11 @@ test('one flat group request persists nested frames and undoes as one transactio
   const refreshed = createProjectEditing({ storage: f.storage, storageKey: 'edits',
     capabilityRegistry: registry }).load('p1');
   assert.deepEqual(refreshed.document, applied.document);
-  assert.deepEqual(refreshed.document.edits[0].payload.layers, groupStep().params.layers);
+  assert.deepEqual(refreshed.document.edits[0].payload.layers, [
+    { kind: 'shape', params: { ...groupStep().params.layers[0].params,
+      cornerRadius: 0, borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1 } },
+    groupStep().params.layers[1]
+  ]);
   assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
     transactionId: 'group-request' }).document.edits, []);
 });

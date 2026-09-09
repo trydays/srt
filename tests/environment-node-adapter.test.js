@@ -7,8 +7,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  createRemotionBrowserProbe,
   createNodeRunner,
-  inspectBundledTools
+  inspectBundledTools,
+  inspectRemotionRuntime,
+  resolveInstalledRemotionBrowser
 } = require('../src/environment/node-adapter');
 
 function fakeSpawn(calls, behavior = {}) {
@@ -257,6 +260,152 @@ test('Node runner independently bounds stdout and stderr to one MiB', async () =
       }
     );
   }
+});
+
+test('Remotion inspector requires coherent packages and both local bundles', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-remotion-runtime-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const versions = {
+    remotion: '4.0.522',
+    '@remotion/player': '4.0.522',
+    '@remotion/renderer': '4.0.522',
+    '@remotion/bundler': '4.0.522'
+  };
+  const packageFiles = {};
+  for (const [name, version] of Object.entries(versions)) {
+    const packageFile = path.join(root, 'packages', name.replace('/', '__'), 'package.json');
+    await fs.promises.mkdir(path.dirname(packageFile), { recursive: true });
+    await fs.promises.writeFile(packageFile, JSON.stringify({ version }));
+    packageFiles[`${name}/package.json`] = packageFile;
+  }
+  const playerPath = path.join(root, 'app/remotion-built/player.js');
+  const renderPath = path.join(root, 'app/remotion-built/render');
+  await fs.promises.mkdir(renderPath, { recursive: true });
+  await fs.promises.writeFile(playerPath, 'player');
+  await fs.promises.writeFile(path.join(renderPath, 'index.html'), '<script src="./bundle.js"></script>');
+  await fs.promises.writeFile(path.join(renderPath, 'bundle.js'), 'renderer');
+  const browserPath = path.join(root, 'chrome-headless-shell');
+  await fs.promises.writeFile(browserPath, 'browser');
+
+  const probeCalls = [];
+  const ready = await inspectRemotionRuntime({
+    appRoot: root,
+    resolvePackage: (request) => packageFiles[request],
+    resolveBrowser: () => ({ path: browserPath, version: '149.0.7790.0', compatible: true }),
+    probeBrowser: async (executablePath) => { probeCalls.push(executablePath); }
+  });
+  assert.deepEqual(ready, {
+    packages: { status: 'ready', reason: 'ok', version: '4.0.522' },
+    playerBundle: { status: 'ready', reason: 'ok', path: playerPath },
+    rendererBundle: { status: 'ready', reason: 'ok', path: renderPath },
+    browser: { status: 'ready', reason: 'ok', path: browserPath, version: '149.0.7790.0' }
+  });
+  assert.deepEqual(probeCalls, [browserPath]);
+
+  versions['@remotion/player'] = '4.0.521';
+  await fs.promises.writeFile(packageFiles['@remotion/player/package.json'], JSON.stringify({ version: '4.0.521' }));
+  const incoherent = await inspectRemotionRuntime({
+    appRoot: root,
+    resolvePackage: (request) => packageFiles[request],
+    resolveBrowser: () => ({ path: browserPath, version: '149.0.7790.0', compatible: true }),
+    probeBrowser: async () => { throw new Error('must not launch when packages mismatch'); }
+  });
+  assert.deepEqual(incoherent.packages, {
+    status: 'limited', reason: 'remotion_versions_incoherent', version: null
+  });
+});
+
+test('Remotion browser resolution is bound to the app package root, not the process cwd', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-remotion-app-root-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const rendererPackage = path.join(root, 'node_modules/@remotion/renderer/package.json');
+  const browserPath = path.join(
+    root, 'node_modules/.remotion/chrome-headless-shell/mac-arm64',
+    'chrome-headless-shell-mac-arm64/chrome-headless-shell'
+  );
+  await fs.promises.mkdir(path.dirname(rendererPackage), { recursive: true });
+  await fs.promises.mkdir(path.dirname(browserPath), { recursive: true });
+  await fs.promises.writeFile(rendererPackage, JSON.stringify({ version: '4.0.522' }));
+  await fs.promises.writeFile(browserPath, 'browser');
+  await fs.promises.writeFile(
+    path.join(root, 'node_modules/.remotion/chrome-headless-shell/VERSION'),
+    '149.0.7790.0'
+  );
+
+  const resolved = resolveInstalledRemotionBrowser(root, {
+    platform: 'darwin',
+    arch: 'arm64',
+    resolvePackage: () => rendererPackage,
+    loadBrowserFetcher: () => ({
+      TESTED_VERSION: '149.0.7790.0',
+      getRevisionInfo: () => ({ local: false, executablePath: '/private/tmp/wrong-cache/chrome' }),
+      readVersionFile: () => null
+    })
+  });
+
+  assert.deepEqual(resolved, {
+    path: browserPath,
+    version: '149.0.7790.0',
+    compatible: true
+  });
+});
+
+test('Remotion browser probe always uses a resolved local executable and never ensures a download', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'srt-remotion-browser-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const browserPath = path.join(root, 'chrome-headless-shell');
+  await fs.promises.writeFile(browserPath, 'browser');
+  const calls = [];
+  const result = await inspectRemotionRuntime({
+    appRoot: root,
+    inspectPackages: () => ({ status: 'ready', reason: 'ok', version: '4.0.522' }),
+    inspectBundles: () => ({
+      playerBundle: { status: 'ready', reason: 'ok', path: '/player.js' },
+      rendererBundle: { status: 'ready', reason: 'ok', path: '/render' }
+    }),
+    resolveBrowser: () => ({ path: browserPath, version: '149.0.7790.0', compatible: true }),
+    probeBrowser: async (executablePath, options) => calls.push({ executablePath, options })
+  });
+  assert.equal(result.browser.status, 'ready');
+  assert.deepEqual(calls, [{ executablePath: browserPath, options: { timeoutMs: 10000 } }]);
+});
+
+test('Remotion browser process probe uses only fixed local-render arguments and cleans its profile', async () => {
+  const calls = [];
+  const removed = [];
+  const probe = createRemotionBrowserProbe({
+    run: async (program, args, options) => {
+      calls.push({ program, args, options });
+      return { stdout: '<html><title>srt-remotion-probe</title></html>' };
+    },
+    makeTempDir: async () => '/tmp/srt-remotion-profile-fixed',
+    removeTempDir: async (directory) => { removed.push(directory); }
+  });
+
+  await probe('/fixed/local/chrome', { timeoutMs: 25 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].program, '/fixed/local/chrome');
+  assert.equal(calls[0].options.timeoutMs, 25);
+  assert.ok(calls[0].args.includes('--disable-background-networking'));
+  assert.ok(calls[0].args.includes('--dump-dom'));
+  assert.ok(calls[0].args.includes('--user-data-dir=/tmp/srt-remotion-profile-fixed'));
+  assert.equal(calls[0].args.some((arg) => /^https?:/.test(arg)), false);
+  assert.deepEqual(removed, ['/tmp/srt-remotion-profile-fixed']);
+});
+
+test('Remotion browser process probe cleans its profile when the bounded runner rejects', async () => {
+  const removed = [];
+  const probe = createRemotionBrowserProbe({
+    run: async () => { const error = new Error('timed out'); error.code = 'ETIMEDOUT'; throw error; },
+    makeTempDir: async () => '/tmp/srt-remotion-profile-failed',
+    removeTempDir: async (directory) => { removed.push(directory); }
+  });
+
+  await assert.rejects(
+    probe('/fixed/local/chrome', { timeoutMs: 10 }),
+    (error) => error.code === 'ETIMEDOUT'
+  );
+  assert.deepEqual(removed, ['/tmp/srt-remotion-profile-failed']);
 });
 
 test('Windows bundled tools are read only from an explicit resources/tools root', async (t) => {

@@ -58,9 +58,13 @@ function renderSubtitleTrack() {
   });
 }
 function renderCurrentSubtitle() {
+  if (window.remotionPreviewController && window.remotionPreviewController.isActive()) {
+    subtitlePreview.hidden = true;
+    return;
+  }
   if (projectEditingState !== 'ready') { subtitlePreview.hidden = true; return; }
   var snapshot = projectEditing.load(getActiveProjectId());
-  var active = editCapabilityRegistry.get('subtitle.generate@1').preview(snapshot.graph, videoEl.currentTime);
+  var active = editCapabilityRegistry.get('subtitle.generate@1').preview(snapshot.graph, editorPlayback.getState().currentTime);
   subtitlePreview.hidden = !active.visible;
   subtitlePreview.textContent = active.text;
 }
@@ -196,7 +200,7 @@ subtitleTrack.addEventListener('click', function(event) {
   var block = event.target.closest('[data-segment-id]'); if (!block) return;
   var segment = currentSubtitleState().segments.find(function(item) { return item.id === block.dataset.segmentId; });
   if (!segment) return;
-  try { videoEl.currentTime = segment.start; } catch (_) {}
+  try { editorPlayback.seekSeconds(segment.start); } catch (_) {}
   renderCurrentSubtitle();
 });
 subtitleDocumentSurface.addEventListener('input', function(event) {

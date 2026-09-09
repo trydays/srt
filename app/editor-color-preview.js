@@ -27,6 +27,7 @@
   function render() {
     filter.replaceChildren();
     video.style.filter = '';
+    if (window.remotionPreviewController && window.remotionPreviewController.isActive()) return;
     if (window.sourcePreviewController && window.sourcePreviewController.render()) return;
     if (window.projectEditingState !== 'ready') return;
     var graph = window.projectEditing.load(getActiveProjectId()).graph;

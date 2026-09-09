@@ -12,3 +12,4 @@ _test_*
 .env
 test-results/
 playwright-report/
+app/remotion-built/

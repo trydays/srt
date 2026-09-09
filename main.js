@@ -240,7 +240,7 @@ function publicExportCode(error, fallback) {
 }
 
 function startApplication({ environmentModule, localCliService, subtitleService,
-  videoExportService, showSaveDialog } = {}) {
+  videoExportService, remotionExportService, remotionEnabled = true, showSaveDialog } = {}) {
   const userDataDir = app.getPath('userData');
   const bundledRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'tools')
@@ -261,6 +261,83 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   const activeShowSaveDialog = showSaveDialog
     || ((browserWindow, options) => dialog.showSaveDialog(browserWindow, options));
   let activeExport = null;
+  let remotionService = remotionExportService;
+  const previewSessions = new Map();
+  // Production provides the Remotion-specific check. The fallback only serves
+  // injected historical test environments that still exercise the old exporter.
+  function getRemotionTools() {
+    return activeEnvironment.getRemotionTools
+      ? activeEnvironment.getRemotionTools() : activeEnvironment.getExportTools();
+  }
+  function getRemotionService() {
+    if (!remotionService) remotionService = require('./src/remotion-export').createRemotionExportService({
+      getExportTools: getRemotionTools
+    });
+    return remotionService;
+  }
+  function releasePreview(entry) {
+    entry.generation += 1;
+    const session = entry.session;
+    entry.session = null; entry.sessionId = null;
+    return session ? Promise.resolve(session.close()).catch(() => {}) : Promise.resolve();
+  }
+  ipcMain.handle('remotion:state', () => ({ enabled: remotionEnabled }));
+  ipcMain.handle('remotion:prepare-preview', async ({ sender }, request) => {
+    if (!remotionEnabled) return { ok: false, errorCode: 'EXPORT_RUNTIME_NOT_READY' };
+    let entry = previewSessions.get(sender.id);
+    if (!entry) {
+      entry = { generation: 0, session: null, sessionId: null };
+      previewSessions.set(sender.id, entry);
+      sender.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+        if (isMainFrame !== false) void releasePreview(entry);
+      });
+      sender.once('destroyed', () => { void releasePreview(entry); previewSessions.delete(sender.id); });
+    }
+    const releasing = releasePreview(entry);
+    const generation = entry.generation;
+    await releasing;
+    let session;
+    try {
+      const { createRenderInput } = require('./src/remotion-input');
+      const { createRenderAssetSession } = require('./src/remotion-assets');
+      const { readMediaFacts } = require('./src/remotion-export');
+      const { snapshot, videoPath } = request || {};
+      let sourcePath;
+      try {
+        sourcePath = await fs.promises.realpath(videoPath);
+        if (!(await fs.promises.stat(sourcePath)).isFile()) throw new Error('Not a file');
+      } catch (_) {
+        throw Object.assign(new Error('Local media unavailable'), { code: 'EXPORT_INVALID_MEDIA' });
+      }
+      const tools = await getRemotionTools();
+      const media = await readMediaFacts(sourcePath, tools);
+      if (!snapshot || !snapshot.document ||
+          snapshot.document.timeline.canvas.width !== media.width ||
+          snapshot.document.timeline.canvas.height !== media.height ||
+          Math.abs(snapshot.document.timeline.duration - media.duration) > 1 / media.fps) {
+        throw Object.assign(new Error('Source does not match project'), { code: 'EXPORT_INVALID_MEDIA' });
+      }
+      session = await createRenderAssetSession({
+        assetId: snapshot.document.sources[0].assetId, videoPath: sourcePath
+      });
+      const input = createRenderInput(snapshot, { fps: media.fps, assets: session.assets });
+      if (generation !== entry.generation || sender.isDestroyed()) {
+        await session.close();
+        return { ok: false, errorCode: 'EXPORT_CANCELLED' };
+      }
+      entry.session = session;
+      entry.sessionId = require('node:crypto').randomUUID();
+      return { ok: true, input, sessionId: entry.sessionId };
+    } catch (error) {
+      if (session) await session.close().catch(() => {});
+      return publicFailure(error, 'EXPORT_INVALID_MEDIA');
+    }
+  });
+  ipcMain.handle('remotion:release-preview', async ({ sender }, sessionId) => {
+    const entry = previewSessions.get(sender.id);
+    if (entry && entry.sessionId === sessionId) await releasePreview(entry);
+  });
+  app.on('before-quit', () => { previewSessions.forEach(entry => { void releasePreview(entry); }); });
 
   ipcMain.handle('environment:detect', () => activeEnvironment.detectEnvironment());
   ipcMain.handle('installation:describe', (_event, toolId) => activeEnvironment.describeInstall(toolId));
@@ -300,7 +377,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
     }
   });
   ipcMain.handle('video-export:start', async (event, request) => {
-    const { jobId, videoPath, recipe } = request || {};
+    const { jobId, videoPath, recipe, snapshot, engine } = request || {};
     const sender = event.sender;
     if (activeExport) {
       return { jobId, status: 'failed', errorCode: 'EXPORT_BUSY' };
@@ -309,6 +386,16 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       jobId, sender, phase: 'dialog', cancelled: false, completion: null
     };
     try {
+      if (engine !== undefined && engine !== 'legacy' && engine !== 'remotion') {
+        throw Object.assign(new Error('Unsupported renderer'), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+      }
+      if (remotionEnabled && engine !== 'remotion') {
+        throw Object.assign(new Error('A Remotion snapshot is required'), { code: 'EXPORT_UNSUPPORTED_OPERATION' });
+      }
+      if (engine === 'remotion' && !remotionEnabled) {
+        throw Object.assign(new Error('Renderer unavailable'), { code: 'EXPORT_RUNTIME_NOT_READY' });
+      }
+      slot.service = engine === 'remotion' ? getRemotionService() : activeVideoExportService;
       const senderWindow = BrowserWindow.fromWebContents(sender);
       const saveOptions = {
         title: '导出视频',
@@ -327,8 +414,8 @@ function startApplication({ environmentModule, localCliService, subtitleService,
         jobId, phase: 'preparing', percent: null, outputPath
       });
       slot.phase = 'service';
-      slot.completion = activeVideoExportService.start(
-        { jobId, videoPath, outputPath, recipe },
+      slot.completion = slot.service.start(
+        engine === 'remotion' ? { jobId, videoPath, outputPath, snapshot } : { jobId, videoPath, outputPath, recipe },
         function(progress) {
           if (progress && progress.phase) slot.phase = progress.phase;
           if (activeExport === slot && !sender.isDestroyed()) {
@@ -360,7 +447,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       slot.cancelled = true;
       return;
     }
-    if (slot.phase !== 'finalizing') await activeVideoExportService.cancel(jobId);
+    if (slot.phase !== 'finalizing') await slot.service.cancel(jobId);
     if (slot.completion) await slot.completion;
   });
 
@@ -372,7 +459,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
       slot.closing = true;
       Promise.resolve().then(async function() {
         if (slot.phase === 'dialog') slot.cancelled = true;
-        else if (slot.phase !== 'finalizing') await activeVideoExportService.cancel(slot.jobId);
+        else if (slot.phase !== 'finalizing') await slot.service.cancel(slot.jobId);
         if (slot.completion) await slot.completion;
       }).finally(function() {
         if (!closingWindow.isDestroyed()) closingWindow.destroy();

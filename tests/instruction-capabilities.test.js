@@ -105,6 +105,12 @@ test('group prompt serializes the full strict schema and describes timing and ad
   assert.deepEqual(schema.properties.scale.oneOf[1].properties.keyframes.items.properties.easing.enum,
     ['linear', 'ease-out', 'back-out']);
   assert.equal(schema.properties.layers.items.oneOf[0].additionalProperties, false);
+  const standaloneShape = getCapabilitySchema('visual.shape@1');
+  for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity']) {
+    assert.ok(schema.properties.layers.items.oneOf[0].properties.params.properties[name]);
+    assert.ok(standaloneShape.params.properties[name]);
+    assert.match(prompt, new RegExp(name));
+  }
 });
 
 test('group context preserves nested valid payloads and omits undeclared or malformed values', () => {
@@ -140,6 +146,17 @@ test('parseInstruction accepts the nested group schema and rejects unknown child
   for (const id of ['video.noise@1', 'video.vignette@1']) {
     assert.ok(CAPABILITY_SCHEMAS.some(schema => schema.id === id), id + ' is in the AI catalog');
   }
+});
+
+test('parseInstruction accepts styled standalone and nested shapes', () => {
+  const style = { x: .1, y: .1, width: .4, height: .25, color: '#101820',
+    cornerRadius: .1, borderWidth: .02, borderColor: '#268AFF', fillOpacity: .75 };
+  const recipe = { kind: 'instruction', steps: [
+    { capability: 'visual.shape@1', range: { start: 0, end: 1 }, params: style },
+    { capability: 'visual.group@1', range: { start: 1, end: 2 }, params: {
+      layers: [{ kind: 'shape', params: style }] } }
+  ] };
+  assert.deepEqual(parseInstruction(JSON.stringify(recipe)), recipe);
 });
 
 test('buildPrompt defines incremental actions without removing applied context', () => {

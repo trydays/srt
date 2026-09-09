@@ -297,9 +297,28 @@ test('accepts exact frozen layers between source effects and subtitles', () => {
   const text={capability:'visual.text@1',range:{start:1,end:3},params:{text:'重点',x:.12,y:.12,fontSize:.08,color:'#FFFFFF'}};
   const recipe=validateRenderRecipe({version:1,steps:[colorStep(),shape,text,subtitle]});
   assert.deepEqual(recipe.steps,[colorStep(),shape,text,subtitle]); assert.ok(Object.isFrozen(recipe.steps[1].params));
+  const neutralStyle = { ...shape, params: { ...shape.params, cornerRadius: 0,
+    borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1 } };
+  assert.deepEqual(validateRenderRecipe({ version: 1, steps: [neutralStyle] }).steps[0], neutralStyle);
+  const missingOriginal = { ...neutralStyle, params: { ...neutralStyle.params } };
+  delete missingOriginal.params.color;
+  assert.throws(() => validateRenderRecipe({ version: 1, steps: [missingOriginal] }),
+    { code: 'EXPORT_INVALID_RECIPE' });
   assert.throws(()=>validateRenderRecipe({version:1,steps:[text,colorStep()]}),{code:'EXPORT_INVALID_RECIPE'});
   assert.throws(()=>validateRenderRecipe({version:1,steps:[subtitle,shape]}),{code:'EXPORT_INVALID_RECIPE'});
   assert.throws(()=>validateRenderRecipe({version:1,steps:[{...text,params:{...text.params,path:'/tmp/x'}}]}),{code:'EXPORT_INVALID_RECIPE'});
+});
+
+test('accepts a frozen group whose shape child predates neutral style fields', () => {
+  const group = groupStep();
+  for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity']) {
+    delete group.params.layers[0].params[name];
+  }
+  const validated = validateRenderRecipe({ version: 1, steps: [group] });
+  assert.deepEqual(validated.steps[0].params.layers[0].params, {
+    ...group.params.layers[0].params, cornerRadius: 0, borderWidth: 0,
+    borderColor: '#FFFFFF', fillOpacity: 1
+  });
 });
 
 function groupStep() {
