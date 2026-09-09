@@ -465,7 +465,19 @@
       editType: 'visual.group.layer@1',
       nodeType: 'visual.group@1',
       graphStage: 'visualOverlay',
-      prepare: async function() { return {}; },
+      prepare: async function(step, executionContext) {
+        var layers = step && step.params && step.params.layers;
+        var hasMedia = Array.isArray(layers) && layers.some(function(layer) {
+          return layer && (layer.kind === 'image' || layer.kind === 'video');
+        });
+        if (!hasMedia) return {};
+        if (!executionContext || typeof executionContext.validateProjectAssets !== 'function') {
+          throw codedError('PROJECT_ASSET_RUNTIME_NOT_READY');
+        }
+        var result = await executionContext.validateProjectAssets({ layers: clone(layers), range: clone(step.range) });
+        if (!result || result.ok !== true) throw codedError(result && result.errorCode || 'PROJECT_ASSET_INVALID');
+        return {};
+      },
       toEdit: function(_prepared, step) {
         return {
           type: 'visual.group.layer@1',

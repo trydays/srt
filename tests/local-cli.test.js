@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const { createLocalCliService } = require('../src/local-cli');
 
 function fakeFs(files) {
@@ -304,12 +305,10 @@ for (const output of ['not json', '[]', '{"kind":"instruction","steps":[{"capabi
   });
 }
 
-test('translate ignores stdin so interactive CLI prompts do not hang', async () => {
-  const calls = [];
-  const execFile = (file, args, options, callback) => {
-    calls.push({ file, args, options });
-    callback(null, '{"kind":"instruction","steps":[{"capability":"subtitle.generate@1","params":{}}]}', '');
-  };
+test('translate closes stdin so a CLI waiting for EOF can respond', async () => {
+  const execFile = (_file, _args, options, callback) => childProcess.execFile(process.execPath, ['-e',
+    "process.stdin.on('end',()=>process.stdout.write(JSON.stringify({kind:'clarify',message:'stdin closed'})));process.stdin.resume()"
+  ], { ...options, timeout: 500 }, callback);
   const service = createLocalCliService({
     platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
     fsApi: fakeFs(['/bin/claude']),
@@ -317,9 +316,9 @@ test('translate ignores stdin so interactive CLI prompts do not hang', async () 
     execFile
   });
   await service.select('claude');
-  await service.translateInstruction('加字幕');
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(await service.translateInstruction('加字幕'), {
+    kind: 'clarify', message: 'stdin closed'
+  });
 });
 
 test('waits up to 60s for a local CLI translation response', async () => {
@@ -338,3 +337,20 @@ test('waits up to 60s for a local CLI translation response', async () => {
   await service.translateInstruction('加字幕');
   assert.equal(calls[0].options.timeout, 60000);
 });
+
+for (const [name, ending, expectedCode] of [
+  ['nonzero exit', 'process.exitCode=1', 'LOCAL_CLI_TRANSLATION_FAILED'],
+  ['timeout', 'setInterval(()=>{},1000)', 'LOCAL_CLI_TRANSLATION_TIMEOUT']
+]) {
+  test(`does not accept valid stdout after a real CLI ${name}`, async () => {
+    const service = createLocalCliService({
+      platform: 'darwin', env: { PATH: '/bin' }, homeDir: '/Users/a', userDataDir: '/prefs',
+      fsApi: fakeFs(['/bin/codex']), run: async () => ({ exitCode: 0 }),
+      execFile: (_file, _args, options, callback) => childProcess.execFile(process.execPath, ['-e',
+        `process.stdin.resume();process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({kind:'clarify',message:'not a successful invocation'}));${ending};})`
+      ], { ...options, timeout: 500 }, callback)
+    });
+    await service.select('codex');
+    await assert.rejects(service.translateInstruction('连接测试'), { code: expectedCode });
+  });
+}

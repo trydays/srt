@@ -119,12 +119,20 @@
     catch(_){ throw codedError('EXPORT_INVALID_RECIPE'); }
     var expectedKeys=Object.keys(kind==='shape'?getVisualLayers().SHAPE_PARAMETERS:getVisualLayers().TEXT_PARAMETERS).sort();
     var legacyShapeKeys=['color','height','width','x','y'];
+    var cardShapeKeys=['borderColor','borderWidth','color','cornerRadius','fillOpacity','height','width','x','y'];
+    var legacyTextKeys=['color','fontSize','text','x','y'];
     var legacyShape=kind==='shape' && hasOnlyKeys(step.params,legacyShapeKeys);
-    if (!hasOnlyKeys(step.params,expectedKeys)
-        && !legacyShape)
+    var cardShape=kind==='shape' && hasOnlyKeys(step.params,cardShapeKeys);
+    var legacyText=kind==='text' && hasOnlyKeys(step.params,legacyTextKeys);
+    if (!hasOnlyKeys(step.params,expectedKeys) && !legacyShape && !cardShape && !legacyText)
       throw codedError('EXPORT_INVALID_RECIPE');
-    if (legacyShape) params={x:step.params.x,y:step.params.y,width:step.params.width,
-      height:step.params.height,color:step.params.color};
+    if (kind==='shape' && (params.backdropBlur!==0 || params.glowBlur!==0
+        || params.glowColor!=='#FFFFFF' || params.glowOpacity!==0)) throw codedError('EXPORT_INVALID_RECIPE');
+    if (kind==='text' && (params.fontWeight!==400 || params.letterSpacing!==0
+        || params.shadowBlur!==0 || params.shadowColor!=='#000000' || params.shadowOpacity!==0)) {
+      throw codedError('EXPORT_INVALID_RECIPE');
+    }
+    if (legacyShape || cardShape || legacyText) params=Object.assign({},step.params);
     return {capability:step.capability,range:{start:step.range.start,end:step.range.end},params:params};
   }
 
@@ -154,13 +162,24 @@
     } catch (_) {
       throw codedError('EXPORT_INVALID_RECIPE');
     }
+    if (params.layers.some(function(layer) {
+      if (layer.kind==='image' || layer.kind==='video') return true;
+      if (layer.kind==='shape') return layer.params.backdropBlur!==0 || layer.params.glowBlur!==0
+        || layer.params.glowColor!=='#FFFFFF' || layer.params.glowOpacity!==0;
+      return layer.params.fontWeight!==400 || layer.params.letterSpacing!==0
+        || layer.params.shadowBlur!==0 || layer.params.shadowColor!=='#000000'
+        || layer.params.shadowOpacity!==0;
+    })) throw codedError('EXPORT_INVALID_RECIPE');
     var comparable=step.params;
     if (Array.isArray(step.params.layers)) {
-      comparable=Object.assign({},step.params,{layers:step.params.layers.map(function(layer){
-        if (!isPlainObject(layer) || layer.kind!=='shape' || !isPlainObject(layer.params)
-            || !hasOnlyKeys(layer.params,['color','height','width','x','y'])) return layer;
-        return {kind:'shape',params:Object.assign({},layer.params,{cornerRadius:0,borderWidth:0,
-          borderColor:'#FFFFFF',fillOpacity:1})};
+      comparable=Object.assign({},step.params,{layers:step.params.layers.map(function(layer,index){
+        if (!isPlainObject(layer) || !isPlainObject(layer.params)) return layer;
+        var legacy = layer.kind==='shape' && hasOnlyKeys(layer.params,['color','height','width','x','y']);
+        var card = layer.kind==='shape' && hasOnlyKeys(layer.params,
+          ['borderColor','borderWidth','color','cornerRadius','fillOpacity','height','width','x','y']);
+        var legacyText = layer.kind==='text' && hasOnlyKeys(layer.params,['color','fontSize','text','x','y']);
+        if (!legacy && !card && !legacyText) return layer;
+        return {kind:layer.kind,params:params.layers[index].params};
       })});
     }
     if (!sameData(comparable, params)) throw codedError('EXPORT_INVALID_RECIPE');

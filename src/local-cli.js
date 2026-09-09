@@ -48,10 +48,11 @@ function createDefaultRun(execFile, platform, env) {
 function createDefaultTranslate(execFile) {
   return function translate(file, args) {
     return new Promise((resolve, reject) => {
-      execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }, (error, stdout) => {
+      const child = execFile(file, args, { timeout: TRANSLATION_TIMEOUT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
         if (error) reject(error);
         else resolve(stdout);
       });
+      if (child && child.stdin && typeof child.stdin.end === 'function') child.stdin.end();
     });
   };
 }

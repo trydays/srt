@@ -4,8 +4,8 @@ const fs = require('node:fs/promises');
 const { constants } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createRenderInput } = require('./remotion-input');
-const { createRenderAssetSession } = require('./remotion-assets');
+const { createRenderInput, referencedAssetIds } = require('./remotion-input');
+const { createRenderAssetSession, createRenderAssetSessions } = require('./remotion-assets');
 
 const execFileAsync = promisify(execFile);
 
@@ -100,6 +100,9 @@ function createRemotionExportService(options) {
   const getBundlePath = options.getBundlePath
     || (async () => path.join(__dirname, '../app/remotion-built/render'));
   const createAssetSession = options.createAssetSession || createRenderAssetSession;
+  const createAssetSessions = options.createAssetSessions || ((request) =>
+    createRenderAssetSessions({ ...request, createSession: createAssetSession }));
+  const resolveProjectAssets = options.resolveProjectAssets;
   const renderer = options.renderer || require('@remotion/renderer');
   let current = null;
 
@@ -248,9 +251,18 @@ function createRemotionExportService(options) {
       validateSourceMatch(job.snapshot, source);
 
       const assetId = sourceAssetId(job.snapshot);
+      const extraIds = referencedAssetIds(job.snapshot.graph).filter((id) => id !== assetId);
       try {
-        assetSession = await waitForPreparing(active,
-          createAssetSession({ assetId, videoPath: sourcePath }), {
+        let extraAssets = [];
+        if (extraIds.length) {
+          if (typeof resolveProjectAssets !== 'function') throw codedError('EXPORT_INVALID_MEDIA');
+          extraAssets = await waitForPreparing(active, resolveProjectAssets({
+            projectId: job.snapshot.document.projectId, assetIds: extraIds.slice()
+          }));
+        }
+        assetSession = await waitForPreparing(active, extraAssets.length
+          ? createAssetSessions({ assets: [{ assetId, filePath: sourcePath }, ...extraAssets] })
+          : createAssetSession({ assetId, videoPath: sourcePath }), {
             timeoutInMilliseconds: 10000,
             onLateValue: (session) => session && session.close && session.close()
           });

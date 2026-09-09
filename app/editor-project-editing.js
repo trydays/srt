@@ -7,10 +7,13 @@ var projectEditing = SRTProjectEditing.createProjectEditing({
   idFactory: createLocalId,
   capabilityRegistry: editCapabilityRegistry,
   graphCompiler: SRTRenderGraph.createRenderGraphCompiler({ capabilityRegistry: editCapabilityRegistry }),
-  executionContext: function() {
+  executionContext: function(projectId) {
     return {
       videoPath: window.currentProjectVideoPath,
-      generateSubtitles: function(request) { return window.srtAPI.generateSubtitles(request); }
+      generateSubtitles: function(request) { return window.srtAPI.generateSubtitles(request); },
+      validateProjectAssets: function(request) {
+        return window.srtAPI.validateProjectAssets(Object.assign({}, request, {projectId:projectId}));
+      }
     };
   }
 });
@@ -114,11 +117,16 @@ projectEditingReady.catch(function() {});
     if (disposed) return;
     runtimeError = error || new Error('Preview failed');
     surface.dataset.state = 'error';
-    message.textContent = error && error.code === 'EXPORT_INVALID_MEDIA'
+    var assetErrors = {
+      PROJECT_ASSET_MISSING: '素材文件已移动或不可读取，请还原素材文件后重新打开项目。',
+      PROJECT_ASSET_UNKNOWN: '卡片引用的素材不属于当前项目，请重新导入并生成卡片。',
+      PROJECT_ASSET_INDEX_INVALID: '项目素材记录不可读取，未继续准备预览。'
+    };
+    message.textContent = assetErrors[error && error.code] || (error && error.code === 'EXPORT_INVALID_MEDIA'
       ? '视频信息不可用，未能准备预览。请重新打开项目。'
       : error && error.code === 'REMOTION_GRAPH_UNSUPPORTED'
         ? '当前编辑包含渲染器尚不支持的内容，未能准备预览。'
-        : '视频预览未完成，请重新打开项目后重试。';
+        : '视频预览未完成，请重新打开项目后重试。');
     message.hidden = false;
     editorPlayback.pause();
   }
@@ -143,7 +151,9 @@ projectEditingReady.catch(function() {});
       throw Object.assign(new Error('Unsupported render graph'), { code: 'REMOTION_GRAPH_UNSUPPORTED' });
     }
     if (!window.SRTRemotionPlayer) throw Object.assign(new Error('Player bundle missing'), { code: 'EXPORT_RUNTIME_NOT_READY' });
-    if (remotionDriver && input) {
+    var references = SRTRemotionInput.referencedAssetIds(snapshot.graph);
+    var assetsChanged = !input || references.join('\n') !== Object.keys(input.assets).sort().join('\n');
+    if (remotionDriver && input && !assetsChanged) {
       input = SRTRemotionInput.createRenderInput(snapshot, { fps: input.fps, assets: input.assets });
       remotionDriver.updateInput(input);
     } else {
@@ -153,7 +163,14 @@ projectEditingReady.catch(function() {});
         window.srtAPI.releaseRemotionPreview(result.sessionId).catch(function() {});
         return engine;
       }
+      var previousSession = sessionId;
       input = result.input; sessionId = result.sessionId; fit();
+      if (remotionDriver) {
+        // New graph references need fresh URLs before the mounted Player updates.
+        // Keep the old sessions alive until the replacement has been handed over.
+        remotionDriver.updateInput(input);
+        if (previousSession) window.srtAPI.releaseRemotionPreview(previousSession).catch(function() {});
+      } else {
       var token = playerToken = {};
       var driver = await SRTRemotionPlayer.mount(surface, input, { onError: function(error) {
         if (playerToken === token) fail(error);
@@ -161,6 +178,7 @@ projectEditingReady.catch(function() {});
       if (turn !== epoch || disposed) { driver.destroy(); release(); return engine; }
       remotionDriver = driver;
       await editorPlayback.setDriver(driver);
+      }
     }
     if (runtimeError) throw runtimeError;
     fit(); clearLegacy(); message.hidden = true; surface.dataset.state = 'ready';

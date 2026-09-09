@@ -74,6 +74,45 @@ const localCliService = {
   },
   async translateInstruction(text, history, context, skill) {
     state.translationCalls = (state.translationCalls || []).concat([{ text, history, context, skill }]);
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'real-keypoints') {
+      if (!process.env.SRT_REAL_KEYPOINT_USER_DATA) throw new Error('Explicit prepared CLI profile required');
+      const started=Date.now();
+      const resultEvidence={selectedCliId,startedAt:new Date(started).toISOString()};
+      (state.realTranslationResults ||= []).push(resultEvidence);
+      const realService=require('../../src/local-cli').createLocalCliService({
+        userDataDir:process.env.SRT_REAL_KEYPOINT_USER_DATA,
+        execFile(file,args,options,callback) {
+          const processStarted=Date.now();
+          return require('node:child_process').execFile(file,args,options,(error,stdout,stderr)=>{
+            // Keep only process metadata, never CLI auth, prompts or reasoning logs.
+            if (args[0] !== '--version') (state.realCliProcesses ||= []).push({
+              file,command:args[0],timeout:options.timeout,durationMs:Date.now()-processStarted,
+              code:error?.code ?? 0,killed:!!error?.killed,signal:error?.signal ?? null,
+              stdoutBytes:Buffer.byteLength(stdout || ''),stderrBytes:Buffer.byteLength(stderr || '')
+            });
+            callback(error,stdout,stderr);
+          });
+        }
+      });
+      try {
+        const actual=await realService.getState();
+        if (actual.selectedCliId !== selectedCliId) throw new Error('Real CLI profile differs from selected test UI');
+        const result=await realService.translateInstruction(text,history,context,skill);
+        resultEvidence.result=result;
+        return result;
+      } catch(error) {
+        resultEvidence.error={code:error.code,message:error.message};
+        throw error;
+      } finally {
+        resultEvidence.durationMs=Date.now()-started;
+      }
+    }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'remotion-media-card-flow') {
+      return require('./remotion-media-card-recipe')(text, context);
+    }
+    if (process.env.SRT_E2E_EFFECT_RESULT === 'keypoint-text-flow') {
+      return require('./keypoint-recipe')(text, context);
+    }
     if (process.env.SRT_E2E_EFFECT_RESULT === 'remotion-card-style-flow') {
       return require('./remotion-card-style-recipe')(text, context);
     }
@@ -234,6 +273,13 @@ const localCliService = {
 const subtitleService = {
   async generate(request) {
     state.subtitleCalls = (state.subtitleCalls || []).concat([request]);
+    if (process.env.SRT_E2E_SUBTITLE_RESULT === 'real-keypoints') {
+      if (!process.env.SRT_REAL_KEYPOINT_USER_DATA) throw new Error('Explicit prepared speech profile required');
+      return require('../../src/subtitles').createSubtitleService({
+        userDataDir:process.env.SRT_REAL_KEYPOINT_USER_DATA,
+        transcriberPath:path.join(__dirname,'../../resources/tools/transcribe-subtitles.py')
+      }).generate(request);
+    }
     if (process.env.SRT_E2E_SUBTITLE_RESULT === 'no-speech') {
       const error = new Error('no speech');
       error.code = 'SUBTITLE_NO_SPEECH';
@@ -297,7 +343,9 @@ if (useRemotion) {
       };
     });
     service = require('../../src/remotion-export').createRemotionExportService({
-      getExportTools: () => environmentModule.getRemotionTools(), renderer: tracedRenderer
+      getExportTools: () => environmentModule.getRemotionTools(), renderer: tracedRenderer,
+      resolveProjectAssets: request => require('../../src/project-assets')
+        .createProjectAssetStore({rootDir:userDataDir}).resolve(request)
     });
     return service;
   };
@@ -315,6 +363,8 @@ if (useRemotion) {
   };
 }
 startApplication({ environmentModule, localCliService, subtitleService,
+  showOpenDialog: async () => ({canceled: !state.mediaImportPaths || state.mediaImportPaths.length === 0,
+    filePaths: state.mediaImportPaths || []}),
   ...(process.env.SRT_E2E_REMOTION === 'default' ? {} : { remotionEnabled: useRemotion }),
   ...(remotionExportService ? { remotionExportService } : {}),
   showSaveDialog,

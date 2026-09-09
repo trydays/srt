@@ -208,6 +208,10 @@
     .selected-skill__clear:disabled{opacity:.45;cursor:default}
     .personal-skills-button,.skill-exit-clarify,.save-as-skill,.skill-button{appearance:none;height:29px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-panel);color:var(--text);font:inherit;font-size:11px;cursor:pointer}
     .personal-skills-button:disabled,.skill-button:disabled{opacity:.48;cursor:default}
+    .project-media-row{display:flex;gap:6px;align-items:center;margin:6px 0;font-size:11px;color:var(--text-soft)}
+    .project-media-row[hidden]{display:none}
+    .project-media-row select{min-width:0;flex:1;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--bg-panel);color:var(--text);font:inherit}
+    .project-media-status{font-size:11px;line-height:1.4;color:var(--text-soft);margin:4px 0}
     .save-as-skill{margin-top:7px}
     .skill-dialog{width:min(430px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));padding:0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg-panel);color:var(--text);box-shadow:var(--shadow-lg)}
     .skill-dialog::backdrop{background:rgba(0,0,0,.28)}
@@ -275,8 +279,12 @@
             <button class="skill-exit-clarify" data-testid="skill-exit-clarify" type="button" hidden>退出本次补充</button>
           </div>
           <div class="input-editor" contenteditable="true" data-placeholder="描述要给视频加什么效果…" aria-label="效果描述输入" role="textbox" aria-multiline="true"></div>
+          <label class="project-media-row" data-project-media-row hidden>参考素材
+            <select data-testid="project-media-select" aria-label="本次参考素材"><option value="">不指定，由 AI 按需求选择</option></select>
+          </label>
+          <div class="project-media-status" data-testid="project-media-status" role="status" hidden></div>
           <div class="input-foot">
-            <div class="input-foot-l"><button class="personal-skills-button" data-testid="personal-skills-button" type="button">我的技能</button></div>
+            <div class="input-foot-l"><button class="personal-skills-button" data-testid="personal-skills-button" type="button">我的技能</button><button class="personal-skills-button" data-testid="project-media-import" type="button">导入素材</button></div>
             <div class="input-foot-r">
               <button class="input-submit" id="generateBtn">生成效果 →</button>
             </div>
@@ -400,6 +408,7 @@
   <script src="../src/video-transform.js"></script>
   <script src="../src/video-texture.js"></script>
   <script src="../src/visual-layers.js"></script>
+  <script src="../src/visual-media.js"></script>
   <script src="../src/keyframes.js"></script>
   <script src="../src/visual-group.js"></script>
   <script src="../src/remotion-support.js"></script>
@@ -411,10 +420,12 @@
   <script src="../src/project-editing.js"></script>
   <script src="subtitle-draft-state.js"></script>
   <script src="editor-project-editing.js"></script>
+  <script src="editor-assets.js"></script>
   <script src="editor-color-preview.js"></script>
   <script src="editor-source-preview.js"></script>
   <script src="editor-layer-preview.js"></script>
   <script src="editor-subtitles.js"></script>
+  <script src="../src/transcript-context.js"></script>
   <script src="editor-timeline.js"></script>
   <script src="editor-skills.js"></script>
   <script src="editor-export.js"></script>

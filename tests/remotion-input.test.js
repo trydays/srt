@@ -138,3 +138,17 @@ test('exposes the browser UMD input API', () => {
   assert.equal(typeof context.window.SRTRemotionInput.supportsGraph, 'function');
   assert.equal(context.window.SRTRemotionInput.supportsGraph(visualFixture().graph), true);
 });
+
+test('collects every referenced source and group media asset id in sorted order', () => {
+  const snapshot = fixture();
+  snapshot.document.edits[0].payload.layers.splice(1, 0,
+    { kind: 'image', params: { assetId: 'asset-z', x: 0, y: 0, width: .5, height: .5 } },
+    { kind: 'video', params: { assetId: 'asset-a', x: .5, y: .5, width: .5, height: .5, sourceStartSeconds: 0 } });
+  snapshot.graph = createRenderGraphCompiler().compile(snapshot.document);
+  assert.deepEqual(api().referencedAssetIds(snapshot.graph), ['asset-a', 'asset-z', 'video']);
+  assert.throws(() => api().createRenderInput(snapshot, options()), { code: 'REMOTION_INPUT_INVALID' });
+  const settings = options();
+  settings.assets['asset-z'] = { src: 'http://127.0.0.1:4178/z' };
+  settings.assets['asset-a'] = { src: 'http://127.0.0.1:4178/a' };
+  assert.equal(api().createRenderInput(snapshot, settings).assets['asset-a'].src.endsWith('/a'), true);
+});

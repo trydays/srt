@@ -21,8 +21,10 @@ test('canonicalizes one flat ordered group with shared defaults and animations',
   assert.deepEqual(canonical, {
     layers: [
       { kind: 'shape', params: { ...input.layers[0].params, cornerRadius: 0,
-        borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1 } },
-      input.layers[1]
+        borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1,
+        backdropBlur: 0, glowBlur: 0, glowColor: '#FFFFFF', glowOpacity: 0 } },
+      { kind: 'text', params: { ...input.layers[1].params, fontWeight: 400,
+        letterSpacing: 0, shadowBlur: 0, shadowColor: '#000000', shadowOpacity: 0 } }
     ],
     pivotX: .5,
     pivotY: .5,
@@ -34,6 +36,18 @@ test('canonicalizes one flat ordered group with shared defaults and animations',
   });
   assert.notEqual(canonical.layers, input.layers);
   assert.notEqual(canonical.layers[0].params, input.layers[0].params);
+});
+
+test('normalizes ordered image and video children', () => {
+  const canonical = group.normalizeParams({ layers: [
+    { kind: 'image', params: { assetId: 'asset-image', x: .1, y: .1, width: .8, height: .4 } },
+    { kind: 'video', params: { assetId: 'asset-video', x: .2, y: .5, width: .6, height: .4, sourceStartSeconds: .25 } },
+    { kind: 'text', params: { text: 'front' } }
+  ] }, 2);
+  assert.deepEqual(canonical.layers.map(layer => layer.kind), ['image', 'video', 'text']);
+  assert.equal(canonical.layers[0].params.fit, 'contain');
+  assert.equal(canonical.layers[1].params.fit, 'cover');
+  assert.equal(canonical.layers[1].params.sourceStartSeconds, .25);
 });
 
 test('rejects oversized, nested, malformed or executable flat groups', () => {
@@ -56,6 +70,17 @@ test('rejects oversized, nested, malformed or executable flat groups', () => {
   for (const value of invalid) {
     assert.throws(() => group.normalizeParams(value, 2), { code: 'VISUAL_GROUP_INVALID' });
   }
+});
+
+test('requires the single formal glass surface to be the first child', () => {
+  assert.throws(() => group.normalizeParams({ layers: [
+    { kind: 'text', params: { text: 'front' } },
+    { kind: 'shape', params: { backdropBlur: .02 } }
+  ] }, 2), { code: 'VISUAL_GROUP_INVALID' });
+  assert.doesNotThrow(() => group.normalizeParams({ layers: [
+    { kind: 'shape', params: { backdropBlur: .02 } },
+    { kind: 'text', params: { text: 'front' } }
+  ] }, 2));
 });
 
 test('samples half-open ranges using group-relative time and integer pivot geometry', () => {

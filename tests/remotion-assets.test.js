@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { createRenderAssetSession } = require('../src/remotion-assets');
+const { createRenderAssetSession, createRenderAssetSessions } = require('../src/remotion-assets');
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'srt-remotion-assets-'));
@@ -49,6 +49,26 @@ test('serves only the selected real file through its opaque session route', asyn
   const blocked = await request(arbitrary);
   assert.equal(blocked.statusCode, 404);
   assert.equal(blocked.body.length, 0);
+});
+
+test('combines multiple referenced files and cleans prepared sessions on failure', async (t) => {
+  const { videoPath } = await fixture(t);
+  const second = path.join(path.dirname(videoPath), 'image.png'); await fs.writeFile(second, 'image');
+  const combined = await createRenderAssetSessions({ assets: [
+    { assetId: 'main', filePath: videoPath }, { assetId: 'image', filePath: second }
+  ] });
+  assert.deepEqual(Object.keys(combined.assets).sort(), ['image', 'main']);
+  assert.equal((await request(combined.assets.image.src)).headers['content-type'], 'image/png');
+  const mainUrl = combined.assets.main.src;
+  await combined.close();
+  await assert.rejects(request(mainUrl));
+
+  let closed = 0;
+  await assert.rejects(createRenderAssetSessions({ assets: [
+    { assetId: 'first', filePath: videoPath }, { assetId: 'bad', filePath: '/missing' }
+  ], createSession: async (item) => item.assetId === 'bad' ? Promise.reject(new Error('bad'))
+    : { assets: { first: { src: 'http://127.0.0.1:1/a' } }, close: async () => { closed++; } } }));
+  assert.equal(closed, 1);
 });
 
 test('supports HEAD without reading a body', async (t) => {

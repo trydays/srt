@@ -311,14 +311,40 @@ test('accepts exact frozen layers between source effects and subtitles', () => {
 
 test('accepts a frozen group whose shape child predates neutral style fields', () => {
   const group = groupStep();
-  for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity']) {
+  for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity',
+    'backdropBlur', 'glowBlur', 'glowColor', 'glowOpacity']) {
     delete group.params.layers[0].params[name];
   }
   const validated = validateRenderRecipe({ version: 1, steps: [group] });
   assert.deepEqual(validated.steps[0].params.layers[0].params, {
     ...group.params.layers[0].params, cornerRadius: 0, borderWidth: 0,
-    borderColor: '#FFFFFF', fillOpacity: 1
+    borderColor: '#FFFFFF', fillOpacity: 1, backdropBlur: 0, glowBlur: 0,
+    glowColor: '#FFFFFF', glowOpacity: 0
   });
+});
+
+test('accepts an R4 group shape with neutral card fields but no formal fields', () => {
+  const group = groupStep();
+  for (const name of ['backdropBlur', 'glowBlur', 'glowColor', 'glowOpacity']) {
+    delete group.params.layers[0].params[name];
+  }
+  const validated = validateRenderRecipe({ version: 1, steps: [group] });
+  assert.equal(validated.steps[0].params.layers[0].params.backdropBlur, 0);
+  assert.equal(validated.steps[0].params.layers[0].params.glowOpacity, 0);
+});
+
+test('legacy recipe boundary rejects formal styles and media instead of dropping them', () => {
+  const shape = { capability: 'visual.shape@1', range: { start: 0, end: 1 },
+    params: require('../src/visual-layers').normalizeParams('shape', { width: .4, backdropBlur: .02 }, false) };
+  const text = { capability: 'visual.text@1', range: { start: 0, end: 1 },
+    params: require('../src/visual-layers').normalizeParams('text', { text: 'x', fontWeight: 700 }, false) };
+  const mediaGroup = { capability: 'visual.group@1', range: { start: 0, end: 1 },
+    params: normalizeGroup({ layers: [{ kind: 'image', params: {
+      assetId: 'image', x: 0, y: 0, width: .5, height: .5 } }] }, 1) };
+  for (const step of [shape, text, mediaGroup]) {
+    assert.throws(() => validateRenderRecipe({ version: 1, steps: [step] }),
+      { code: 'EXPORT_INVALID_RECIPE' });
+  }
 });
 
 function groupStep() {

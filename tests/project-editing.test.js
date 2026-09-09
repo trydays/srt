@@ -280,7 +280,8 @@ test('styled shapes persist and undo while loading legacy shapes leaves stored b
     stored.p1.document.edits[1].payload.layers[0].params,
     stored.p1.undoStack[0].edits[0].payload];
   for (const payload of oldPayloads) {
-    for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity']) delete payload[name];
+    for (const name of ['cornerRadius', 'borderWidth', 'borderColor', 'fillOpacity',
+      'backdropBlur', 'glowBlur', 'glowColor', 'glowOpacity']) delete payload[name];
   }
   legacy.storage.setItem('edits', JSON.stringify(stored));
   const bytes = legacy.raw();
@@ -301,7 +302,8 @@ test('styled shapes persist and undo while loading legacy shapes leaves stored b
   const applied = await applySteps(f, [{ capability: 'visual.shape@1',
     range: { start: 1, end: 3 }, params }], 'styled');
   assert.deepEqual(f.editing.load('p1').document, applied.document);
-  assert.deepEqual(applied.document.edits[0].payload, params);
+  assert.deepEqual(applied.document.edits[0].payload, { ...params, backdropBlur: 0,
+    glowBlur: 0, glowColor: '#FFFFFF', glowOpacity: 0 });
   assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
     transactionId: 'styled' }).document.edits, []);
 });
@@ -343,8 +345,10 @@ test('one flat group request persists nested frames and undoes as one transactio
   assert.deepEqual(refreshed.document, applied.document);
   assert.deepEqual(refreshed.document.edits[0].payload.layers, [
     { kind: 'shape', params: { ...groupStep().params.layers[0].params,
-      cornerRadius: 0, borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1 } },
-    groupStep().params.layers[1]
+      cornerRadius: 0, borderWidth: 0, borderColor: '#FFFFFF', fillOpacity: 1,
+      backdropBlur: 0, glowBlur: 0, glowColor: '#FFFFFF', glowOpacity: 0 } },
+    { kind: 'text', params: { ...groupStep().params.layers[1].params, fontWeight: 400,
+      letterSpacing: 0, shadowBlur: 0, shadowColor: '#000000', shadowOpacity: 0 } }
   ]);
   assert.deepEqual(f.editing.undo({ projectId: 'p1', expectedRevision: 1,
     transactionId: 'group-request' }).document.edits, []);

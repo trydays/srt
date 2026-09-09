@@ -111,6 +111,62 @@ test('shared shape rendering keeps rounded fill and border inside its original b
   assert.match(grouped, /stroke="#268AFF"/);
   assert.doesNotMatch(grouped, /<text[^>]*(?:opacity|fill-opacity)=/);
 });
+test('formal group puts animation on the glass surface and preserves styled child order', () => {
+  const value = node({ opacity: .5, scale: .8, layers: [
+    { kind: 'shape', params: { x: .1, y: .1, width: .7, height: .5, color: '#102030',
+      fillOpacity: .35, cornerRadius: .08, backdropBlur: .04, glowBlur: .02,
+      glowColor: '#268AFF', glowOpacity: .6 } },
+    { kind: 'text', params: { text: '标题', x: .16, y: .16, fontSize: .1, fontWeight: 700,
+      letterSpacing: .1, shadowBlur: .2, shadowColor: '#000000', shadowOpacity: .5 } }
+  ] });
+  const html = markup(value, 40);
+  assert.match(html, /data-group-id="node-group"/);
+  assert.match(html, /data-glass-surface="true"/);
+  assert.match(html, /backdrop-filter:blur\(9\.6px\)/);
+  assert.match(html, /opacity:0\.5/);
+  assert.match(html, /transform:scale\(0\.8\)/);
+  assert.doesNotMatch(html, /data-group-id="node-group"[^>]*opacity/);
+  assert.match(html, /font-weight:700/);
+  assert.match(html, /letter-spacing:2\.4/);
+  assert.ok(html.indexOf('data-glass-surface') < html.indexOf('<text'));
+});
+test('formal group allows full-canvas children but rejects another glass in one group', () => {
+  const outside = node({ layers: [
+    { kind: 'shape', params: { x: .1, y: .1, width: .4, height: .4, backdropBlur: .02 } },
+    { kind: 'shape', params: { x: .45, y: .2, width: .2, height: .2 } }
+  ] });
+  assert.match(markup(outside, 40), /data-glass-content="true" style="[^\"]*overflow:visible/);
+  assert.throws(() => markup(node({ layers: [
+    { kind: 'shape', params: { x: .1, y: .1, width: .8, height: .7, backdropBlur: .02 } },
+    { kind: 'shape', params: { x: .2, y: .2, width: .2, height: .2, glowOpacity: .5 } }
+  ] }), 40), /(?:REMOTION_GLASS_GROUP_LAYOUT|VISUAL_GROUP_INVALID)/);
+});
+test('mixed group resolves image and timed video assets in child order', () => {
+  const value = node({ opacity: 1, scale: 1, layers: [
+    { kind: 'shape', params: { x: .1, y: .1, width: .8, height: .7, color: '#102030' } },
+    { kind: 'image', params: { assetId: 'cover', x: .15, y: .15, width: .3, height: .3,
+      fit: 'contain', cornerRadius: .1 } },
+    { kind: 'video', params: { assetId: 'clip', x: .5, y: .15, width: .3, height: .3,
+      fit: 'cover', cornerRadius: .1, sourceStartSeconds: .5 } },
+    { kind: 'text', params: { text: '说明', x: .15, y: .55, fontSize: .08 } }
+  ] });
+  const { GroupLayer } = scene();
+  const React = require('react');
+  const { Player } = require('@remotion/player');
+  const component = () => React.createElement(GroupLayer, { node: value, frame: 49, fps: 24,
+    width: 320, height: 240, assets: { cover: { src: 'http://127.0.0.1/cover.png' },
+      clip: { src: 'http://127.0.0.1/clip.mp4' } } });
+  const html = require('react-dom/server').renderToStaticMarkup(React.createElement(Player, {
+    component, durationInFrames: 96, compositionWidth: 320, compositionHeight: 240, fps: 24,
+    initialFrame: 49, noSuspense: true, numberOfSharedAudioTags: 0,
+    acknowledgeRemotionLicense: true
+  }));
+  assert.match(html, /data-media-asset="cover"/);
+  assert.match(html, /data-media-kind="video"[^]*<video /);
+  assert.match(html, /muted=""/);
+  assert.ok(html.indexOf('data-media-asset="cover"') < html.indexOf('data-media-kind="video"'));
+  assert.ok(html.indexOf('data-media-kind="video"') < html.indexOf('说明'));
+});
 test('subtitle uses half-open segment times, gaps, overlap order and literal newlines', () => {
   const value = { id: 'subtitles', type: 'visual.subtitle@1', range: { start: .5, end: 3 }, props: {
     segments: [
@@ -146,9 +202,9 @@ test('composition preserves graph z-order with standalone layers and subtitle to
     bottomPercent: 7, maxWidthPercent: 84, textColor: '#FFFFFF', backgroundColor: '#000000', backgroundOpacity: .72 };
   const nodes = [
     { id: 'video', type: 'source.video@1', range: { start: 0, end: 4 }, props: { assetId: 'video' } },
+    { id: 'subtitle', type: 'visual.subtitle@1', range: { start: 0, end: 4 }, props: { segments: [{ id: 's', start: 0, end: 4, text: 'caption' }], style } },
     { id: 'shape', type: 'visual.shape@1', range: { start: 0, end: 4 }, props: { x: .1, y: .1, width: .2, height: .2, color: '#112233' } },
-    { id: 'text', type: 'visual.text@1', range: { start: 0, end: 4 }, props: { text: 'title', x: .1, y: .1, fontSize: .1, color: '#FFFFFF' } },
-    { id: 'subtitle', type: 'visual.subtitle@1', range: { start: 0, end: 4 }, props: { segments: [{ id: 's', start: 0, end: 4, text: 'caption' }], style } }
+    { id: 'text', type: 'visual.text@1', range: { start: 0, end: 4 }, props: { text: 'title', x: .1, y: .1, fontSize: .1, color: '#FFFFFF' } }
   ];
   const html = require('react-dom/server').renderToStaticMarkup(React.createElement(Player, {
     component: SrtComposition, inputProps: { graph: { nodes }, width: 320, height: 240,

@@ -21,6 +21,21 @@
     if (!graph.nodes.every(function(node) { return node && support.supportsNodeType(node.type); })) return false;
     try { renderGraph.createRenderGraphCompiler().validate(graph); return true; } catch (_) { return false; }
   }
+  function referencedAssetIds(graph) {
+    if (!graph || !Array.isArray(graph.nodes)) fail();
+    var ids = Object.create(null);
+    graph.nodes.forEach(function(node) {
+      if (node && node.type === 'source.video@1' && node.props
+          && typeof node.props.assetId === 'string' && node.props.assetId) ids[node.props.assetId] = true;
+      if (node && node.type === 'visual.group@1' && node.props && Array.isArray(node.props.layers)) {
+        node.props.layers.forEach(function(layer) {
+          if (layer && (layer.kind === 'image' || layer.kind === 'video') && layer.params
+              && typeof layer.params.assetId === 'string' && layer.params.assetId) ids[layer.params.assetId] = true;
+        });
+      }
+    });
+    return Object.keys(ids).sort();
+  }
   function createRenderInput(snapshot, options) {
     if (!snapshot || !snapshot.document || !snapshot.graph || !options) fail();
     var graph = renderGraph.createRenderGraphCompiler().compile(snapshot.document);
@@ -45,9 +60,12 @@
       if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port
           || url.username || url.password || url.hash) fail();
     });
-    if (!Object.prototype.hasOwnProperty.call(assets, graph.nodes[0].props.assetId)) fail();
+    if (referencedAssetIds(graph).some(function(id) {
+      return !Object.prototype.hasOwnProperty.call(assets, id);
+    })) fail();
     return { graph: graph, width: canvas.width, height: canvas.height, fps: fps,
       durationInFrames: durationInFrames, assets: JSON.parse(JSON.stringify(assets)) };
   }
-  return { createRenderInput: createRenderInput, supportsGraph: supportsGraph };
+  return { createRenderInput: createRenderInput, supportsGraph: supportsGraph,
+    referencedAssetIds: referencedAssetIds };
 });

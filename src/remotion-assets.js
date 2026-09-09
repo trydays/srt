@@ -5,6 +5,10 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 
 const MIME_BY_EXTENSION = Object.freeze({
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.mp4': 'video/mp4',
   '.m4v': 'video/x-m4v',
   '.mov': 'video/quicktime',
@@ -165,4 +169,34 @@ async function createRenderAssetSession({ assetId, videoPath }) {
   }
 }
 
-module.exports = { createRenderAssetSession };
+async function createRenderAssetSessions({ assets, createSession = createRenderAssetSession } = {}) {
+  if (!Array.isArray(assets) || assets.length === 0 || typeof createSession !== 'function') {
+    throw new TypeError('Invalid render assets');
+  }
+  const ids = new Set();
+  for (const item of assets) {
+    if (!item || typeof item.assetId !== 'string' || !item.assetId
+        || typeof item.filePath !== 'string' || !item.filePath || ids.has(item.assetId)) {
+      throw new TypeError('Invalid render assets');
+    }
+    ids.add(item.assetId);
+  }
+  const sessions = [];
+  try {
+    for (const item of assets) {
+      sessions.push(await createSession({ assetId: item.assetId, videoPath: item.filePath }));
+    }
+  } catch (error) {
+    await Promise.allSettled(sessions.map(session => session.close()));
+    throw error;
+  }
+  const combined = {};
+  sessions.forEach(session => Object.assign(combined, session.assets));
+  let closePromise;
+  return { assets: combined, close() {
+    if (!closePromise) closePromise = Promise.allSettled(sessions.map(session => session.close())).then(() => undefined);
+    return closePromise;
+  } };
+}
+
+module.exports = { createRenderAssetSession, createRenderAssetSessions };

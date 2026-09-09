@@ -102,8 +102,10 @@ test('normalizes and lowers independent visual layer capabilities', () => {
     { capability: 'visual.text@1', range: { start: 1, end: 3 }, params: { text: '重点' } }
   ] }, { duration: 4 });
   assert.deepEqual(normalized.steps.map(s => s.params), [
-    { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1 },
-    { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' }
+    { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1,
+      backdropBlur:0,glowBlur:0,glowColor:'#FFFFFF',glowOpacity:0 },
+    { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF',fontWeight:400,letterSpacing:0,
+      shadowBlur:0,shadowColor:'#000000',shadowOpacity:0 }
   ]);
   for (const registration of [createShapeRegistration(), createTextRegistration()]) {
     assert.equal(registration.editMode, 'append'); assert.equal(registration.graphStage, 'visualOverlay');
@@ -219,8 +221,10 @@ test('normalizes group duration after range and lowers all canonical adapters', 
   assert.deepEqual(normalized.range, { start: 2, end: 4 });
   assert.deepEqual(normalized.params, {
     layers: [
-      { kind: 'shape', params: { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1 } },
-      { kind: 'text', params: { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF' } }
+      { kind: 'shape', params: { x:.1,y:.1,width:.4,height:.15,color:'#000000',cornerRadius:0,borderWidth:0,borderColor:'#FFFFFF',fillOpacity:1,
+        backdropBlur:0,glowBlur:0,glowColor:'#FFFFFF',glowOpacity:0 } },
+      { kind: 'text', params: { text:'重点',x:.12,y:.12,fontSize:.05,color:'#FFFFFF',fontWeight:400,letterSpacing:0,
+        shadowBlur:0,shadowColor:'#000000',shadowOpacity:0 } }
     ],
     pivotX: .5, pivotY: .5,
     opacity: { keyframes: [
@@ -249,6 +253,20 @@ test('normalizes group duration after range and lowers all canonical adapters', 
   assert.deepEqual(registration.toExport(node), {
     capability: 'visual.group@1', range: normalized.range, params: normalized.params
   });
+});
+
+test('group preparation validates project media references before creating an edit', async () => {
+  const registration = createGroupRegistration();
+  const step = { range: { start: 1, end: 2 }, params: { layers: [
+    { kind: 'image', params: { assetId: 'asset-a', x: 0, y: 0, width: 1, height: 1 } }
+  ] } };
+  let received;
+  assert.deepEqual(await registration.prepare(step, { validateProjectAssets: async request => {
+    received = request; return { ok: true, assetIds: ['asset-a'] };
+  } }), {});
+  assert.deepEqual(received, { layers: step.params.layers, range: step.range });
+  await assert.rejects(registration.prepare(step, { validateProjectAssets: async () =>
+    ({ ok: false, errorCode: 'PROJECT_ASSET_UNKNOWN' }) }), { code: 'PROJECT_ASSET_UNKNOWN' });
 });
 
 test('rejects animation beyond explicit and default whole-video group ranges', () => {

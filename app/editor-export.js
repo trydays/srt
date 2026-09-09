@@ -77,7 +77,10 @@
       EXPORT_SOURCE_OVERWRITE: '不能覆盖源视频',
       EXPORT_INVALID_MEDIA: '视频文件不可用',
       EXPORT_WRITE_FAILED: '视频保存失败',
-      EXPORT_RENDER_FAILED: '导出失败'
+      EXPORT_RENDER_FAILED: '导出失败',
+      PROJECT_ASSET_MISSING: '素材文件已移动或不可读取，请还原素材文件后重新打开项目。',
+      PROJECT_ASSET_UNKNOWN: '卡片引用的素材不属于当前项目，请重新导入并生成卡片。',
+      PROJECT_ASSET_INDEX_INVALID: '项目素材记录不可读取，未继续导出。'
     };
     return messages[code] || '导出失败';
   }

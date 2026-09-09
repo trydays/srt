@@ -44,8 +44,9 @@ function aggregateVisualTimelineItems(items) {
   var visual = {};
   items.forEach(function(item) {
     if (item.lane !== 'visual') return;
-    var aggregate = visual[item.transactionId];
-    if (!aggregate) aggregate = visual[item.transactionId] = { editId: item.editId,
+    var aggregateKey = item.transactionId + ':' + item.editId;
+    var aggregate = visual[aggregateKey];
+    if (!aggregate) aggregate = visual[aggregateKey] = { editId: item.editId,
       editIds: [], transactionId: item.transactionId, lane: 'visual', range: { start: item.range.start, end: item.range.end },
       label: '静态图层', summary: '', elementCount: 0 };
     aggregate.editIds.push(item.editId);
@@ -58,14 +59,23 @@ function aggregateVisualTimelineItems(items) {
   var emitted = {};
   return items.reduce(function(result, item) {
     if (item.lane !== 'visual') { result.push(item); return result; }
-    if (!emitted[item.transactionId]) { result.push(visual[item.transactionId]); emitted[item.transactionId] = true; }
+    var aggregateKey = item.transactionId + ':' + item.editId;
+    if (!emitted[aggregateKey]) { result.push(visual[aggregateKey]); emitted[aggregateKey] = true; }
     return result;
   }, []);
 }
 
-function currentProjectContext() {
-  var context = window.projectEditing.aiContext(activeProjectId);
+async function currentProjectContext(projectId) {
+  var context = window.projectEditing.aiContext(projectId);
   context.playheadSeconds = editorPlayback.getState().currentTime;
+  if (window.projectAssetsController) {
+    try {
+      await window.projectAssetsController.ready;
+      context.assets = window.projectAssetsController.list();
+      var selected = window.projectAssetsController.selected && window.projectAssetsController.selected();
+      if (selected && typeof selected.assetId === 'string') context.selectedAssetId = selected.assetId;
+    } catch (_) { context.assets = []; }
+  }
   return context;
 }
 
@@ -118,6 +128,7 @@ var conversationRecords = getProjectConversation(activeProjectId);
 var requestInFlight = false;
 var pendingClarifyRecord = null;
 var pendingClarifyCard = null;
+var requestTranscriptCache = new WeakMap();
 function setSubmitState(){generateBtn.disabled=requestInFlight||editorEl.textContent.trim().length===0}
 editorEl.addEventListener('input',setSubmitState);setSubmitState();
 function addMsg(role,text){
@@ -188,7 +199,7 @@ function requestCardSummary(record) {
 function renderRequestStatusCard(card, record) {
   var isSubtitle = record.subtitleRequest === true;
   var isCollapsed = isSuccessfulRequest(record) && card.dataset.detailsExpanded !== 'true';
-  var secondLabel = isSubtitle ? '生成字幕'
+  var secondLabel = record.transcriptPreparing ? '读取语音／提炼要点' : isSubtitle ? '生成字幕'
     : (record.subtitleRequest === null ? '执行编辑' : '应用到时间轴');
   var secondTestId = isSubtitle ? 'subtitle-status' : 'timeline-status';
   var clarify = record.clarifyMessage
@@ -265,6 +276,7 @@ function updateRequestStatus(record, card, patch) {
   Object.assign(record, patch);
   renderRequestStatusCard(card, record);
   if (activeProjectId && isFinalRequest(record)) {
+    requestTranscriptCache.delete(record);
     var isNewRecord = conversationRecords.indexOf(record) === -1;
     var nextConversationRecords = isNewRecord
       ? conversationRecords.concat([record]) : conversationRecords;
@@ -305,7 +317,13 @@ function projectErrorMessage(error) {
   if (code === 'EDIT_REVISION_CONFLICT') return '项目已变化，请重新提交这次编辑。';
   if (code === 'EDIT_PROJECT_NOT_READY' || code === 'EDIT_INVALID_MEDIA' || code === 'RECIPE_INVALID_MEDIA' || code === 'VIDEO_METADATA_UNAVAILABLE') return '视频信息尚未准备好，请重新导入视频后重试。';
   if (code === 'EDIT_STORAGE_CORRUPT') return '项目保存的数据无法读取，请先保留现有数据再检查。';
+  if (code === 'PROJECT_ASSET_UNKNOWN') return '这张素材卡片引用的素材已不在当前项目中，请重新导入素材并重新生成卡片。';
+  if (code === 'PROJECT_ASSET_MISSING') return '素材文件已移动或不可读取，请恢复到原位置，或重新导入素材并重新生成卡片。';
+  if (code === 'PROJECT_ASSET_VIDEO_TOO_SHORT') return '素材视频长度不足，请缩短卡片显示时间或选择更长的视频。';
+  if (code === 'PROJECT_ASSET_KIND_MISMATCH') return '素材类型与卡片不匹配，请选择正确的图片或视频后重新生成。';
+  if (code === 'PROJECT_ASSET_RUNTIME_NOT_READY') return '素材卡片运行环境尚未准备好，请稍后重试。';
   if (code && code.indexOf('RECIPE_') === 0) return '当前能力尚未接通此编辑，请试试「生成整段视频字幕」。';
+  if (code === 'LOCAL_CLI_INVALID_INSTRUCTION_OUTPUT') return instructionErrorMessage(code);
   if (code && (code.indexOf('SUBTITLE_') === 0 || code === 'VIDEO_PATH_UNAVAILABLE')) return subtitleErrorMessage(code);
   if (error && (error.name === 'QuotaExceededError' || error.name === 'SecurityError')) return '项目暂时无法保存，请检查可用存储后重试。';
   return '这次编辑未完成，请重试。';
@@ -344,9 +362,37 @@ async function translateAndApply(text, record, card) {
   record.awaitingMetadata = false;
   renderRequestStatusCard(card, record);
   if (window.projectEditingError) throw window.projectEditingError;
-  var loaded = window.projectEditing.load(activeProjectId);
-  var context = currentProjectContext();
-  var translated = await window.srtAPI.translateInstruction(text, record.turns, context, record.skillContext);
+  var frozenProjectId = activeProjectId;
+  var loaded = window.projectEditing.load(frozenProjectId);
+  var frozenRevision = loaded.document.revision;
+  var frozenAssetId = loaded.document.sources[0].assetId;
+  var frozenVideoPath = window.currentProjectVideoPath;
+  var frozenSkill = record.skillContext;
+  var context = await currentProjectContext(frozenProjectId);
+  if (activeProjectId !== frozenProjectId || window.currentProjectVideoPath !== frozenVideoPath
+      || window.projectEditing.load(frozenProjectId).document.revision !== frozenRevision) {
+    throw Object.assign(new Error('Project changed'), { code: 'EDIT_REVISION_CONFLICT' });
+  }
+  var duration = loaded.document.timeline.duration;
+  var appliedSegments = window.subtitleController ? window.subtitleController.getAppliedSegments() : [];
+  var continuedTranscriptRange = null;
+  if (appliedSegments.length && window.SRTTranscriptContext) {
+    try {
+      context.transcript = window.SRTTranscriptContext.selectTranscript({ segments: appliedSegments,
+        source: 'applied-subtitles', range: { start: 0, end: duration }, maxChars: 24000 });
+    } catch (error) {
+      if (!error || error.code !== 'TRANSCRIPT_TOO_LARGE') throw error;
+    }
+  }
+  if (!context.transcript) {
+    var cachedTranscript = requestTranscriptCache.get(record);
+    if (cachedTranscript && cachedTranscript.projectId === frozenProjectId
+        && cachedTranscript.assetId === frozenAssetId && cachedTranscript.videoPath === frozenVideoPath) {
+      context.transcript = cachedTranscript.transcript;
+      continuedTranscriptRange = context.transcript.range;
+    }
+  }
+  var translated = await window.srtAPI.translateInstruction(text, record.turns, context, frozenSkill);
   if (!translated.ok) {
     updateRequestStatus(record, card, {
       instructionStatus: 'failed', timelineStatus: 'not_run',
@@ -361,6 +407,80 @@ async function translateAndApply(text, record, card) {
       error: '当前能力尚未接通此编辑，请试试「生成整段视频字幕」。'
     });
     return;
+  }
+  var preparedTranscriptRange = continuedTranscriptRange;
+  if (turn.kind === 'prepare') {
+    if (record.transcriptPrepareUsed) {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: '本次请求已经读取过一次语音，不能重复准备。' });
+      return;
+    }
+    if (context.transcript) {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: '已有完整语音原文，但模型仍重复请求读取，未执行任何编辑。' });
+      return;
+    }
+    if (turn.range.start < 0 || turn.range.end > duration || turn.range.end <= turn.range.start) {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: '请求的语音范围超出当前视频，请缩小范围后重试。' });
+      return;
+    }
+    record.transcriptPrepareUsed = true;
+    record.transcriptPreparing = true;
+    record.timelineStatus = 'generating';
+    renderRequestStatusCard(card, record);
+    var source = appliedSegments;
+    var sourceKind = 'applied-subtitles';
+    if (!source.length) {
+      var recognized = await window.srtAPI.generateSubtitles({ videoPath: frozenVideoPath });
+      if (!recognized || recognized.ok !== true || !Array.isArray(recognized.segments)) {
+        updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+          error: subtitleErrorMessage(recognized && recognized.errorCode) });
+        return;
+      }
+      source = recognized.segments;
+      sourceKind = 'speech-recognition';
+    }
+    try {
+      context.transcript = window.SRTTranscriptContext.selectTranscript({ segments: source,
+        source: sourceKind, range: turn.range, maxChars: 24000 });
+      preparedTranscriptRange = context.transcript.range;
+      requestTranscriptCache.set(record, { projectId: frozenProjectId, assetId: frozenAssetId,
+        videoPath: frozenVideoPath, transcript: context.transcript });
+    } catch (error) {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: error && error.code === 'TRANSCRIPT_TOO_LARGE'
+          ? '所选语音原文超过分析上限，请缩小时间范围。' : '语音原文无法读取，请重试。' });
+      return;
+    }
+    if (activeProjectId !== frozenProjectId || window.currentProjectVideoPath !== frozenVideoPath
+        || window.projectEditing.load(frozenProjectId).document.revision !== frozenRevision
+        || window.projectEditing.load(frozenProjectId).document.sources[0].assetId !== frozenAssetId) {
+      throw Object.assign(new Error('Project changed'), { code: 'EDIT_REVISION_CONFLICT' });
+    }
+    record.transcriptPreparing = false;
+    renderRequestStatusCard(card, record);
+    translated = await window.srtAPI.translateInstruction(text, record.turns, context, frozenSkill);
+    if (!translated.ok || !translated.instruction || translated.instruction.kind === 'prepare') {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: translated.ok ? '语音准备后仍未得到可执行结果，请重试。' : instructionErrorMessage(translated.errorCode) });
+      return;
+    }
+    turn = translated.instruction;
+  }
+  if (preparedTranscriptRange) {
+    var keypointSteps = turn.kind === 'instruction' && Array.isArray(turn.steps)
+      ? turn.steps.filter(function(step) { return step.capability === 'visual.group@1'; }) : [];
+    var invalidKeypointResult = turn.kind === 'instruction' && (keypointSteps.length === 0
+      || keypointSteps.some(function(step) {
+        return !step.range || step.range.start < preparedTranscriptRange.start
+          || step.range.end > preparedTranscriptRange.end;
+      }));
+    if (invalidKeypointResult) {
+      updateRequestStatus(record, card, { instructionStatus: 'failed', timelineStatus: 'not_run',
+        error: '语音提炼未返回所选时段内的重点文字，未执行任何编辑。' });
+      return;
+    }
   }
   if (turn.kind === 'clarify') {
     record.turns.push({ role: 'assistant', text: turn.message });
@@ -378,8 +498,11 @@ async function translateAndApply(text, record, card) {
   updateRequestStatus(record, card, {
     instructionStatus: 'success', timelineStatus: record.subtitleRequest ? 'generating' : 'applying', error: ''
   });
-  var applied = await window.projectEditing.applyRecipe({ projectId: activeProjectId,
-    expectedRevision: loaded.document.revision, requestId: record.id, recipe: turn });
+  if (activeProjectId !== frozenProjectId || window.currentProjectVideoPath !== frozenVideoPath) {
+    throw Object.assign(new Error('Project changed'), { code: 'EDIT_REVISION_CONFLICT' });
+  }
+  var applied = await window.projectEditing.applyRecipe({ projectId: frozenProjectId,
+    expectedRevision: frozenRevision, requestId: record.id, recipe: turn });
   record.transactionId = applied.transactionId;
   record.timelineStatus = 'success';
   updateRequestStatus(record, card, Object.assign({ timelineStatus: 'success', error: '' },

@@ -232,7 +232,8 @@ const PUBLIC_EXPORT_CODES = new Set([
   'VIDEO_PATH_UNAVAILABLE', 'EXPORT_BUSY', 'EXPORT_UNSUPPORTED_OPERATION',
   'EXPORT_RUNTIME_NOT_READY', 'EXPORT_INVALID_RECIPE',
   'EXPORT_TARGET_EXISTS', 'EXPORT_SOURCE_OVERWRITE', 'EXPORT_INVALID_MEDIA',
-  'EXPORT_WRITE_FAILED', 'EXPORT_RENDER_FAILED'
+  'EXPORT_WRITE_FAILED', 'EXPORT_RENDER_FAILED',
+  'PROJECT_ASSET_MISSING', 'PROJECT_ASSET_UNKNOWN', 'PROJECT_ASSET_INDEX_INVALID'
 ]);
 
 function publicExportCode(error, fallback) {
@@ -240,7 +241,8 @@ function publicExportCode(error, fallback) {
 }
 
 function startApplication({ environmentModule, localCliService, subtitleService,
-  videoExportService, remotionExportService, remotionEnabled = true, showSaveDialog } = {}) {
+  videoExportService, remotionExportService, projectAssetStore,
+  remotionEnabled = true, showSaveDialog, showOpenDialog } = {}) {
   const userDataDir = app.getPath('userData');
   const bundledRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'tools')
@@ -260,6 +262,9 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   });
   const activeShowSaveDialog = showSaveDialog
     || ((browserWindow, options) => dialog.showSaveDialog(browserWindow, options));
+  const activeShowOpenDialog = showOpenDialog
+    || ((browserWindow, options) => dialog.showOpenDialog(browserWindow, options));
+  let activeProjectAssetStore = projectAssetStore;
   let activeExport = null;
   let remotionService = remotionExportService;
   const previewSessions = new Map();
@@ -271,35 +276,70 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   }
   function getRemotionService() {
     if (!remotionService) remotionService = require('./src/remotion-export').createRemotionExportService({
-      getExportTools: getRemotionTools
+      getExportTools: getRemotionTools,
+      resolveProjectAssets: async (request) => (await getProjectAssetStore()).resolve(request)
     });
     return remotionService;
   }
-  function releasePreview(entry) {
+  async function getProjectAssetStore() {
+    if (!activeProjectAssetStore) {
+      const tools = await getRemotionTools();
+      activeProjectAssetStore = require('./src/project-assets').createProjectAssetStore({
+        rootDir: userDataDir, ffprobePath: tools && tools.ffprobePath
+      });
+    }
+    return activeProjectAssetStore;
+  }
+  function releasePreview(entry, sessionId) {
+    if (sessionId) {
+      const session = entry.sessions.get(sessionId);
+      entry.sessions.delete(sessionId);
+      if (entry.activeSessionId === sessionId) entry.activeSessionId = null;
+      return session ? Promise.resolve(session.close()).catch(() => {}) : Promise.resolve();
+    }
     entry.generation += 1;
-    const session = entry.session;
-    entry.session = null; entry.sessionId = null;
-    return session ? Promise.resolve(session.close()).catch(() => {}) : Promise.resolve();
+    const sessions = Array.from(entry.sessions.values());
+    entry.sessions.clear(); entry.activeSessionId = null;
+    return Promise.allSettled(sessions.map(session => session.close())).then(() => undefined);
   }
   ipcMain.handle('remotion:state', () => ({ enabled: remotionEnabled }));
+  ipcMain.handle('project-assets:list', async (_event, request) => {
+    try { return { ok: true, assets: await (await getProjectAssetStore()).list(request && request.projectId) }; }
+    catch (error) { return publicFailure(error, 'PROJECT_ASSET_INVALID'); }
+  });
+  ipcMain.handle('project-assets:import', async (event, request) => {
+    try {
+      const choice = await activeShowOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+        title: '导入图片或视频', properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '图片与视频', extensions: ['png', 'jpg', 'jpeg', 'webp', 'mp4'] }]
+      });
+      if (!choice || choice.canceled || !choice.filePaths || choice.filePaths.length === 0) return { ok: true, assets: [] };
+      const store = await getProjectAssetStore(), assets = [];
+      for (const filePath of choice.filePaths) assets.push(await store.importFile({ projectId: request && request.projectId, filePath }));
+      return { ok: true, assets };
+    } catch (error) { return publicFailure(error, 'PROJECT_ASSET_INVALID_MEDIA'); }
+  });
+  ipcMain.handle('project-assets:validate', async (_event, request) => {
+    try { return await (await getProjectAssetStore()).validate(request); }
+    catch (error) { return publicFailure(error, 'PROJECT_ASSET_INVALID'); }
+  });
   ipcMain.handle('remotion:prepare-preview', async ({ sender }, request) => {
     if (!remotionEnabled) return { ok: false, errorCode: 'EXPORT_RUNTIME_NOT_READY' };
     let entry = previewSessions.get(sender.id);
     if (!entry) {
-      entry = { generation: 0, session: null, sessionId: null };
+      entry = { generation: 0, sessions: new Map(), activeSessionId: null };
       previewSessions.set(sender.id, entry);
       sender.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
         if (isMainFrame !== false) void releasePreview(entry);
       });
       sender.once('destroyed', () => { void releasePreview(entry); previewSessions.delete(sender.id); });
     }
-    const releasing = releasePreview(entry);
+    entry.generation += 1;
     const generation = entry.generation;
-    await releasing;
     let session;
     try {
-      const { createRenderInput } = require('./src/remotion-input');
-      const { createRenderAssetSession } = require('./src/remotion-assets');
+      const { createRenderInput, referencedAssetIds } = require('./src/remotion-input');
+      const renderAssets = require('./src/remotion-assets');
       const { readMediaFacts } = require('./src/remotion-export');
       const { snapshot, videoPath } = request || {};
       let sourcePath;
@@ -317,17 +357,25 @@ function startApplication({ environmentModule, localCliService, subtitleService,
           Math.abs(snapshot.document.timeline.duration - media.duration) > 1 / media.fps) {
         throw Object.assign(new Error('Source does not match project'), { code: 'EXPORT_INVALID_MEDIA' });
       }
-      session = await createRenderAssetSession({
-        assetId: snapshot.document.sources[0].assetId, videoPath: sourcePath
-      });
-      const input = createRenderInput(snapshot, { fps: media.fps, assets: session.assets });
+      const mainAssetId = snapshot.document.sources[0].assetId;
+      const extraIds = referencedAssetIds(snapshot.graph).filter(id => id !== mainAssetId);
+      const extraAssets = extraIds.length ? await (await getProjectAssetStore()).resolve({
+        projectId: snapshot.document.projectId, assetIds: extraIds
+      }) : [];
+      session = extraAssets.length || typeof renderAssets.createRenderAssetSessions === 'function'
+        ? await renderAssets.createRenderAssetSessions({ assets: [
+          { assetId: mainAssetId, filePath: sourcePath }, ...extraAssets
+        ] })
+        : await renderAssets.createRenderAssetSession({ assetId: mainAssetId, videoPath: sourcePath });
       if (generation !== entry.generation || sender.isDestroyed()) {
         await session.close();
         return { ok: false, errorCode: 'EXPORT_CANCELLED' };
       }
-      entry.session = session;
-      entry.sessionId = require('node:crypto').randomUUID();
-      return { ok: true, input, sessionId: entry.sessionId };
+      const input = createRenderInput(snapshot, { fps: media.fps, assets: session.assets });
+      const sessionId = require('node:crypto').randomUUID();
+      entry.sessions.set(sessionId, session);
+      entry.activeSessionId = sessionId;
+      return { ok: true, input, sessionId };
     } catch (error) {
       if (session) await session.close().catch(() => {});
       return publicFailure(error, 'EXPORT_INVALID_MEDIA');
@@ -335,7 +383,7 @@ function startApplication({ environmentModule, localCliService, subtitleService,
   });
   ipcMain.handle('remotion:release-preview', async ({ sender }, sessionId) => {
     const entry = previewSessions.get(sender.id);
-    if (entry && entry.sessionId === sessionId) await releasePreview(entry);
+    if (entry) await releasePreview(entry, sessionId);
   });
   app.on('before-quit', () => { previewSessions.forEach(entry => { void releasePreview(entry); }); });
 

@@ -1,10 +1,11 @@
 (function(root, factory) {
   var node = typeof module === 'object' && module.exports;
   var api = factory(node ? require('./keyframes') : root.SRTKeyframes,
-    node ? require('./visual-layers') : root.SRTVisualLayers);
+    node ? require('./visual-layers') : root.SRTVisualLayers,
+    node ? require('./visual-media') : root.SRTVisualMedia);
   if (node) module.exports = api;
   if (root) root.SRTVisualGroup = api;
-})(typeof window === 'undefined' ? null : window, function(keyframes, visualLayers) {
+})(typeof window === 'undefined' ? null : window, function(keyframes, visualLayers, visualMedia) {
   'use strict';
 
   function childParamsSchema(properties, required) {
@@ -35,12 +36,28 @@
     properties: {
       layers: {
         type: 'array',
+        description: '从下到上排列。带 backdropBlur、glowBlur 或 glowOpacity 的正式玻璃底板最多一个且必须是首层；更多卡片请拆成多个 visual.group。',
         minItems: 1,
         maxItems: 16,
         items: {
           oneOf: [
             layerSchema('shape', visualLayers.SHAPE_PARAMETERS, []),
-            layerSchema('text', visualLayers.TEXT_PARAMETERS, ['text'])
+            layerSchema('text', visualLayers.TEXT_PARAMETERS, ['text']),
+            layerSchema('image', {
+              assetId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' },
+              x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+              width: { type: 'number', minimum: 0, maximum: 1 }, height: { type: 'number', minimum: 0, maximum: 1 },
+              fit: { type: 'string', enum: ['contain', 'cover'], default: 'contain' },
+              cornerRadius: { type: 'number', minimum: 0, maximum: .5, default: 0 }
+            }, ['assetId', 'x', 'y', 'width', 'height']),
+            layerSchema('video', {
+              assetId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' },
+              x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+              width: { type: 'number', minimum: 0, maximum: 1 }, height: { type: 'number', minimum: 0, maximum: 1 },
+              fit: { type: 'string', enum: ['contain', 'cover'], default: 'cover' },
+              cornerRadius: { type: 'number', minimum: 0, maximum: .5, default: 0 },
+              sourceStartSeconds: { type: 'number', minimum: 0, default: 0 }
+            }, ['assetId', 'x', 'y', 'width', 'height'])
           ]
         }
       },
@@ -109,13 +126,19 @@
         && (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0)) fail();
     var layers = params.layers.map(function(layer) {
       if (!plain(layer) || Object.keys(layer).length !== 2 || !exactKeys(layer, ['kind', 'params'])
-          || (layer.kind !== 'shape' && layer.kind !== 'text') || !plain(layer.params)) fail();
+          || ['shape', 'text', 'image', 'video'].indexOf(layer.kind) === -1 || !plain(layer.params)) fail();
       try {
-        return { kind: layer.kind, params: visualLayers.normalizeParams(layer.kind, layer.params, true) };
+        return { kind: layer.kind, params: layer.kind === 'image' || layer.kind === 'video'
+          ? visualMedia.normalizeMediaParams(layer.kind, layer.params)
+          : visualLayers.normalizeParams(layer.kind, layer.params, true) };
       } catch (_) {
         fail();
       }
     });
+    if (layers.some(function(layer, index) {
+      return index > 0 && layer.kind === 'shape' && (layer.params.backdropBlur > 0
+        || layer.params.glowBlur > 0 || layer.params.glowOpacity > 0);
+    })) fail();
     var pivotX = params.pivotX === undefined ? 0.5 : params.pivotX;
     var pivotY = params.pivotY === undefined ? 0.5 : params.pivotY;
     if (!bounded(pivotX, 0, 1) || !bounded(pivotY, 0, 1)) fail();
@@ -185,7 +208,9 @@
     if (!scratch || typeof scratch.clearRect !== 'function') fail();
     scratch.clearRect(0, 0, width, height);
     canonical.layers.forEach(function(layer) {
-      visualLayers.draw(scratch, layer.kind, layer.params, width, height);
+      if (layer.kind === 'shape' || layer.kind === 'text') {
+        visualLayers.draw(scratch, layer.kind, layer.params, width, height);
+      }
     });
     context.save();
     context.globalAlpha = frame.opacity;

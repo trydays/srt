@@ -17,11 +17,11 @@ export function SrtComposition({ graph, assets, width, height }) {
       graph.nodes.forEach(node => {
         if (node.type === 'visual.group@1') node.props.layers.filter(layer => layer.kind === 'text').forEach(layer => {
           const geometry = visualLayers.geometry('text', layer.params, width, height);
-          requests.push(fontSet.load(`normal ${geometry.fontSize}px "${visualLayers.FONT_FAMILY}"`, layer.params.text));
+          requests.push(fontSet.load(`normal ${geometry.fontWeight} ${geometry.fontSize}px "${visualLayers.FONT_FAMILY}"`, layer.params.text));
         });
         if (node.type === 'visual.text@1') {
           const geometry = visualLayers.geometry('text', node.props, width, height);
-          requests.push(fontSet.load(`normal ${geometry.fontSize}px "${visualLayers.FONT_FAMILY}"`, node.props.text));
+          requests.push(fontSet.load(`normal ${geometry.fontWeight} ${geometry.fontSize}px "${visualLayers.FONT_FAMILY}"`, node.props.text));
         }
         if (node.type === 'visual.subtitle@1') {
           const style = node.props.style;
@@ -36,8 +36,7 @@ export function SrtComposition({ graph, assets, width, height }) {
     }).catch(error => { if (active) cancelRender(error); });
     return () => { active = false; continueRender(fontHandle); };
   }, [fontHandle, graph, width, height]);
-  return <AbsoluteFill style={{ backgroundColor: '#000000', overflow: 'hidden' }}>
-    {graph.nodes.map(node => {
+  function renderNode(node) {
       if (node.type === 'source.video@1') {
         const source = assets[node.props.assetId];
         if (!source?.src) throw new Error('REMOTION_SOURCE_MISSING');
@@ -48,7 +47,7 @@ export function SrtComposition({ graph, assets, width, height }) {
       }
       if (isSourceEffect(node)) return null;
       if (node.type === 'visual.group@1') return <GroupLayer key={node.id}
-        node={node} frame={frame} fps={fps} width={width} height={height} />;
+        node={node} frame={frame} fps={fps} width={width} height={height} assets={assets} />;
       if (node.type === 'visual.shape@1' || node.type === 'visual.text@1') {
         return <StandaloneLayer key={node.id} node={node} frame={frame} fps={fps}
           width={width} height={height} />;
@@ -56,6 +55,9 @@ export function SrtComposition({ graph, assets, width, height }) {
       if (node.type === 'visual.subtitle@1') return <SubtitleLayer key={node.id}
         node={node} frame={frame} fps={fps} width={width} height={height} />;
       throw new Error('REMOTION_GRAPH_UNSUPPORTED');
-    })}
+  }
+  return <AbsoluteFill style={{ backgroundColor: '#000000', overflow: 'hidden' }}>
+    {graph.nodes.filter(node => node.type !== 'visual.subtitle@1').map(renderNode)}
+    {graph.nodes.filter(node => node.type === 'visual.subtitle@1').map(renderNode)}
   </AbsoluteFill>;
 }
