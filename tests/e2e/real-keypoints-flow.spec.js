@@ -31,6 +31,10 @@ test.describe('real selected CLI + local ASR + formal Remotion', () => {
       '-map', '0:v:0', '-map', '0:a:0', '-t', '35',
       '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source]);
+    const probe=await run('/opt/homebrew/opt/ffmpeg-full/bin/ffprobe',
+      ['-v','error','-show_entries','format=duration','-of','json',source]);
+    const durationSeconds=Number(JSON.parse(probe.stdout).format.duration);
+    expect(durationSeconds).toBeGreaterThan(0);
     const {selectedCliId}=JSON.parse(await fs.readFile(path.join(process.env.SRT_REAL_KEYPOINT_USER_DATA,'local-cli.json'),'utf8'));
     expect(['codex','claude']).toContain(selectedCliId);
     await window.getByTestId(`local-cli-${selectedCliId}`).click(); await window.getByTestId('continue').click();
@@ -49,7 +53,7 @@ test.describe('real selected CLI + local ASR + formal Remotion', () => {
     expect(snapshot.document.edits.length).toBeGreaterThan(0);
     expect(snapshot.document.edits.every(edit=>edit.type==='visual.group.layer@1')).toBe(true);
     expect(new Set(snapshot.document.edits.map(edit=>edit.transactionId)).size).toBe(1);
-    expect(snapshot.document.edits.every(edit=>edit.range.start>=0 && edit.range.end<=35.1)).toBe(true);
+    expect(snapshot.document.edits.every(edit=>edit.range.start>=0 && edit.range.end<=durationSeconds+0.1)).toBe(true);
     await fs.writeFile(testInfo.outputPath('applied.json'),JSON.stringify(snapshot,null,2));
     const recipePath=testInfo.outputPath('real-ai-recipe.json');
     await fs.writeFile(recipePath,JSON.stringify({

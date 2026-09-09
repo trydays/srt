@@ -32,7 +32,10 @@ function translateCodex(execFile, file, args, timeoutMs) {
       let event;
       try { event = JSON.parse(line); } catch { return finish(failure()); }
       if (!event || typeof event.type !== 'string') return finish(failure());
-      if (event.type === 'error' || event.type === 'turn.failed') return finish(failure());
+      // Codex also emits `error` while reconnecting. Only a terminal turn
+      // event, an incomplete process exit, or the original deadline ends a turn.
+      if (event.type === 'turn.failed') return finish(failure());
+      if (event.type === 'error') return;
       if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
         if (typeof event.item.text !== 'string' || Buffer.byteLength(event.item.text) > 64 * 1024) {
           return finish(failure());

@@ -83,12 +83,28 @@ const localCliService = {
         userDataDir:process.env.SRT_REAL_KEYPOINT_USER_DATA,
         execFile(file,args,options,callback) {
           const processStarted=Date.now();
+          const protocolEvents=[];
           return require('node:child_process').execFile(file,args,options,(error,stdout,stderr)=>{
+            if (args.includes('--json')) {
+              for (const line of (stdout || '').split('\n')) {
+                try {
+                  const event=JSON.parse(line);
+                  if (event.type==='error' || event.type==='turn.failed') {
+                    const message=String(event.message || event.error?.message || '')
+                      .replace(/https?:\/\/\S+/g,'[URL]')
+                      .replace(/(?:Bearer\s+|sk-)[\w.-]+/gi,'[REDACTED]').slice(0,1000);
+                    protocolEvents.push({type:event.type,message});
+                  } else if (['thread.started','turn.started','turn.completed'].includes(event.type)) {
+                    protocolEvents.push({type:event.type});
+                  }
+                } catch {}
+              }
+            }
             // Keep only process metadata, never CLI auth, prompts or reasoning logs.
             if (args[0] !== '--version') (state.realCliProcesses ||= []).push({
               file,command:args[0],timeout:options.timeout,durationMs:Date.now()-processStarted,
               code:error ? (error.code ?? null) : 0,killed:!!error?.killed,signal:error?.signal ?? null,
-              stdoutBytes:Buffer.byteLength(stdout || ''),stderrBytes:Buffer.byteLength(stderr || '')
+              stdoutBytes:Buffer.byteLength(stdout || ''),stderrBytes:Buffer.byteLength(stderr || ''),protocolEvents
             });
             callback(error,stdout,stderr);
           });

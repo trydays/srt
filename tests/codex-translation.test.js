@@ -26,6 +26,20 @@ function emit(events) {
   return `process.stdout.write(${JSON.stringify(events.map(e => JSON.stringify(e)).join('\n') + '\n')});`;
 }
 
+const reconnect = { type: 'error', message: 'Reconnecting... 2/5 (request timed out)' };
+
+test('allows a reconnect notification followed by successful completion', async () => {
+  assert.equal(await run(emit([reconnect]) + `setTimeout(() => {${emit([item, done])}}, 80);`), answer);
+});
+
+test('rejects a terminal turn failure after reconnecting', async () => {
+  await assert.rejects(run(emit([reconnect, item, { type: 'turn.failed', error: { message: 'exhausted' } }])));
+});
+
+test('reconnect notifications do not reset the original deadline', async () => {
+  await assert.rejects(run(`setInterval(() => {${emit([reconnect])}}, 30);`, 200), { code: 'ETIMEDOUT' });
+});
+
 test('handles UTF-8 and JSONL split across chunks, and a final line without newline', async () => {
   const bytes = Buffer.from([JSON.stringify(item), JSON.stringify(done)].join('\n'));
   assert.equal(await run(`
