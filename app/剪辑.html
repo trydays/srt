@@ -112,15 +112,25 @@
     .tl-vol-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg-panel);box-shadow:var(--shadow-sm);cursor:pointer}
     .tl-vol-slider::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg-panel);box-shadow:var(--shadow-sm);cursor:pointer;border-color:var(--bg-panel)}
     .tl-label{font-size:11px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.08em}
-    .tl-track{position:relative;height:80px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;padding:0 16px;box-shadow:var(--shadow-xs);cursor:pointer;user-select:none}
+    .tl-viewport{width:100%;min-width:0;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);box-shadow:var(--shadow-xs);box-sizing:border-box}
+    .tl-track{position:relative;height:58px;background:var(--bg-panel);cursor:pointer;user-select:none}
+    .tl-zoom{margin-left:auto;display:flex;gap:2px;flex-shrink:0}
+    .tl-btn:disabled{opacity:.35;cursor:default}
+    .tl-ruler{position:sticky;top:0;height:28px;background:var(--bg-panel);border-bottom:1px solid var(--border);z-index:8;box-sizing:border-box}
+    .tl-ruler-tick{position:absolute;top:7px;height:21px;border-left:1px solid var(--border);padding-left:4px;color:var(--text-faint);font-family:var(--mono);font-size:10px;white-space:nowrap}
+    .tl-ruler-tick.is-last{transform:translateX(-100%);border-left:0;border-right:1px solid var(--border);padding-right:4px}
+    .tl-row{position:absolute;left:0;right:0;height:30px;border-bottom:1px solid var(--border);box-sizing:border-box}
+    .tl-row-label,.tl-ruler-label{position:sticky;left:0;width:88px;height:100%;box-sizing:border-box;padding:7px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--bg-panel);border-right:1px solid var(--border);color:var(--text-muted);font-size:10px;z-index:6}
+    .tl-ruler-label{z-index:9}
     .tl-line{position:absolute;left:16px;right:16px;height:2px;background:var(--border-strong);border-radius:1px}
     .tl-ticks{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);display:flex;justify-content:space-between}
     .tl-tick{width:1px;height:8px;background:var(--border-strong);opacity:.6}
-    .tl-playhead{position:absolute;top:8px;bottom:8px;width:2px;background:var(--accent);border-radius:1px;z-index:2;pointer-events:none}
+    .tl-playhead{position:absolute;top:28px;bottom:0;width:2px;background:var(--accent);border-radius:1px;z-index:5;pointer-events:none}
     .tl-playhead::before{content:'';position:absolute;top:-2px;left:50%;transform:translateX(-50%);width:14px;height:14px;background:var(--accent);border-radius:50%;border:2px solid var(--bg-panel);box-shadow:var(--shadow-sm)}
     .tl-time{display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);font-family:var(--mono);padding:0 16px}
     /* Timeline markers */
-    .tl-marker{position:absolute;top:60%;transform:translateY(-50%);box-sizing:border-box;overflow:hidden;z-index:3;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:var(--shadow-xs)}
+    .tl-marker,.tl-source{position:absolute;top:4px;height:22px;box-sizing:border-box;overflow:hidden;z-index:3;display:inline-flex;align-items:center;padding:2px 0;text-indent:6px;border-radius:var(--radius-sm);font-size:10px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:inset 0 0 0 1px var(--accent),var(--shadow-xs);background:var(--accent-tint);color:var(--text-strong);border:0}
+    .tl-source{background:var(--bg-subtle);box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--text-muted)}
     .tl-marker:hover{z-index:4}
     .tl-track.drag-over-tl{background:color-mix(in srgb,var(--accent-tint) 20%,var(--bg-panel));border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
     .subtitle-section{width:100%;max-width:800px;display:grid;grid-template-columns:42px minmax(0,1fr);gap:6px 8px;
@@ -345,11 +355,12 @@
         </div>
 
         <div class="timeline" data-od-id="timeline">
-          <div class="tl-head"><button class="tl-btn" id="tlPlayBtn" type="button" title="播放/暂停">▶</button><button class="tl-btn tl-btn--wider" id="tlSpeedBtn" type="button" title="播放速度">1×</button><button class="tl-btn" id="tlVolBtn" type="button" title="静音/取消静音">🔊</button><input type="range" class="tl-vol-slider" id="tlVolSlider" min="0" max="100" value="100" title="音量" /><div class="tl-label">时间轴</div></div>
-          <div class="tl-track" id="tlTrack">
-            <div class="tl-line"></div>
-            <div class="tl-ticks"><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span><span class="tl-tick"></span></div>
-            <div class="tl-playhead" id="tlPlayhead" style="left:16px"></div>
+          <div class="tl-head"><button class="tl-btn" id="tlPlayBtn" type="button" title="播放/暂停">▶</button><button class="tl-btn tl-btn--wider" id="tlSpeedBtn" type="button" title="播放速度">1×</button><button class="tl-btn" id="tlVolBtn" type="button" title="静音/取消静音">🔊</button><input type="range" class="tl-vol-slider" id="tlVolSlider" min="0" max="100" value="100" title="音量" /><div class="tl-label">时间轴</div><div class="tl-zoom"><button class="tl-btn" id="tlZoomOut" type="button" aria-label="缩小时间轴" disabled>−</button><button class="tl-btn" id="tlZoomIn" type="button" aria-label="放大时间轴" disabled>＋</button><button class="tl-btn tl-btn--wider" id="tlFit" type="button" disabled>显示全片</button></div></div>
+          <div class="tl-viewport" id="tlViewport" tabindex="0" aria-label="分轨时间轴，可横向和纵向滚动">
+            <div class="tl-track" id="tlTrack">
+              <div class="tl-ruler" id="tlRuler"></div>
+              <div class="tl-playhead" id="tlPlayhead" hidden></div>
+            </div>
           </div>
           <div class="tl-time"><span id="tlCurrent">00:00</span><span id="tlTotal">03:20</span></div>
         </div>
@@ -426,6 +437,8 @@
   <script src="editor-layer-preview.js"></script>
   <script src="editor-subtitles.js"></script>
   <script src="../src/transcript-context.js"></script>
+  <script src="../src/timeline-layout.js"></script>
+  <script src="editor-timeline-view.js"></script>
   <script src="editor-timeline.js"></script>
   <script src="editor-skills.js"></script>
   <script src="editor-export.js"></script>

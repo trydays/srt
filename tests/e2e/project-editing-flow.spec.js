@@ -196,8 +196,8 @@ test.describe('graph-derived color transactions', () => {
     await expect(marker).toHaveCount(1);
     const bounds = await marker.evaluate(element => ({ left: parseFloat(element.style.left),
       width: parseFloat(element.style.width), track: document.getElementById('tlTrack').getBoundingClientRect().width }));
-    expect(bounds.left).toBeCloseTo(16 + (bounds.track - 32) / 4, 1);
-    expect(bounds.width).toBeCloseTo((bounds.track - 32) / 2, 1);
+    expect(bounds.left).toBeCloseTo(104 + (bounds.track - 120) / 4, 1);
+    expect(bounds.width).toBeCloseTo((bounds.track - 120) / 2, 1);
     await seek(window, 0.5);
     await expect(window.locator('#previewVideo')).toHaveCSS('filter', 'none');
     await seek(window, 2, 'seeked');
@@ -249,7 +249,7 @@ test.describe('graph-derived color transactions', () => {
     }));
     expect(markerRows[0].bottom).toBeLessThanOrEqual(markerRows[1].top);
     await expect(window.locator('.tl-marker[data-lane="subtitle"]')).toHaveJSProperty('offsetWidth',
-      Math.round(await window.locator('#tlTrack').evaluate(el => el.getBoundingClientRect().width - 32)));
+      Math.round(await window.locator('#tlTrack').evaluate(el => el.getBoundingClientRect().width - 120)));
     await seek(window, 2);
     await expect(window.locator('#previewSubtitle')).toBeVisible();
     await expect(window.locator('#previewSubtitle')).toHaveCSS('filter', 'none');

@@ -1,45 +1,18 @@
 /* === editor-timeline.js — 三天remotion 时间轴 + 聊天 === */
 
 /* ── Timeline ── */
-var track=document.getElementById('tlTrack'),playhead=document.getElementById('tlPlayhead'),tlCur=document.getElementById('tlCurrent'),tlTotal=document.getElementById('tlTotal'),dragging=false;
-/* 缓存 track 宽度避免 timeupdate 时 layout thrashing；resize 时重置 */
-var _trackW = 0;
-function trackWidth(){ if(!_trackW)_trackW=track.getBoundingClientRect().width; return _trackW; }
-window.addEventListener('resize',function(){ _trackW = 0; });
-function posToPct(cx){var r=track.getBoundingClientRect(),pad=16;return Math.max(0,Math.min(1,(cx-r.left-pad)/(r.width-pad*2)))}
-function getDur(){return videoDuration||200}
-function pctToTime(pct){return formatDur(pct*getDur())}
-function renderPlayhead(pct){var pad=16;playhead.style.left=(pad+pct*(trackWidth()-pad*2))+'px';tlCur.textContent=pctToTime(pct)}
-/* Seek video from playhead */
-function seekVideo(pct){if(videoDuration)editorPlayback.seekSeconds(pct*videoDuration);renderPlayhead(pct)}
-/* Update playhead from video */
-editorPlayback.subscribe(function(state){if(!dragging&&videoDuration)renderPlayhead(state.currentTime/videoDuration)});
-
-track.addEventListener('mousedown',function(e){dragging=true;seekVideo(posToPct(e.clientX));e.preventDefault()});
-document.addEventListener('mousemove',function(e){if(!dragging)return;seekVideo(posToPct(e.clientX))});
-document.addEventListener('mouseup',function(){dragging=false});
+var track = document.getElementById('tlTrack');
+var timelineView = SRTTimelineView.create({
+  track: track, viewport: document.getElementById('tlViewport'), ruler: document.getElementById('tlRuler'),
+  playhead: document.getElementById('tlPlayhead'), current: document.getElementById('tlCurrent'), total: document.getElementById('tlTotal'),
+  zoomIn: document.getElementById('tlZoomIn'), zoomOut: document.getElementById('tlZoomOut'), fit: document.getElementById('tlFit'),
+  seek: function(seconds) { editorPlayback.seekSeconds(seconds); }
+});
+editorPlayback.subscribe(function(state) { timelineView.setTime(state.currentTime); });
 
 /* 时间轴由已提交文档投影，拖入组件不产生编辑。 */
 var projectStateReady = false;
-function createMarkerDOM(item) {
-  var pad=16, w=trackWidth()-pad*2;
-  var left = pad + (item.range.start / getDur()) * w;
-  var m = document.createElement('span');
-  m.className = 'tl-marker';
-  m.style.left = left+'px';
-  m.style.width = ((item.range.end - item.range.start) / getDur()) * w + 'px';
-  m.style.background = 'var(--accent-tint)';
-  m.style.color = 'var(--text-strong)';
-  m.style.border = '1px solid var(--accent)';
-  m.textContent = item.label + ' · ' + item.summary;
-  m.title = item.label + ' @ ' + formatDur(item.range.start) + '–' + formatDur(item.range.end);
-  m.dataset.editId = item.editId;
-  m.dataset.transactionId = item.transactionId;
-  m.dataset.lane = item.lane;
-  if (item.editIds) m.dataset.editIds = item.editIds.join(',');
-  return m;
-}
-
+// 对话摘要也使用此投影，保留既有文字与事务标识。
 function aggregateVisualTimelineItems(items) {
   var visual = {};
   items.forEach(function(item) {
@@ -64,7 +37,6 @@ function aggregateVisualTimelineItems(items) {
     return result;
   }, []);
 }
-
 async function currentProjectContext(projectId) {
   var context = window.projectEditing.aiContext(projectId);
   context.playheadSeconds = editorPlayback.getState().currentTime;
@@ -79,31 +51,13 @@ async function currentProjectContext(projectId) {
   return context;
 }
 
-/* 全量重建（ResizeObserver 用 — 宽度变化后位置需重算） */
+/* 仅投影已提交数据，浏览动作不回写项目。 */
 function renderMarkers(){
-  var old = track.querySelectorAll('.tl-marker'); for(var i=0;i<old.length;i++)old[i].remove();
-  if (!projectStateReady) return;
-  var items = aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId));
-  track.style.height = Math.max(80, 28 + items.length * 26) + 'px';
-  items.forEach(function(item, index) {
-    var marker = createMarkerDOM(item);
-    marker.style.top = (28 + index * 26) + 'px';
-    track.appendChild(marker);
-  });
+  if (!projectStateReady) { timelineView.render([], 0); return; }
+  timelineView.render(aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId)), videoDuration);
+  timelineView.setTime(editorPlayback.getState().currentTime);
 }
-
-/* ResizeObserver + rAF 防抖：拖拽 split pane 时最多 60fps 触发一次 */
-var _roPending = false;
-var ro = new ResizeObserver(function(){
-  if (_roPending) return;
-  _roPending = true;
-  requestAnimationFrame(function(){
-    _roPending = false;
-    _trackW = 0;
-    renderMarkers();
-  });
-});
-ro.observe(track);
+renderMarkers();
 
 track.addEventListener('dragover',function(e){e.preventDefault();e.dataTransfer.dropEffect='copy';track.classList.add('drag-over-tl')});
 track.addEventListener('dragleave',function(){track.classList.remove('drag-over-tl')});

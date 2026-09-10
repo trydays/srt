@@ -98,10 +98,10 @@ test.describe('ranged transform editing', () => {
         ? ['video.transform.operation@1', 'video.color.adjustment@1', 'subtitle.track@1'] : ['video.transform.operation@1']);
       expect(new Set(saved.document.edits.map(e => e.transactionId)).size).toBe(1);
       await expect(window.locator('.tl-marker')).toHaveCount(mixed ? 3 : 1);
-      const bounds = await window.locator('.tl-marker').first().evaluate(el => ({ left: parseFloat(el.style.left),
+      const bounds = await window.locator('.tl-marker[data-lane="video-effect"]').first().evaluate(el => ({ left: parseFloat(el.style.left),
         width: parseFloat(el.style.width), track: document.getElementById('tlTrack').getBoundingClientRect().width }));
-      expect(bounds.left).toBeCloseTo(16 + (bounds.track - 32) / 4, 1);
-      expect(bounds.width).toBeCloseTo((bounds.track - 32) / 2, 1);
+      expect(bounds.left).toBeCloseTo(104 + (bounds.track - 120) / 4, 1);
+      expect(bounds.width).toBeCloseTo((bounds.track - 120) / 2, 1);
       await window.reload(); await metadata(window);
       expect(await window.evaluate(() => projectEditing.load(getActiveProjectId()))).toEqual(saved);
       await window.getByTestId('video-export-button').click();

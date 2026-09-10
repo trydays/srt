@@ -26,7 +26,7 @@ async function submit(window, text, state = 'success') {
 test.describe('static visual layer editing', () => {
   test.use({ localCliMode: 'two', localCliEffectResult: 'layer-transactions-success' });
 
-  test('one request persists four edits but presents one visual timeline envelope', async ({ window, readScenarioState }, testInfo) => {
+  test('one request persists four independent layers with one undo transaction', async ({ window, readScenarioState }, testInfo) => {
     await openEditor(window, testInfo); const before = await window.evaluate(() => projectEditing.load(getActiveProjectId()));
     const card = await submit(window, '做两张重叠卡片');
     await expect(card.getByTestId('timeline-status')).toHaveAttribute('data-state', 'success');
@@ -35,10 +35,10 @@ test.describe('static visual layer editing', () => {
     expect(saved.document.edits.map(e => e.type)).toEqual(['visual.shape.layer@1', 'visual.text.layer@1', 'visual.shape.layer@1', 'visual.text.layer@1']);
     expect(new Set(saved.document.edits.map(e => e.transactionId)).size).toBe(1);
     expect(new Set(saved.document.edits.map(e => e.id)).size).toBe(4);
-    await expect(window.locator('.tl-marker[data-lane="visual"]')).toHaveCount(1);
-    await expect(window.locator('.tl-marker[data-lane="visual"]')).toHaveText('静态图层 · 4 个元素');
+    await expect(window.locator('.tl-marker[data-lane="visual"]')).toHaveCount(4);
+    await expect(window.locator('.tl-marker[data-lane="visual"]')).toHaveText(Array(4).fill('静态图层 · 1 个元素'));
     await expect(window.locator('.property-panel, [data-testid="layer-property-panel"]')).toHaveCount(0);
-    await expect(card.getByTestId('request-status-summary')).toContainText('静态图层 · 4 个元素');
+    await expect(card.getByTestId('request-status-summary')).toContainText(Array(4).fill('静态图层 · 1 个元素').join('；'));
 
     await window.getByTestId('video-export-button').click();
     await expect(window.getByTestId('video-export-status')).toHaveText('导出完成');
