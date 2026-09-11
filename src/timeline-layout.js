@@ -32,5 +32,17 @@
     var anchor = head >= scroll && head <= scroll + viewport ? head : scroll + viewport / 2;
     return clamp(anchor / oldWidth * newWidth - (anchor - scroll), 0, Math.max(0, newWidth - viewport));
   }
-  return { layout: layout, contentWidth: contentWidth, timeAt: timeAt, zoomScroll: zoomScroll };
+  function formatTick(seconds, step) {
+    var safeStep = Number(step);
+    var precision = Number.isFinite(safeStep) && safeStep > 0
+      ? Math.min(10, Math.max(0, Math.ceil(-Math.log10(safeStep))))
+      : 0;
+    var rounded = Number(seconds.toFixed(precision));
+    if (rounded < 60) return rounded.toFixed(precision) + 's';
+    var minutes = Math.floor(rounded / 60);
+    var remainder = (rounded - minutes * 60).toFixed(precision);
+    if (Number(remainder) < 10) remainder = '0' + remainder;
+    return String(minutes).padStart(2, '0') + ':' + remainder;
+  }
+  return { layout: layout, contentWidth: contentWidth, timeAt: timeAt, zoomScroll: zoomScroll, formatTick: formatTick };
 });

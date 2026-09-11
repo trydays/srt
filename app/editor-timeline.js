@@ -54,8 +54,16 @@ async function currentProjectContext(projectId) {
 /* 仅投影已提交数据，浏览动作不回写项目。 */
 function renderMarkers(){
   if (!projectStateReady) { timelineView.render([], 0); return; }
-  timelineView.render(aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId)), videoDuration);
-  timelineView.setTime(editorPlayback.getState().currentTime);
+  try {
+    timelineView.render(aggregateVisualTimelineItems(window.projectEditing.timelineItems(activeProjectId)), videoDuration);
+    timelineView.setTime(editorPlayback.getState().currentTime);
+  } catch (error) {
+    timelineView.render([], 0);
+    var code = error && error.code;
+    var knownProjectError = code && (code.indexOf('EDIT_') === 0 || code.indexOf('RECIPE_') === 0 || code.indexOf('PROJECT_ASSET_') === 0 || code === 'VIDEO_METADATA_UNAVAILABLE' || code.indexOf('LOCAL_CLI_') === 0);
+    if (!knownProjectError) throw error;
+    addMsg('ai', projectErrorMessage(error));
+  }
 }
 renderMarkers();
 

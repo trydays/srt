@@ -1,6 +1,6 @@
 (function(root) {
   'use strict';
-  var model = root.SRTTimelineLayout, LABEL = 88, PAD = 16, HEADER = 28, ROW = 30;
+  var model = root.SRTTimelineLayout, LABEL = 0, PAD = 12, HEADER = 28, ROW = 30;
   function create(options) {
     var track = options.track, viewport = options.viewport, ruler = options.ruler;
     var items = [], duration = 0, time = 0, zoom = 1, width = 1, dragging = false;
@@ -26,8 +26,8 @@
       track.style.height = (HEADER + Math.max(1, rows.length) * ROW) + 'px';
       rows.forEach(function(row, index) {
         var el = node('tl-row'); el.dataset.lane = row.lane;
+        if (index > 0 && rows[index - 1].lane !== row.lane) el.classList.add('tl-lane-divider');
         el.style.top = (HEADER + index * ROW) + 'px';
-        var label = node('tl-row-label', row.label); label.title = row.label; el.appendChild(label);
         row.items.forEach(function(item) {
           var marker = node(row.lane === 'source' ? 'tl-source' : 'tl-marker', item.label + (item.summary ? ' · ' + item.summary : ''));
           marker.style.left = (LABEL + PAD + item.range.start / duration * width) + 'px';
@@ -45,13 +45,12 @@
         var intervals = Math.max(1, Math.floor(width / 90));
         for (var i = 0; i <= intervals; i++) {
           var seconds = duration * i / intervals;
-          var tick = node('tl-ruler-tick', seconds < 60 ? Number(seconds.toFixed(1)) + 's' : formatDur(seconds));
+          var tick = node('tl-ruler-tick', model.formatTick(seconds, duration / intervals));
           tick.style.left = (LABEL + PAD + width * i / intervals) + 'px';
           if (i === intervals) tick.classList.add('is-last');
           ruler.appendChild(tick);
         }
       }
-      ruler.appendChild(node('tl-ruler-label', '时间'));
       options.total.textContent = formatDur(duration);
       options.zoomIn.disabled = !duration || zoom >= 16;
       options.zoomOut.disabled = !duration || zoom <= 1;

@@ -6,6 +6,22 @@ const modulePath = path.join(__dirname, '../src/timeline-layout.js');
 const model = fs.existsSync(modulePath) ? require(modulePath) : {};
 const item = (id, start, end, lane = 'visual') => ({ editId: id, lane, range: { start, end } });
 
+test('ruler labels remain distinct at high zoom for short and minute-long media', () => {
+  assert.equal(typeof model.formatTick, 'function');
+  for (const duration of [4, 65]) {
+    const step = duration / 120;
+    const labels = Array.from({ length: 121 }, (_, i) => model.formatTick(step * i, step));
+    assert.equal(new Set(labels).size, labels.length);
+  }
+  assert.equal(model.formatTick(60, .01), '01:00.00');
+});
+
+test('formatTick safely falls back for invalid spacing', () => {
+  assert.equal(model.formatTick(1.234, 0), '1s');
+  assert.equal(model.formatTick(1.234, -1), '1s');
+  assert.equal(model.formatTick(1.234, NaN), '1s');
+});
+
 test('layout packs touching intervals, separates overlaps and lanes without mutating input', () => {
   assert.equal(typeof model.layout, 'function');
   const items = [item('c', 2, 4), item('b', 0, 3), item('a', 0, 2), item('fx', 0, 4, 'video-effect'), item('sub', 0, 4, 'subtitle')];

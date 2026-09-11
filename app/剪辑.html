@@ -119,9 +119,9 @@
     .tl-ruler{position:sticky;top:0;height:28px;background:var(--bg-panel);border-bottom:1px solid var(--border);z-index:8;box-sizing:border-box}
     .tl-ruler-tick{position:absolute;top:7px;height:21px;border-left:1px solid var(--border);padding-left:4px;color:var(--text-faint);font-family:var(--mono);font-size:10px;white-space:nowrap}
     .tl-ruler-tick.is-last{transform:translateX(-100%);border-left:0;border-right:1px solid var(--border);padding-right:4px}
-    .tl-row{position:absolute;left:0;right:0;height:30px;border-bottom:1px solid var(--border);box-sizing:border-box}
-    .tl-row-label,.tl-ruler-label{position:sticky;left:0;width:88px;height:100%;box-sizing:border-box;padding:7px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--bg-panel);border-right:1px solid var(--border);color:var(--text-muted);font-size:10px;z-index:6}
-    .tl-ruler-label{z-index:9}
+    .tl-row{position:absolute;left:0;right:0;height:30px;box-sizing:border-box}
+    .tl-lane-divider{border-top:1px solid var(--border-strong)}
+    .tl-row-label,.tl-ruler-label{display:none}
     .tl-line{position:absolute;left:16px;right:16px;height:2px;background:var(--border-strong);border-radius:1px}
     .tl-ticks{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);display:flex;justify-content:space-between}
     .tl-tick{width:1px;height:8px;background:var(--border-strong);opacity:.6}

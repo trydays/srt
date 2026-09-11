@@ -35,12 +35,18 @@ test('packs effects into bounded lanes and zooms, scrolls, seeks without changin
       ], opacity: 1, scale: 1 } }));
     steps.push({ capability: 'visual.text@1', range: { start: 10, end: 15 }, params: { text: '后续要点' } });
     steps.push({ capability: 'video.color.adjust@1', range: { start: 0, end: 40 }, params: { brightness: .1 } });
+    steps.push({ capability: 'subtitle.generate@1', params: {} });
     const projectId = getActiveProjectId();
     await projectEditing.applyRecipe({ projectId, expectedRevision: 0, requestId: 'timeline-fixture', recipe: { kind: 'instruction', steps } });
     renderMarkers();
     return localStorage.getItem('srt_project_edit_state');
   });
-  await expect(window.locator('.tl-marker')).toHaveCount(12);
+  await expect(window.locator('.tl-marker')).toHaveCount(13);
+  await expect(window.locator('#tlTrack')).toHaveCount(1);
+  await expect(window.locator('.tl-row-label,.tl-ruler-label')).toHaveCount(0);
+  await expect(window.locator('.tl-lane-divider')).toHaveCount(3);
+  await expect(window.locator('.tl-row[data-lane="subtitle"]')).toHaveCount(1);
+  await expect(window.locator('.tl-row[data-lane="video-effect"]')).toHaveCount(1);
   await expect(window.locator('.tl-row[data-lane="visual"]')).toHaveCount(10);
   await expect(window.locator('.tl-row[data-lane="visual"]').first().locator('.tl-marker')).toHaveCount(2);
   const viewport = window.locator('#tlViewport');
@@ -54,9 +60,9 @@ test('packs effects into bounded lanes and zooms, scrolls, seeks without changin
     const el = document.getElementById('tlViewport');
     return (el.scrollLeft + 100) / Number(document.getElementById('tlTrack').dataset.timeWidth) * 40;
   });
-  await window.mouse.click(box.x + 1 + 104 + 100, box.y + 45);
+  await window.mouse.click(box.x + 1 + 12 + 100, box.y + 45);
   expect(await window.evaluate(() => editorPlayback.getState().currentTime)).toBeCloseTo(expected, 1);
-  expect(await window.locator('#tlPlayhead').evaluate(el => parseFloat(el.style.left))).toBeCloseTo(404, 0);
+  expect(await window.locator('#tlPlayhead').evaluate(el => parseFloat(el.style.left))).toBeCloseTo(312, 0);
   await window.locator('#tlFit').click();
   expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);
   expect(await viewport.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
@@ -67,7 +73,7 @@ test('packs effects into bounded lanes and zooms, scrolls, seeks without changin
   expect(await window.evaluate(() => localStorage.getItem('srt_project_edit_state'))).toBe(before);
   await window.reload();
   await metadata(window);
-  await expect(window.locator('.tl-marker')).toHaveCount(12);
+  await expect(window.locator('.tl-marker')).toHaveCount(13);
   expect(await window.evaluate(() => localStorage.getItem('srt_project_edit_state'))).toBe(before);
   // Presentation-only boundary: very short touching clips keep their true widths.
   await window.evaluate(() => timelineView.render([
@@ -79,4 +85,20 @@ test('packs effects into bounded lanes and zooms, scrolls, seeks without changin
   }));
   expect(tiny[0].width).toBeLessThan(2);
   expect(tiny[0].right).toBeLessThanOrEqual(tiny[1].left + .02);
+  await window.evaluate(() => timelineView.render([], 4));
+  for (let i = 0; i < 4; i++) await window.locator('#tlZoomIn').click();
+  const labels = await window.locator('.tl-ruler-tick').allTextContents();
+  expect(new Set(labels).size).toBe(labels.length);
+  await window.evaluate(() => renderMarkers());
+  // Failed reads must clear stale timeline content without rewriting storage.
+  await window.evaluate(() => {
+    localStorage.setItem('srt_project_edit_state', '{broken');
+    try { renderMarkers(); } catch (_) {} // Old implementation throws before clearing.
+  });
+  await expect(window.locator('.tl-marker,.tl-source')).toHaveCount(0);
+  await expect(window.locator('#tlZoomIn')).toBeDisabled();
+  await expect(window.locator('#chatArea')).toContainText('项目保存的数据无法读取');
+  expect(await window.evaluate(() => localStorage.getItem('srt_project_edit_state'))).toBe('{broken');
+  await window.evaluate(saved => { localStorage.setItem('srt_project_edit_state', saved); renderMarkers(); }, before);
+  await expect(window.locator('.tl-marker')).toHaveCount(13);
 });
